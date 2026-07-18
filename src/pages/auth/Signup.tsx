@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { AuthLayout, FormField } from './AuthLayout';
 
 export function Signup() {
   const { signUp } = useAuth();
+  const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -17,21 +17,16 @@ export function Signup() {
     setError(null);
     setLoading(true);
     try {
+      // No email confirmation step — signUp() returns an active session directly
+      // (as long as "Confirm email" is off in the Supabase project's Auth settings),
+      // so a successful signup drops the user straight into the app.
       await signUp(email, password, fullName);
-      setDone(true);
+      navigate('/overview');
     } catch (err) {
       setError((err as Error).message || 'Could not create account');
     } finally {
       setLoading(false);
     }
-  }
-
-  if (done) {
-    return (
-      <AuthLayout title="Check your inbox">
-        <p className="text-sm text-slate-600 dark:text-slate-300">We sent a confirmation link to <strong>{email}</strong>. Confirm your email, then <Link to="/login" className="text-brand-600 dark:text-brand-400 hover:underline">sign in</Link>.</p>
-      </AuthLayout>
-    );
   }
 
   return (
