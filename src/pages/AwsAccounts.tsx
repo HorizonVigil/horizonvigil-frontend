@@ -8,6 +8,7 @@ import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
+import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { api, type CloudConnection } from '../lib/api';
 
 export function AwsAccounts() {
@@ -15,11 +16,9 @@ export function AwsAccounts() {
   const { refreshToken } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { syncStates, startSync } = useSync();
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number; stepId: string } | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { connections: rows } = await api.getConnections();
@@ -27,28 +26,11 @@ export function AwsAccounts() {
   }, []);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
-
-  async function handleSyncNow(id: string) {
-    setBusyId(id);
-    setSyncError(null);
-    setProgress(null);
-    try {
-      // Scanned one service at a time, not all ~57 in one request — a single
-      // request doing everything reliably exceeds Cloudflare's free-tier
-      // per-request CPU/subrequest limits and gets killed by the platform
-      // with no error at all. See discovery.ts for the full story.
-      await api.runDiscoverySteps(id, (done, total, stepId) => setProgress({ done, total, stepId }));
-      await api.syncConnectionCost(id).catch(() => {}); // best-effort — Cost Explorer needs to be enabled on the account
-      await api.generateRecommendations(id).catch(() => {});
-      await load();
-    } catch (err) {
-      setSyncError((err as Error).message || 'Sync failed — see the error message in the table below for detail.');
-      await load();
-    } finally {
-      setBusyId(null);
-      setProgress(null);
-    }
-  }
+  // Sync keeps running in the background (see syncContext.tsx) even if you
+  // navigate away mid-run — this refreshes the table once it finishes,
+  // whether that happens while you're sitting on this page or you come back
+  // to it later.
+  useSyncCompletion(connections.map(c => c.id), load);
 
   async function handleDisconnect(id: string) {
     if (!(await confirm('Disconnect this AWS account? Discovered resources and cost history will be removed.'))) return;
@@ -73,16 +55,22 @@ export function AwsAccounts() {
     { key: 'resources', header: 'Resources', render: c => c.resourceSummary?.totalResources?.toLocaleString() ?? '—', sortValue: c => c.resourceSummary?.totalResources ?? 0 },
     { key: 'lastSync', header: 'Last Sync', render: c => c.lastSyncAt ? new Date(c.lastSyncAt).toLocaleString() : 'Never', sortValue: c => c.lastSyncAt ?? '' },
     {
-      key: 'actions', header: 'Actions', render: c => (
-        <div className="flex gap-2 text-xs items-center">
-          <button onClick={e => { e.stopPropagation(); void handleSyncNow(c.id); }} disabled={busyId === c.id} className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
-            {busyId === c.id ? (progress ? `Scanning ${progress.done}/${progress.total}…` : 'Starting…') : 'Sync Now'}
-          </button>
-          <button onClick={e => { e.stopPropagation(); void handleDisconnect(c.id); }} className="text-red-500 hover:underline">Disconnect</button>
-        </div>
-      ),
+      key: 'actions', header: 'Actions', render: c => {
+        const sync = syncStates[c.id];
+        const running = sync?.status === 'running';
+        return (
+          <div className="flex gap-2 text-xs items-center">
+            <button onClick={e => { e.stopPropagation(); startSync(c.id); }} disabled={running} className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+              {running ? (sync?.total ? `Scanning ${sync.done}/${sync.total}…` : 'Starting…') : 'Sync Now'}
+            </button>
+            <button onClick={e => { e.stopPropagation(); void handleDisconnect(c.id); }} className="text-red-500 hover:underline">Disconnect</button>
+          </div>
+        );
+      },
     },
   ];
+
+  const anyErrors = connections.map(c => syncStates[c.id]).filter(s => s?.status === 'error' && s.error);
 
   return (
     <div>
@@ -92,10 +80,9 @@ export function AwsAccounts() {
         <button onClick={() => setWizardOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ Add AWS Account</button>
       </div>
 
-      {syncError && (
-        <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex justify-between items-center">
-          <span>{syncError}</span>
-          <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 ml-3">×</button>
+      {anyErrors.length > 0 && (
+        <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+          {anyErrors[0]!.error}
         </div>
       )}
 

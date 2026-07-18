@@ -4,17 +4,17 @@ import { FilterBar } from '../components/FilterBar';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
+import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { api, type CloudConnection, type CloudResource } from '../lib/api';
 
 export function AwsAccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { syncStates, startSync } = useSync();
   const [connection, setConnection] = useState<CloudConnection | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -27,8 +27,15 @@ export function AwsAccountDetail() {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+  // Sync keeps running in the background (see syncContext.tsx) even if you
+  // navigate away mid-run — this refreshes once it finishes, whether that
+  // happens while you're sitting on this page or you come back to it later.
+  useSyncCompletion(id ? [id] : [], load);
 
   if (!connection) return <div className="text-sm text-slate-400">Loading…</div>;
+
+  const sync = id ? syncStates[id] : undefined;
+  const syncing = sync?.status === 'running';
 
   const iamCounts = {
     users: resources.filter(r => r.resourceTypeKey === 'iam_user').length,
@@ -41,29 +48,15 @@ export function AwsAccountDetail() {
   const rotationDue = connection.keyRotationDueAt ? new Date(connection.keyRotationDueAt) : null;
   const rotationOverdue = rotationDue ? rotationDue.getTime() < Date.now() : false;
 
-  async function runAction(action: 'sync' | 'test') {
+  async function runTest() {
     if (!id) return;
-    setBusy(action);
+    setTesting(true);
     setTestResult(null);
-    setSyncError(null);
     try {
-      if (action === 'sync') {
-        // One scanner per request — see discovery.ts for why a single
-        // do-everything request gets silently killed on Cloudflare's free tier.
-        await api.runDiscoverySteps(id, (done, total) => setProgress({ done, total }));
-        await api.syncConnectionCost(id).catch(() => {});
-        await api.generateRecommendations(id).catch(() => {});
-        await load();
-      } else {
-        const result = await api.testConnection(id);
-        setTestResult(result.detail);
-      }
-    } catch (err) {
-      setSyncError((err as Error).message || 'Sync failed.');
-      await load();
+      const result = await api.testConnection(id);
+      setTestResult(result.detail);
     } finally {
-      setBusy(null);
-      setProgress(null);
+      setTesting(false);
     }
   }
 
@@ -76,18 +69,17 @@ export function AwsAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.awsAccountId}</span>
         <div className="flex-1" />
-        <button onClick={() => void runAction('test')} disabled={!!busy} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-          {busy === 'test' ? 'Testing…' : 'Re-authenticate / Test'}
+        <button onClick={() => void runTest()} disabled={testing || syncing} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+          {testing ? 'Testing…' : 'Re-authenticate / Test'}
         </button>
-        <button onClick={() => void runAction('sync')} disabled={!!busy} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
-          {busy === 'sync' ? (progress ? `Scanning ${progress.done}/${progress.total}…` : 'Starting…') : 'Sync Now'}
+        <button onClick={() => id && startSync(id)} disabled={testing || syncing} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+          {syncing ? (sync?.total ? `Scanning ${sync.done}/${sync.total}…` : 'Starting…') : 'Sync Now'}
         </button>
       </div>
       {testResult && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 -mt-3">{testResult}</p>}
-      {syncError && (
-        <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex justify-between items-center">
-          <span>{syncError}</span>
-          <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 ml-3">×</button>
+      {sync?.status === 'error' && sync.error && (
+        <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+          {sync.error}
         </div>
       )}
 
