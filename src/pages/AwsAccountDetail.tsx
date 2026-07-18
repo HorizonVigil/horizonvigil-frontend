@@ -13,6 +13,8 @@ export function AwsAccountDetail() {
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -43,18 +45,25 @@ export function AwsAccountDetail() {
     if (!id) return;
     setBusy(action);
     setTestResult(null);
+    setSyncError(null);
     try {
       if (action === 'sync') {
-        await api.discoverConnection(id);
-        await api.syncConnectionCost(id);
-        await api.generateRecommendations(id);
+        // One scanner per request — see discovery.ts for why a single
+        // do-everything request gets silently killed on Cloudflare's free tier.
+        await api.runDiscoverySteps(id, (done, total) => setProgress({ done, total }));
+        await api.syncConnectionCost(id).catch(() => {});
+        await api.generateRecommendations(id).catch(() => {});
         await load();
       } else {
         const result = await api.testConnection(id);
         setTestResult(result.detail);
       }
+    } catch (err) {
+      setSyncError((err as Error).message || 'Sync failed.');
+      await load();
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   }
 
@@ -71,10 +80,16 @@ export function AwsAccountDetail() {
           {busy === 'test' ? 'Testing…' : 'Re-authenticate / Test'}
         </button>
         <button onClick={() => void runAction('sync')} disabled={!!busy} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
-          {busy === 'sync' ? 'Syncing…' : 'Sync Now'}
+          {busy === 'sync' ? (progress ? `Scanning ${progress.done}/${progress.total}…` : 'Starting…') : 'Sync Now'}
         </button>
       </div>
       {testResult && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 -mt-3">{testResult}</p>}
+      {syncError && (
+        <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex justify-between items-center">
+          <span>{syncError}</span>
+          <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600 ml-3">×</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Total Resources" value={resources.length.toLocaleString()} />

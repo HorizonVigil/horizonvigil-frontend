@@ -112,7 +112,32 @@ class ApiClient {
     return this.put<{ ok: boolean }>('cloud', `/api/connections/${id}`, data);
   }
   deleteConnection(id: string) { return this.delete<{ ok: boolean }>('cloud', `/api/connections/${id}`); }
-  discoverConnection(id: string) { return this.post<{ ok: boolean; scanned: number; created: number; deleted: number; errors: string[] }>('cloud', `/api/connections/${id}/discover`); }
+
+  // Stepped discovery — one scanner per request, so a free-tier Cloudflare Worker
+  // never has to do enough work in one invocation to get killed by the platform.
+  // See discovery.ts's module comment for why. Drive with runDiscoverySteps() below.
+  planDiscovery(id: string) { return this.post<{ ok: boolean; runStartedAt: string; region: string; steps: string[] }>('cloud', `/api/connections/${id}/discover?mode=plan`); }
+  discoverStep(id: string, stepId: string, runStartedAt: string) {
+    return this.post<{ ok: boolean; stepId: string; resourceCount: number; created: number; error?: string }>(
+      'cloud', `/api/connections/${id}/discover?mode=step&step=${encodeURIComponent(stepId)}&runStartedAt=${encodeURIComponent(runStartedAt)}`,
+    );
+  }
+  finalizeDiscovery(id: string, runStartedAt: string) {
+    return this.post<{ ok: boolean; scanned: number; created: number; deleted: number; errors: string[] }>(
+      'cloud', `/api/connections/${id}/discover?mode=finalize&runStartedAt=${encodeURIComponent(runStartedAt)}`,
+    );
+  }
+  /** Runs the full plan -> step*N -> finalize sequence, reporting progress via onProgress. */
+  async runDiscoverySteps(id: string, onProgress?: (done: number, total: number, stepId: string) => void) {
+    const plan = await this.planDiscovery(id);
+    for (let i = 0; i < plan.steps.length; i++) {
+      onProgress?.(i, plan.steps.length, plan.steps[i]);
+      await this.discoverStep(id, plan.steps[i], plan.runStartedAt);
+    }
+    onProgress?.(plan.steps.length, plan.steps.length, 'finalizing');
+    return this.finalizeDiscovery(id, plan.runStartedAt);
+  }
+
   syncConnectionCost(id: string) { return this.post<{ ok: boolean; daysSynced: number; rowsUpserted: number; error?: string }>('cloud', `/api/connections/${id}/sync-cost`); }
   generateRecommendations(id: string) { return this.post<{ ok: boolean; created: number }>('cloud', `/api/connections/${id}/generate-recommendations`); }
 
