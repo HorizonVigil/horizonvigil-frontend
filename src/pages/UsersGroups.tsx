@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useOrg } from '../lib/orgContext';
 import { api, type Member, type PendingInvite, type Group, type Role } from '../lib/api';
 
@@ -9,6 +10,7 @@ const ROLES: Role[] = ['owner', 'admin', 'editor', 'viewer', 'billing_admin'];
 
 export function UsersGroups() {
   const { currentOrg } = useOrg();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -49,7 +51,7 @@ export function UsersGroups() {
   }
 
   async function handleRemove(roleGrantId: string) {
-    if (!confirm('Remove this member from the organization?')) return;
+    if (!(await confirm('Remove this member from the organization?'))) return;
     await api.deleteRoleGrant(roleGrantId);
     await load();
   }
@@ -134,6 +136,7 @@ export function UsersGroups() {
           <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Create Group</button>
         </form>
       </div>
+      {confirmDialog}
     </div>
   );
 }

@@ -13,20 +13,29 @@ interface Alert {
   id: string; severity: string; alert_name: string; status: string; triggered_at: string; resolved_at: string | null;
 }
 
+interface AlertRule {
+  id: string; name: string; severity: string; enabled: boolean; created_at: string;
+}
+
 const SEVERITIES = ['critical', 'high', 'medium', 'low'];
 const STATUSES = ['open', 'acknowledged', 'in_progress', 'resolved'];
 
 export function Alerts() {
   const { currentOrg } = useOrg();
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [rules, setRules] = useState<AlertRule[]>([]);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [ruleName, setRuleName] = useState('');
   const [ruleSeverity, setRuleSeverity] = useState('medium');
 
   const load = useCallback(async () => {
     if (!currentOrg) return;
-    const { data } = await supabase.from('alerts').select('id,severity,alert_name,status,triggered_at,resolved_at').eq('org_id', currentOrg.id).order('triggered_at', { ascending: false }).limit(500);
-    setAlerts(data ?? []);
+    const [{ data: alertRows }, { data: ruleRows }] = await Promise.all([
+      supabase.from('alerts').select('id,severity,alert_name,status,triggered_at,resolved_at').eq('org_id', currentOrg.id).order('triggered_at', { ascending: false }).limit(500),
+      supabase.from('alert_rules').select('id,name,severity,enabled,created_at').eq('org_id', currentOrg.id).order('created_at', { ascending: false }),
+    ]);
+    setAlerts(alertRows ?? []);
+    setRules(ruleRows ?? []);
   }, [currentOrg]);
 
   useEffect(() => { void load(); }, [load]);
@@ -42,6 +51,17 @@ export function Alerts() {
     await supabase.from('alert_rules').insert({ org_id: currentOrg.id, name: ruleName, severity: ruleSeverity });
     setRuleModalOpen(false);
     setRuleName('');
+    await load();
+  }
+
+  async function toggleRule(id: string, enabled: boolean) {
+    await supabase.from('alert_rules').update({ enabled: !enabled }).eq('id', id);
+    await load();
+  }
+
+  async function deleteRule(id: string) {
+    await supabase.from('alert_rules').delete().eq('id', id);
+    await load();
   }
 
   const bySeverity: Record<string, number> = {};
@@ -83,8 +103,29 @@ export function Alerts() {
         </div>
       </div>
 
-      <div className="flex justify-end mb-3">
-        <button onClick={() => setRuleModalOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">Create Alert Rule</button>
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Alert Rules</h3>
+          <button onClick={() => setRuleModalOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">Create Alert Rule</button>
+        </div>
+        {rules.length === 0 ? (
+          <p className="text-sm text-slate-400">No alert rules yet — create one above. Trigger logic (evaluating rules against synced data) isn't wired up yet, so rules won't produce alerts on their own until that lands, but they're saved here and can be edited or removed.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {rules.map(r => (
+              <li key={r.id} className="flex items-center justify-between py-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Badge>{r.severity}</Badge>
+                  <span className={r.enabled ? 'text-slate-700 dark:text-slate-200' : 'text-slate-400 line-through'}>{r.name}</span>
+                </div>
+                <div className="flex gap-3 text-xs">
+                  <button onClick={() => void toggleRule(r.id, r.enabled)} className="text-brand-600 dark:text-brand-400 hover:underline">{r.enabled ? 'Disable' : 'Enable'}</button>
+                  <button onClick={() => void deleteRule(r.id)} className="text-red-500 hover:underline">Delete</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <DataTable columns={columns} rows={alerts} rowKey={a => a.id} emptyMessage="No alerts yet. Alert rules evaluate against synced resource/cost/security data — trigger logic isn't wired up yet, but rules and alerts you create here persist and display normally." />

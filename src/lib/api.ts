@@ -122,20 +122,28 @@ class ApiClient {
       'cloud', `/api/connections/${id}/discover?mode=step&step=${encodeURIComponent(stepId)}&runStartedAt=${encodeURIComponent(runStartedAt)}`,
     );
   }
-  finalizeDiscovery(id: string, runStartedAt: string) {
+  finalizeDiscovery(id: string, runStartedAt: string, errors: string[] = []) {
     return this.post<{ ok: boolean; scanned: number; created: number; deleted: number; errors: string[] }>(
-      'cloud', `/api/connections/${id}/discover?mode=finalize&runStartedAt=${encodeURIComponent(runStartedAt)}`,
+      'cloud', `/api/connections/${id}/discover?mode=finalize&runStartedAt=${encodeURIComponent(runStartedAt)}`, { errors },
     );
   }
-  /** Runs the full plan -> step*N -> finalize sequence, reporting progress via onProgress. */
+  /**
+   * Runs the full plan -> step*N -> finalize sequence, reporting progress via
+   * onProgress. A per-scanner failure comes back as `{error}` on an
+   * otherwise-successful (HTTP 200) step response — collected here and
+   * handed to finalize so the connection ends up with an honest status
+   * instead of finalize unconditionally resetting it to "connected".
+   */
   async runDiscoverySteps(id: string, onProgress?: (done: number, total: number, stepId: string) => void) {
     const plan = await this.planDiscovery(id);
+    const errors: string[] = [];
     for (let i = 0; i < plan.steps.length; i++) {
       onProgress?.(i, plan.steps.length, plan.steps[i]);
-      await this.discoverStep(id, plan.steps[i], plan.runStartedAt);
+      const result = await this.discoverStep(id, plan.steps[i], plan.runStartedAt);
+      if (result.error) errors.push(`${plan.steps[i]}: ${result.error}`);
     }
     onProgress?.(plan.steps.length, plan.steps.length, 'finalizing');
-    return this.finalizeDiscovery(id, plan.runStartedAt);
+    return this.finalizeDiscovery(id, plan.runStartedAt, errors);
   }
 
   syncConnectionCost(id: string) { return this.post<{ ok: boolean; daysSynced: number; rowsUpserted: number; error?: string }>('cloud', `/api/connections/${id}/sync-cost`); }

@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { useOrg } from '../lib/orgContext';
+import { useConfirm } from '../components/ConfirmDialog';
 import { api } from '../lib/api';
 import { useEffect } from 'react';
 import type { AuditLogEntry } from '../lib/api';
 
 export function OrganizationManagement() {
   const { currentOrg, folders, projects, refresh } = useOrg();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParent, setNewFolderParent] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
@@ -35,13 +37,13 @@ export function OrganizationManagement() {
   }
 
   async function handleDeleteFolder(id: string) {
-    if (!confirm('Delete this folder? Nested folders/projects will also be removed.')) return;
+    if (!(await confirm('Delete this folder? Nested folders/projects will also be removed.'))) return;
     await api.deleteFolder(id);
     await refresh();
   }
 
   async function handleDeleteProject(id: string) {
-    if (!confirm('Delete this project? Linked AWS accounts will be unassigned, not deleted.')) return;
+    if (!(await confirm('Delete this project? Linked AWS accounts will be unassigned, not deleted.'))) return;
     await api.deleteProject(id);
     await refresh();
   }
@@ -115,6 +117,7 @@ export function OrganizationManagement() {
           {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
         </ul>
       </div>
+      {confirmDialog}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { api, type CloudConnection } from '../lib/api';
@@ -13,6 +14,7 @@ export function AwsAccounts() {
   const { projects } = useOrg();
   const { refreshToken } = useFilters();
   const navigate = useNavigate();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function AwsAccounts() {
   }
 
   async function handleDisconnect(id: string) {
-    if (!confirm('Disconnect this AWS account? Discovered resources and cost history will be removed.')) return;
+    if (!(await confirm('Disconnect this AWS account? Discovered resources and cost history will be removed.'))) return;
     await api.deleteConnection(id);
     await load();
   }
@@ -106,6 +108,7 @@ export function AwsAccounts() {
       />
 
       <ConnectAwsAccountWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onConnected={load} projects={projects} />
+      {confirmDialog}
     </div>
   );
 }

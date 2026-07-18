@@ -28,9 +28,14 @@ export function Integrations() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function quickConnect(providerName: string, category: string) {
-    if (!currentOrg) return;
-    await supabase.from('integrations').upsert({ org_id: currentOrg.id, provider_name: providerName, category, status: 'connected', connected_on: new Date().toISOString() }, { onConflict: 'org_id,provider_name' });
+  // None of these providers have a real OAuth/API-key flow wired up yet —
+  // there's nothing behind "Quick Connect" but an instant status flip, which
+  // means the UI could claim "Connected" for a provider the platform has
+  // never actually talked to. That's a real credibility risk for a
+  // security/ops product, so these stay disabled (no fake-connect path)
+  // until each provider's real auth flow exists.
+  async function disconnect(id: string) {
+    await supabase.from('integrations').update({ status: 'disconnected', connected_on: null, last_sync_at: null }).eq('id', id);
     await load();
   }
 
@@ -50,16 +55,14 @@ export function Integrations() {
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Popular Integrations</h3>
+        <p className="text-xs text-slate-400 mb-3">Real OAuth/API-key setup for these providers isn't built yet — shown here so you can see what's planned, not to imply any of them are connected.</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {POPULAR.map(p => {
-            const existing = integrations.find(i => i.provider_name === p.name);
-            return (
-              <button key={p.name} onClick={() => void quickConnect(p.name, p.category)} disabled={existing?.status === 'connected'} className="text-left rounded-lg border border-slate-200 dark:border-slate-700 p-3 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60">
-                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
-                <div className="text-xs text-slate-400 mt-1">{existing?.status === 'connected' ? 'Connected' : 'Quick connect'}</div>
-              </button>
-            );
-          })}
+          {POPULAR.map(p => (
+            <div key={p.name} title="Requires a real OAuth/API-key flow — not implemented yet" className="text-left rounded-lg border border-slate-200 dark:border-slate-700 p-3 opacity-60 cursor-not-allowed">
+              <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
+              <div className="text-xs text-slate-400 mt-1">Coming soon</div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -73,7 +76,7 @@ export function Integrations() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-              <th className="px-3 py-2">Provider</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Connected On</th><th className="px-3 py-2">Last Sync</th>
+              <th className="px-3 py-2">Provider</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Connected On</th><th className="px-3 py-2">Last Sync</th><th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -84,9 +87,12 @@ export function Integrations() {
                 <td className="px-3 py-2"><Badge>{i.status}</Badge></td>
                 <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{i.connected_on ? new Date(i.connected_on).toLocaleDateString() : '—'}</td>
                 <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{i.last_sync_at ? new Date(i.last_sync_at).toLocaleString() : '—'}</td>
+                <td className="px-3 py-2 text-right">
+                  {i.status === 'connected' && <button onClick={() => void disconnect(i.id)} className="text-xs text-red-500 hover:underline">Disconnect</button>}
+                </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">No integrations in this category yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">No integrations in this category yet.</td></tr>}
           </tbody>
         </table>
       </div>
