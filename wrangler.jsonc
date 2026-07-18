@@ -1,0 +1,15 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "cloudops360-1-frontend",
+  // account_id intentionally omitted — CI supplies it via the CLOUDFLARE_ACCOUNT_ID
+  // env var (see .github/workflows/deploy-cloudflare.yml) so it's not hardcoded here.
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "env": {
+    "dev": { "name": "cloudops360-1-frontend-dev" },
+    "test": { "name": "cloudops360-1-frontend-test" }
+  }
+}
