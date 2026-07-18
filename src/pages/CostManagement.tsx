@@ -14,7 +14,7 @@ function money(n: number): string {
 }
 
 export function CostManagement() {
-  const { dateRange, refreshToken } = useFilters();
+  const { region, dateRange, refreshToken } = useFilters();
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +23,7 @@ export function CostManagement() {
     setLoading(true);
     try {
       const [summaryRes, anomaliesRes] = await Promise.all([
-        api.getCostSummary(dateRangeToDays(dateRange)),
+        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region),
         api.getCostAnomalies(),
       ]);
       setSummary(summaryRes);
@@ -31,7 +31,7 @@ export function CostManagement() {
     } finally {
       setLoading(false);
     }
-  }, [dateRange]);
+  }, [dateRange, region]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 

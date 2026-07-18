@@ -102,13 +102,13 @@ class ApiClient {
   createConnection(data: {
     connectionMethod: 'access_key' | 'cross_account_role';
     awsAccountId: string; accessKeyId?: string; secretAccessKey?: string;
-    roleArn?: string; externalId?: string; defaultRegion?: string;
+    roleArn?: string; externalId?: string; defaultRegion?: string; scanRegions?: string[];
     projectId?: string; connectionName?: string; environment?: string;
   }) {
     return this.post<{ ok: boolean; connection: CloudConnection }>('cloud', '/api/connections', data);
   }
   testConnection(id: string) { return this.post<{ ok: boolean; success: boolean; detail: string }>('cloud', `/api/connections/${id}/test`); }
-  updateConnection(id: string, data: { environment?: string; connectionName?: string; projectId?: string }) {
+  updateConnection(id: string, data: { environment?: string; connectionName?: string; projectId?: string; scanRegions?: string[] }) {
     return this.put<{ ok: boolean }>('cloud', `/api/connections/${id}`, data);
   }
   deleteConnection(id: string) { return this.delete<{ ok: boolean }>('cloud', `/api/connections/${id}`); }
@@ -116,7 +116,7 @@ class ApiClient {
   // Stepped discovery — one scanner per request, so a free-tier Cloudflare Worker
   // never has to do enough work in one invocation to get killed by the platform.
   // See discovery.ts's module comment for why. Drive with runDiscoverySteps() below.
-  planDiscovery(id: string) { return this.post<{ ok: boolean; runStartedAt: string; region: string; steps: string[] }>('cloud', `/api/connections/${id}/discover?mode=plan`); }
+  planDiscovery(id: string) { return this.post<{ ok: boolean; runStartedAt: string; regions: string[]; steps: string[] }>('cloud', `/api/connections/${id}/discover?mode=plan`); }
   discoverStep(id: string, stepId: string, runStartedAt: string) {
     return this.post<{ ok: boolean; stepId: string; resourceCount: number; created: number; error?: string }>(
       'cloud', `/api/connections/${id}/discover?mode=step&step=${encodeURIComponent(stepId)}&runStartedAt=${encodeURIComponent(runStartedAt)}`,
@@ -157,14 +157,33 @@ class ApiClient {
     return this.get<{ ok: boolean; resources: CloudResource[]; total: number }>('cloud', `/api/resources?${qs.toString()}`);
   }
   getResource(id: string) { return this.get<{ ok: boolean; resource: CloudResource }>('cloud', `/api/resources/${id}`); }
-  getResourceStats() { return this.get<{ ok: boolean; total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byStatus: Record<string, number>; defaultCount: number }>('cloud', '/api/resources/stats'); }
-  getResourceTrend(days = 30) { return this.get<{ ok: boolean; points: { date: string; created: number; deleted: number; net: number }[] }>('cloud', `/api/resources/trend?days=${days}`); }
+  // Same filter shape as getResources — the cards/charts on Resources.tsx must
+  // read the same filtered set as the table, or they show contradictory
+  // numbers (e.g. a "Total: 19" card next to a 0-row filtered table).
+  getResourceStats(filters: { category?: string; region?: string; status?: string; search?: string } = {}) {
+    const qs = new URLSearchParams();
+    if (filters.category) qs.set('category', filters.category);
+    if (filters.region) qs.set('region', filters.region);
+    if (filters.status) qs.set('status', filters.status);
+    if (filters.search) qs.set('search', filters.search);
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return this.get<{ ok: boolean; total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byStatus: Record<string, number>; defaultCount: number }>('cloud', `/api/resources/stats${suffix}`);
+  }
+  getResourceTrend(days = 30, filters: { category?: string; region?: string; status?: string } = {}) {
+    const qs = new URLSearchParams({ days: String(days) });
+    if (filters.category) qs.set('category', filters.category);
+    if (filters.region) qs.set('region', filters.region);
+    if (filters.status) qs.set('status', filters.status);
+    return this.get<{ ok: boolean; points: { date: string; created: number; deleted: number; net: number }[] }>('cloud', `/api/resources/trend?${qs}`);
+  }
   getResourceCatalog() { return this.get<{ ok: boolean; catalog: ResourceCatalogEntry[]; categories: string[] }>('cloud', '/api/resource-catalog'); }
 
   // ── cloud-api: Cost ──────────────────────────────────────────────────────
 
-  getCostSummary(days = 30) {
-    return this.get<{ ok: boolean; mtdCost: number; forecastCost: number; avgDailyCost: number; byService: { service: string; cost: number }[]; byAccount: { accountId: string; cost: number }[]; byRegion: { region: string; cost: number }[]; daily: { date: string; cost: number }[] }>('cloud', `/api/cost/summary?days=${days}`);
+  getCostSummary(days = 30, region?: string) {
+    const qs = new URLSearchParams({ days: String(days) });
+    if (region) qs.set('region', region);
+    return this.get<{ ok: boolean; mtdCost: number; forecastCost: number; avgDailyCost: number; byService: { service: string; cost: number }[]; byAccount: { accountId: string; cost: number }[]; byRegion: { region: string; cost: number }[]; daily: { date: string; cost: number }[] }>('cloud', `/api/cost/summary?${qs}`);
   }
   getCostAnomalies() { return this.get<{ ok: boolean; anomalies: CostAnomaly[] }>('cloud', '/api/cost/anomalies'); }
   getCostRecommendations(status?: string) { return this.get<{ ok: boolean; recommendations: CostRecommendation[] }>('cloud', `/api/cost/recommendations${status ? `?status=${status}` : ''}`); }
@@ -190,7 +209,7 @@ export type Environment = 'production' | 'staging' | 'dev' | 'sandbox' | 'qa' | 
 export interface CloudConnection {
   id: string; orgId: string; projectId: string | null; connectionMethod: 'access_key' | 'cross_account_role';
   awsAccountId: string; connectionName: string | null; maskedAccessKey: string | null; roleArn: string | null;
-  defaultRegion: string; status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired'; environment: Environment;
+  defaultRegion: string; scanRegions: string[]; status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired'; environment: Environment;
   supportPlan: string | null;
   resourceSummary?: { totalResources?: number; categoryCounts?: Record<string, number>; servicesScanned?: number; servicesTotal?: string; regionsScanned?: string[]; errors?: string[]; scannedAt?: string } | null;
   lastDiscoveryAt: string | null; lastFullScanAt: string | null; lastSyncAt: string | null; keyRotatedAt: string | null;

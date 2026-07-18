@@ -26,10 +26,11 @@ export function Resources() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const filters = { category: category || undefined, status: status || undefined, region: region === 'all' ? undefined : region, search: search || undefined };
       const [resourcesRes, statsRes, trendRes] = await Promise.all([
-        api.getResources({ category: category || undefined, status: status || undefined, region: region === 'all' ? undefined : region, search: search || undefined, limit: 500 }),
-        api.getResourceStats(),
-        api.getResourceTrend(30),
+        api.getResources({ ...filters, limit: 500 }),
+        api.getResourceStats(filters),
+        api.getResourceTrend(30, filters),
       ]);
       setResources(resourcesRes.resources);
       setStats(statsRes);

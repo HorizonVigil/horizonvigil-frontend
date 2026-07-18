@@ -114,6 +114,7 @@ export function AwsAccountDetail() {
             {connection.roleArn && (
               <div className="flex justify-between gap-2"><span className="text-slate-500 dark:text-slate-400 shrink-0">Role ARN</span><span className="font-mono text-xs text-slate-800 dark:text-slate-100 truncate">{connection.roleArn}</span></div>
             )}
+            <div className="flex justify-between gap-2"><span className="text-slate-500 dark:text-slate-400 shrink-0">Regions Scanned</span><span className="text-xs text-slate-800 dark:text-slate-100 text-right">{connection.scanRegions?.length ? connection.scanRegions.join(', ') : connection.defaultRegion}</span></div>
             {rotationDue && (
               <div className={`rounded-md px-2.5 py-1.5 text-xs mt-2 ${rotationOverdue ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                 {rotationOverdue ? 'Key rotation overdue — ' : 'Next rotation due '}{rotationDue.toLocaleDateString()}

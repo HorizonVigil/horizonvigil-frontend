@@ -13,12 +13,22 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
     awsAccountId: '', accessKeyId: '', secretAccessKey: '', roleArn: '', externalId: '',
     defaultRegion: 'us-east-1', projectId: '', connectionName: '', environment: 'production' as Environment,
   });
+  // Discovery loops over every region here for the regional scanners (EC2, RDS,
+  // Lambda, ...) — defaults to all standard regions so an account isn't
+  // silently limited to just its primary region with no indication anything
+  // else was skipped.
+  const [scanRegions, setScanRegions] = useState<string[]>(REGIONS);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function toggleRegion(r: string) {
+    setScanRegions(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (scanRegions.length === 0) { setError('Select at least one region to scan.'); return; }
     setLoading(true);
     try {
       await api.createConnection({
@@ -29,6 +39,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         roleArn: method === 'cross_account_role' ? form.roleArn.trim() : undefined,
         externalId: method === 'cross_account_role' ? form.externalId.trim() : undefined,
         defaultRegion: form.defaultRegion,
+        scanRegions,
         projectId: form.projectId || undefined,
         connectionName: form.connectionName || undefined,
         environment: form.environment,
@@ -108,6 +119,25 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
             {ENVIRONMENTS.map(env => <option key={env} value={env}>{env}</option>)}
           </select>
         </label>
+        <div className="col-span-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm text-slate-600 dark:text-slate-300">Regions to Scan</span>
+            <div className="flex gap-2 text-xs">
+              <button type="button" onClick={() => setScanRegions(REGIONS)} className="text-brand-600 dark:text-brand-400 hover:underline">All</button>
+              <button type="button" onClick={() => setScanRegions([])} className="text-brand-600 dark:text-brand-400 hover:underline">None</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 p-2">
+            {REGIONS.map(r => (
+              <label key={r} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                <input type="checkbox" checked={scanRegions.includes(r)} onChange={() => toggleRegion(r)} />
+                {r}
+              </label>
+            ))}
+          </div>
+          {scanRegions.length === 0 && <p className="text-xs text-red-500 mt-1">Select at least one region.</p>}
+        </div>
+
         <label className="flex flex-col gap-1 text-sm col-span-2">
           <span className="text-slate-600 dark:text-slate-300">Project (optional)</span>
           <select value={form.projectId} onChange={e => setForm(f => ({ ...f, projectId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
