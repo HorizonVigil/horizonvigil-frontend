@@ -5,15 +5,19 @@ import { api } from '../lib/api';
 interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
+  intent?: string;
 }
 
-const WELCOME = 'Hi — ask me about your connected AWS accounts, resources, cost, savings recommendations, or alarms. I only answer from data CloudOps360 has actually discovered — no outside AI, nothing made up.';
+const WELCOME = 'Hi — ask me about your connected AWS accounts, resources, cost, savings recommendations, or alarms. Most answers come straight from real data with nothing made up; if I can\'t match your question to something I track, I\'ll hand it to a small AI model (clearly marked) grounded in the same data.';
 
 /**
- * A floating assistant available on every page. Answers come from
+ * A floating assistant available on every page. Most answers come from
  * chat-api's rule-based intent engine — it queries this org's own
  * connections/resources/cost/recommendations and assembles a plain-English
- * answer from real numbers, never an external LLM call.
+ * answer from real numbers, no LLM involved. Only when nothing matches does
+ * it fall back to a small open-weight model (Workers AI), still grounded in
+ * the same real data — those replies are labeled so it's clear they came
+ * from a generative model rather than a direct lookup.
  */
 export function ChatWidget() {
   const { account } = useFilters();
@@ -35,7 +39,7 @@ export function ChatWidget() {
     setSending(true);
     try {
       const res = await api.sendChatMessage(text, account === 'all' ? undefined : account);
-      setMessages(m => [...m, { role: 'assistant', text: res.answer }]);
+      setMessages(m => [...m, { role: 'assistant', text: res.answer, intent: res.intent }]);
     } catch {
       setMessages(m => [...m, { role: 'assistant', text: 'Something went wrong reaching the chat service — please try again.' }]);
     } finally {
@@ -54,11 +58,13 @@ export function ChatWidget() {
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
             <div className="text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line bg-slate-50 dark:bg-slate-800 rounded-lg px-3 py-2 self-start max-w-[90%]">{WELCOME}</div>
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`text-xs whitespace-pre-line rounded-lg px-3 py-2 max-w-[90%] ${m.role === 'user' ? 'self-end bg-brand-600 text-white' : 'self-start bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}
-              >
-                {m.text}
+              <div key={i} className={`flex flex-col gap-1 max-w-[90%] ${m.role === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                <div className={`text-xs whitespace-pre-line rounded-lg px-3 py-2 ${m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
+                  {m.text}
+                </div>
+                {m.intent === 'ai_fallback' && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 px-1">AI-generated (Workers AI) — verify important numbers on the relevant page</span>
+                )}
               </div>
             ))}
             {sending && <div className="text-xs text-slate-400 self-start px-3 py-2">Thinking…</div>}
