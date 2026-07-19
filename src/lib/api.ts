@@ -118,11 +118,11 @@ class ApiClient {
   // See discovery.ts's module comment for why. Drive with runDiscoverySteps() below.
   planDiscovery(id: string) { return this.post<{ ok: boolean; runStartedAt: string; regions: string[]; steps: string[] }>('cloud', `/api/connections/${id}/discover?mode=plan`); }
   discoverStep(id: string, stepId: string, runStartedAt: string) {
-    return this.post<{ ok: boolean; stepId: string; resourceCount: number; created: number; error?: string }>(
+    return this.post<{ ok: boolean; stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>(
       'cloud', `/api/connections/${id}/discover?mode=step&step=${encodeURIComponent(stepId)}&runStartedAt=${encodeURIComponent(runStartedAt)}`,
     );
   }
-  finalizeDiscovery(id: string, runStartedAt: string, errors: string[] = []) {
+  finalizeDiscovery(id: string, runStartedAt: string, errors: { message: string; severity: 'error' | 'info' }[] = []) {
     return this.post<{ ok: boolean; scanned: number; created: number; deleted: number; errors: string[] }>(
       'cloud', `/api/connections/${id}/discover?mode=finalize&runStartedAt=${encodeURIComponent(runStartedAt)}`, { errors },
     );
@@ -136,11 +136,11 @@ class ApiClient {
    */
   async runDiscoverySteps(id: string, onProgress?: (done: number, total: number, stepId: string) => void) {
     const plan = await this.planDiscovery(id);
-    const errors: string[] = [];
+    const errors: { message: string; severity: 'error' | 'info' }[] = [];
     for (let i = 0; i < plan.steps.length; i++) {
       onProgress?.(i, plan.steps.length, plan.steps[i]);
       const result = await this.discoverStep(id, plan.steps[i], plan.runStartedAt);
-      if (result.error) errors.push(`${plan.steps[i]}: ${result.error}`);
+      if (result.error) errors.push({ message: `${plan.steps[i]}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
     }
     onProgress?.(plan.steps.length, plan.steps.length, 'finalizing');
     return this.finalizeDiscovery(id, plan.runStartedAt, errors);
@@ -168,32 +168,36 @@ class ApiClient {
   // Same filter shape as getResources — the cards/charts on Resources.tsx must
   // read the same filtered set as the table, or they show contradictory
   // numbers (e.g. a "Total: 19" card next to a 0-row filtered table).
-  getResourceStats(filters: { category?: string; region?: string; status?: string; search?: string } = {}) {
+  getResourceStats(filters: { category?: string; region?: string; status?: string; search?: string; service?: string; connectionId?: string } = {}) {
     const qs = new URLSearchParams();
     if (filters.category) qs.set('category', filters.category);
     if (filters.region) qs.set('region', filters.region);
     if (filters.status) qs.set('status', filters.status);
     if (filters.search) qs.set('search', filters.search);
+    if (filters.service) qs.set('service', filters.service);
+    if (filters.connectionId) qs.set('connection_id', filters.connectionId);
     const suffix = qs.toString() ? `?${qs}` : '';
     return this.get<{ ok: boolean; total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byStatus: Record<string, number>; defaultCount: number }>('cloud', `/api/resources/stats${suffix}`);
   }
-  getResourceTrend(days = 30, filters: { category?: string; region?: string; status?: string } = {}) {
+  getResourceTrend(days = 30, filters: { category?: string; region?: string; status?: string; connectionId?: string } = {}) {
     const qs = new URLSearchParams({ days: String(days) });
     if (filters.category) qs.set('category', filters.category);
     if (filters.region) qs.set('region', filters.region);
     if (filters.status) qs.set('status', filters.status);
+    if (filters.connectionId) qs.set('connection_id', filters.connectionId);
     return this.get<{ ok: boolean; points: { date: string; created: number; deleted: number; net: number }[] }>('cloud', `/api/resources/trend?${qs}`);
   }
   getResourceCatalog() { return this.get<{ ok: boolean; catalog: ResourceCatalogEntry[]; categories: string[] }>('cloud', '/api/resource-catalog'); }
 
   // ── cloud-api: Cost ──────────────────────────────────────────────────────
 
-  getCostSummary(days = 30, region?: string) {
+  getCostSummary(days = 30, region?: string, connectionId?: string) {
     const qs = new URLSearchParams({ days: String(days) });
     if (region) qs.set('region', region);
+    if (connectionId) qs.set('connection_id', connectionId);
     return this.get<{ ok: boolean; mtdCost: number; forecastCost: number; avgDailyCost: number; byService: { service: string; cost: number }[]; byAccount: { accountId: string; cost: number }[]; byRegion: { region: string; cost: number }[]; daily: { date: string; cost: number }[] }>('cloud', `/api/cost/summary?${qs}`);
   }
-  getCostAnomalies() { return this.get<{ ok: boolean; anomalies: CostAnomaly[] }>('cloud', '/api/cost/anomalies'); }
+  getCostAnomalies(connectionId?: string) { return this.get<{ ok: boolean; anomalies: CostAnomaly[] }>('cloud', `/api/cost/anomalies${connectionId ? `?connection_id=${connectionId}` : ''}`); }
   getCostRecommendations(status?: string) { return this.get<{ ok: boolean; recommendations: CostRecommendation[] }>('cloud', `/api/cost/recommendations${status ? `?status=${status}` : ''}`); }
   updateCostRecommendation(id: string, status: 'applied' | 'dismissed') { return this.put<{ ok: boolean }>('cloud', `/api/cost/recommendations/${id}`, { status }); }
 }
@@ -219,7 +223,7 @@ export interface CloudConnection {
   awsAccountId: string; connectionName: string | null; maskedAccessKey: string | null; roleArn: string | null;
   defaultRegion: string; scanRegions: string[]; status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired'; environment: Environment;
   supportPlan: string | null;
-  resourceSummary?: { totalResources?: number; categoryCounts?: Record<string, number>; servicesScanned?: number; servicesTotal?: string; regionsScanned?: string[]; errors?: string[]; scannedAt?: string } | null;
+  resourceSummary?: { totalResources?: number; categoryCounts?: Record<string, number>; servicesScanned?: number; servicesTotal?: string; regionsScanned?: string[]; errors?: ({ message: string; severity: 'error' | 'info' } | string)[]; scannedAt?: string } | null;
   lastDiscoveryAt: string | null; lastFullScanAt: string | null; lastSyncAt: string | null; keyRotatedAt: string | null;
   keyRotationDueAt: string | null; errorMessage: string | null; createdAt: string;
 }

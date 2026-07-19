@@ -7,7 +7,7 @@ import { LineChart } from '../components/charts/LineChart';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
-import { api, type CostAnomaly } from '../lib/api';
+import { api, type CostAnomaly, type CloudConnection } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -17,23 +17,26 @@ export function CostManagement() {
   const { region, dateRange, refreshToken } = useFilters();
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
+  const [connections, setConnections] = useState<CloudConnection[]>([]);
+  const [account, setAccount] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [summaryRes, anomaliesRes] = await Promise.all([
-        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region),
-        api.getCostAnomalies(),
+        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region, account || undefined),
+        api.getCostAnomalies(account || undefined),
       ]);
       setSummary(summaryRes);
       setAnomalies(anomaliesRes.anomalies);
     } finally {
       setLoading(false);
     }
-  }, [dateRange, region]);
+  }, [dateRange, region, account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+  useEffect(() => { void api.getConnections().then(r => setConnections(r.connections)); }, []);
 
   const totalByService = summary?.byService.reduce((sum, s) => sum + s.cost, 0) ?? 0;
 
@@ -50,6 +53,13 @@ export function CostManagement() {
   return (
     <div>
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
+
+      <div className="flex justify-end mb-3">
+        <select value={account} onChange={e => setAccount(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
+          <option value="">All Accounts</option>
+          {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+        </select>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Cost (MTD)" value={money(summary?.mtdCost ?? 0)} />

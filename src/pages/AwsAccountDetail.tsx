@@ -116,16 +116,38 @@ export function AwsAccountDetail() {
         </div>
       </div>
 
-      {connection.resourceSummary?.errors && connection.resourceSummary.errors.length > 0 && (
-        <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 p-4 mb-5">
-          <h3 className="text-sm font-medium text-amber-700 dark:text-amber-300 mb-2">Scan Warnings</h3>
-          <ul className="text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-0.5">
-            {connection.resourceSummary.errors.map((e, i) => <li key={i}>{e}</li>)}
-          </ul>
-        </div>
-      )}
+      {(() => {
+        const raw = connection.resourceSummary?.errors ?? [];
+        // Older rows stored plain strings before errors carried a severity —
+        // treat anything without one as a real error rather than lose it.
+        const items = raw.map(e => typeof e === 'string' ? { message: e, severity: 'error' as const } : e);
+        const realErrors = items.filter(e => e.severity !== 'info');
+        const notEnabled = items.filter(e => e.severity === 'info');
+        if (items.length === 0) return null;
+        return (
+          <div className="flex flex-col gap-3 mb-5">
+            {realErrors.length > 0 && (
+              <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 p-4">
+                <h3 className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">Scan Errors — needs attention</h3>
+                <ul className="text-xs text-red-700 dark:text-red-300 list-disc list-inside space-y-0.5">
+                  {realErrors.map((e, i) => <li key={i}>{e.message}</li>)}
+                </ul>
+              </div>
+            )}
+            {notEnabled.length > 0 && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Not enabled on this account</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">These AWS services were never turned on for this account — nothing to fix, just nothing to scan yet.</p>
+                <ul className="text-xs text-slate-500 dark:text-slate-400 list-disc list-inside space-y-0.5">
+                  {notEnabled.map((e, i) => <li key={i}>{e.message}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
-      <button onClick={() => navigate('/resources')} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
+      <button onClick={() => navigate(`/resources?account=${connection.id}`)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
     </div>
   );
 }
