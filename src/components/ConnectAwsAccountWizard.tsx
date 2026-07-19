@@ -3,7 +3,20 @@ import { Modal } from './Modal';
 import { api, type Project, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY } from '../lib/leastPrivilegePolicy';
 
-const REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1'];
+// Every AWS region enabled by default (no opt-in required) — this list
+// previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
+// among others, so a connected account's real EC2 instances there never
+// showed up anywhere in discovery. The backend also independently confirms
+// a new connection's real enabled regions via ec2:DescribeRegions at
+// connect time (including any opt-in regions), so this list just needs to
+// cover the common case for the checklist UI, not be exhaustive.
+const REGIONS = [
+  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+  'ca-central-1', 'sa-east-1',
+  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
+  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
+  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
+];
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 
 export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }: { open: boolean; onClose: () => void; onConnected: () => void; projects: Project[] }) {

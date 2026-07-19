@@ -73,7 +73,13 @@ export function Resources() {
   useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.catalog)); }, []);
 
   const liveTypes = catalog.filter(c => c.scannerStatus === 'live').length;
-  const serviceOptions = useMemo(() => [...new Set(catalog.map(c => c.service))].sort(), [catalog]);
+  // A service with zero live-scanned types will always return 0 rows if
+  // selected — surfaced as disabled + labeled rather than left to look like
+  // an unexplained empty result once picked.
+  const serviceOptions = useMemo(() => {
+    const liveServices = new Set(catalog.filter(c => c.scannerStatus === 'live').map(c => c.service));
+    return [...new Set(catalog.map(c => c.service))].sort().map(s => ({ service: s, live: liveServices.has(s) }));
+  }, [catalog]);
   const accountLabel = useCallback((connectionId: string) => {
     const c = connections.find(c => c.id === connectionId);
     return c ? (c.connectionName ?? c.awsAccountId) : connectionId;
@@ -137,7 +143,7 @@ export function Resources() {
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
           <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
             <option value="">All Services</option>
-            {serviceOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1">

@@ -1,8 +1,14 @@
 import { useFilters, type DateRangePreset } from '../lib/filterContext';
 
+// Kept in sync with cloud-api's DEFAULT_SCAN_REGIONS (scanners/types.ts) —
+// this previously omitted ap-south-1 and others, so even after a region was
+// actually scanned there was no way to filter down to it here.
 const REGIONS = [
   'all', 'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-  'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1',
+  'ca-central-1', 'sa-east-1',
+  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
+  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
+  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
 ];
 
 const RANGE_LABELS: Record<DateRangePreset, string> = {
