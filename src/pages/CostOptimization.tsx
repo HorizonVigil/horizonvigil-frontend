@@ -14,14 +14,14 @@ function money(n: number): string {
 const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Reserved Instances', 'Savings Plans'] as const;
 
 export function CostOptimization() {
-  const { refreshToken } = useFilters();
+  const { account, refreshToken } = useFilters();
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [tab, setTab] = useState<typeof TABS[number]>('Overview');
 
   const load = useCallback(async () => {
-    const { recommendations: recs } = await api.getCostRecommendations('open');
+    const { recommendations: recs } = await api.getCostRecommendations('open', account === 'all' ? undefined : account);
     setRecommendations(recs);
-  }, []);
+  }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 

@@ -7,26 +7,26 @@ import { LineChart } from '../components/charts/LineChart';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
-import { api, type CostAnomaly, type CloudConnection } from '../lib/api';
+import { api, type CostAnomaly } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
 export function CostManagement() {
-  const { region, dateRange, refreshToken } = useFilters();
+  // Account + Region filters live in the global FilterBar now.
+  const { region, account, dateRange, refreshToken } = useFilters();
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
-  const [connections, setConnections] = useState<CloudConnection[]>([]);
-  const [account, setAccount] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const connectionId = account === 'all' ? undefined : account;
       const [summaryRes, anomaliesRes] = await Promise.all([
-        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region, account || undefined),
-        api.getCostAnomalies(account || undefined),
+        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region, connectionId),
+        api.getCostAnomalies(connectionId),
       ]);
       setSummary(summaryRes);
       setAnomalies(anomaliesRes.anomalies);
@@ -36,7 +36,6 @@ export function CostManagement() {
   }, [dateRange, region, account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
-  useEffect(() => { void api.getConnections().then(r => setConnections(r.connections)); }, []);
 
   const totalByService = summary?.byService.reduce((sum, s) => sum + s.cost, 0) ?? 0;
 
@@ -53,16 +52,6 @@ export function CostManagement() {
   return (
     <div>
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
-
-      <div className="flex justify-end mb-3">
-        <label className="flex flex-col gap-1 items-start">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
-          <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${account ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="">All Accounts</option>
-            {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
-          </select>
-        </label>
-      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Cost (MTD)" value={money(summary?.mtdCost ?? 0)} />

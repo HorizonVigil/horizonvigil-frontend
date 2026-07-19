@@ -5,27 +5,30 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { useFilters } from '../lib/filterContext';
 import { api, type CloudResource } from '../lib/api';
 
 export function Clusters() {
+  const { account, refreshToken } = useFilters();
   const [clusters, setClusters] = useState<CloudResource[]>([]);
   const [nodegroups, setNodegroups] = useState<CloudResource[]>([]);
   const [ecsServices, setEcsServices] = useState<CloudResource[]>([]);
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
+    const connectionId = account === 'all' ? undefined : account;
     const [eksRes, ecsClusterRes, ngRes, svcRes] = await Promise.all([
-      api.getResources({ resourceTypeKey: 'eks_cluster', limit: 200 }),
-      api.getResources({ resourceTypeKey: 'ecs_cluster', limit: 200 }),
-      api.getResources({ resourceTypeKey: 'eks_nodegroup', limit: 500 }),
-      api.getResources({ resourceTypeKey: 'ecs_service', limit: 500 }),
+      api.getResources({ resourceTypeKey: 'eks_cluster', connectionId, limit: 200 }),
+      api.getResources({ resourceTypeKey: 'ecs_cluster', connectionId, limit: 200 }),
+      api.getResources({ resourceTypeKey: 'eks_nodegroup', connectionId, limit: 500 }),
+      api.getResources({ resourceTypeKey: 'ecs_service', connectionId, limit: 500 }),
     ]);
     setClusters([...eksRes.resources, ...ecsClusterRes.resources]);
     setNodegroups(ngRes.resources);
     setEcsServices(svcRes.resources);
-  }, []);
+  }, [account]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, refreshToken]);
 
   const columns: Column<CloudResource>[] = [
     { key: 'name', header: 'Cluster', render: c => c.resourceName ?? c.resourceId, sortValue: c => c.resourceName ?? '' },

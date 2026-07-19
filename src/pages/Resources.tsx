@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -10,27 +10,35 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
-import { api, type CloudResource, type ResourceCatalogEntry, type CloudConnection } from '../lib/api';
+import { api, type CloudResource, type ResourceCatalogEntry } from '../lib/api';
 
 export function Resources() {
-  const { region, refreshToken } = useFilters();
-  const [searchParams, setSearchParams] = useSearchParams();
+  // Account + Region live in the global FilterBar (top of every page) —
+  // see filterContext.tsx. Category/Service/Status/Search stay local since
+  // they're specific to this page's data shape.
+  const { region, account, setAccount, connections, refreshToken } = useFilters();
+  const [searchParams] = useSearchParams();
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; defaultCount: number } | null>(null);
   const [trend, setTrend] = useState<{ date: string; created: number; deleted: number; net: number }[]>([]);
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
-  const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [service, setService] = useState('');
-  // Pre-populated from ?account=<id>, e.g. the "View all resources for this
-  // account" link on the account detail page — without this the page always
-  // showed every connected account's resources merged together with no way
-  // to scope down to one.
-  const [account, setAccount] = useState(searchParams.get('account') ?? '');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ?account=<id> (e.g. "View all resources for this account" on the account
+  // detail page) sets the *global* account filter once on arrival, so it's
+  // reflected consistently in the top bar rather than a page-local override.
+  const appliedUrlAccount = useRef(false);
+  useEffect(() => {
+    if (appliedUrlAccount.current) return;
+    appliedUrlAccount.current = true;
+    const fromUrl = searchParams.get('account');
+    if (fromUrl) setAccount(fromUrl);
+  }, [searchParams, setAccount]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,7 +46,7 @@ export function Resources() {
       const filters = {
         category: category || undefined, status: status || undefined,
         region: region === 'all' ? undefined : region, search: search || undefined,
-        service: service || undefined, connectionId: account || undefined,
+        service: service || undefined, connectionId: account === 'all' ? undefined : account,
       };
       const [resourcesRes, statsRes, trendRes] = await Promise.all([
         api.getResources({ ...filters, limit: 500 }),
@@ -55,16 +63,6 @@ export function Resources() {
 
   useEffect(() => { void load(); }, [load, refreshToken]);
   useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.catalog)); }, []);
-  useEffect(() => { void api.getConnections().then(r => setConnections(r.connections)); }, []);
-
-  // Keep the URL in sync so the account filter survives a refresh/share, but
-  // don't fight the user typing into other filters.
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (account) next.set('account', account); else next.delete('account');
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account]);
 
   const liveTypes = catalog.filter(c => c.scannerStatus === 'live').length;
   const serviceOptions = useMemo(() => [...new Set(catalog.map(c => c.service))].sort(), [catalog]);
@@ -121,13 +119,6 @@ export function Resources() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
-          <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${account ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="">All Accounts</option>
-            {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
           <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
             <option value="">All Categories</option>
@@ -148,8 +139,8 @@ export function Resources() {
             {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
-        {(account || category || service || status || search) && (
-          <button onClick={() => { setAccount(''); setCategory(''); setService(''); setStatus(''); setSearch(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+        {(category || service || status || search) && (
+          <button onClick={() => { setCategory(''); setService(''); setStatus(''); setSearch(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
         )}
         {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
       </div>

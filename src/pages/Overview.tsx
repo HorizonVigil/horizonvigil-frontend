@@ -16,7 +16,7 @@ function money(n: number): string {
 
 export function Overview() {
   const { currentOrg, folders, projects } = useOrg();
-  const { dateRange, refreshToken } = useFilters();
+  const { account, dateRange, refreshToken } = useFilters();
   const [costSummary, setCostSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
   const [resourceStats, setResourceStats] = useState<Awaited<ReturnType<typeof api.getResourceStats>> | null>(null);
   const [connectionCount, setConnectionCount] = useState(0);
@@ -24,17 +24,21 @@ export function Overview() {
 
   const load = useCallback(async () => {
     if (!currentOrg) return;
+    const connectionId = account === 'all' ? undefined : account;
     const [cost, resStats, connections, log] = await Promise.all([
-      api.getCostSummary(dateRangeToDays(dateRange)),
-      api.getResourceStats(),
+      api.getCostSummary(dateRangeToDays(dateRange), undefined, connectionId),
+      api.getResourceStats({ connectionId }),
       api.getConnections(),
       api.getAuditLog(currentOrg.id),
     ]);
     setCostSummary(cost);
     setResourceStats(resStats);
+    // "AWS Accounts" is a count of everything connected, independent of the
+    // account filter — filtering it down to "1" when one account is
+    // selected would misrepresent how many accounts actually exist.
     setConnectionCount(connections.connections.length);
     setAuditLog(log.entries.slice(0, 8));
-  }, [currentOrg, dateRange]);
+  }, [currentOrg, dateRange, account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 

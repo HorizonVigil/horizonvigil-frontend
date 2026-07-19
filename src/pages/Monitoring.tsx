@@ -5,24 +5,27 @@ import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
+import { useFilters } from '../lib/filterContext';
 import { api, type CloudResource } from '../lib/api';
 
 const MONITORED_TYPES = ['ec2_instance', 'rds_instance', 'rds_cluster', 'lambda_function', 'eks_cluster', 'ecs_service', 'elasticache_cluster'];
 
 export function Monitoring() {
+  const { account, refreshToken } = useFilters();
   const [alarms, setAlarms] = useState<CloudResource[]>([]);
   const [monitored, setMonitored] = useState<CloudResource[]>([]);
 
   const load = useCallback(async () => {
+    const connectionId = account === 'all' ? undefined : account;
     const [alarmRes, ...monitoredRes] = await Promise.all([
-      api.getResources({ resourceTypeKey: 'cloudwatch_alarm', limit: 500 }),
-      ...MONITORED_TYPES.map(t => api.getResources({ resourceTypeKey: t, limit: 500 })),
+      api.getResources({ resourceTypeKey: 'cloudwatch_alarm', connectionId, limit: 500 }),
+      ...MONITORED_TYPES.map(t => api.getResources({ resourceTypeKey: t, connectionId, limit: 500 })),
     ]);
     setAlarms(alarmRes.resources);
     setMonitored(monitoredRes.flatMap(r => r.resources));
-  }, []);
+  }, [account]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, refreshToken]);
 
   const alarmState = (a: CloudResource) => a.state ?? 'INSUFFICIENT_DATA';
   const byAlarmState: Record<string, number> = {};

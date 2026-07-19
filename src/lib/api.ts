@@ -198,7 +198,13 @@ class ApiClient {
     return this.get<{ ok: boolean; mtdCost: number; forecastCost: number; avgDailyCost: number; byService: { service: string; cost: number }[]; byAccount: { accountId: string; cost: number }[]; byRegion: { region: string; cost: number }[]; daily: { date: string; cost: number }[] }>('cloud', `/api/cost/summary?${qs}`);
   }
   getCostAnomalies(connectionId?: string) { return this.get<{ ok: boolean; anomalies: CostAnomaly[] }>('cloud', `/api/cost/anomalies${connectionId ? `?connection_id=${connectionId}` : ''}`); }
-  getCostRecommendations(status?: string) { return this.get<{ ok: boolean; recommendations: CostRecommendation[] }>('cloud', `/api/cost/recommendations${status ? `?status=${status}` : ''}`); }
+  getCostRecommendations(status?: string, connectionId?: string) {
+    const qs = new URLSearchParams();
+    if (status) qs.set('status', status);
+    if (connectionId) qs.set('connection_id', connectionId);
+    const suffix = qs.toString() ? `?${qs}` : '';
+    return this.get<{ ok: boolean; recommendations: CostRecommendation[] }>('cloud', `/api/cost/recommendations${suffix}`);
+  }
   updateCostRecommendation(id: string, status: 'applied' | 'dismissed') { return this.put<{ ok: boolean }>('cloud', `/api/cost/recommendations/${id}`, { status }); }
 }
 

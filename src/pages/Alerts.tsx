@@ -8,6 +8,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { supabase } from '../lib/supabase';
 import { useOrg } from '../lib/orgContext';
+import { useFilters } from '../lib/filterContext';
 
 interface Alert {
   id: string; severity: string; alert_name: string; status: string; triggered_at: string; resolved_at: string | null;
@@ -22,6 +23,9 @@ const STATUSES = ['open', 'acknowledged', 'in_progress', 'resolved'];
 
 export function Alerts() {
   const { currentOrg } = useOrg();
+  // Alert rules are org-wide definitions, not tied to one AWS account, so
+  // only the fired-alerts query below is scoped by the account filter.
+  const { account, refreshToken } = useFilters();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
@@ -30,15 +34,17 @@ export function Alerts() {
 
   const load = useCallback(async () => {
     if (!currentOrg) return;
+    let alertsQuery = supabase.from('alerts').select('id,severity,alert_name,status,triggered_at,resolved_at').eq('org_id', currentOrg.id);
+    if (account !== 'all') alertsQuery = alertsQuery.eq('connection_id', account);
     const [{ data: alertRows }, { data: ruleRows }] = await Promise.all([
-      supabase.from('alerts').select('id,severity,alert_name,status,triggered_at,resolved_at').eq('org_id', currentOrg.id).order('triggered_at', { ascending: false }).limit(500),
+      alertsQuery.order('triggered_at', { ascending: false }).limit(500),
       supabase.from('alert_rules').select('id,name,severity,enabled,created_at').eq('org_id', currentOrg.id).order('created_at', { ascending: false }),
     ]);
     setAlerts(alertRows ?? []);
     setRules(ruleRows ?? []);
-  }, [currentOrg]);
+  }, [currentOrg, account]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, refreshToken]);
 
   async function updateStatus(id: string, status: string) {
     await supabase.from('alerts').update({ status }).eq('id', id);
