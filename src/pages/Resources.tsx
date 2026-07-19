@@ -115,28 +115,43 @@ export function Resources() {
         <BarChart data={Object.entries(stats?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
-        <select value={account} onChange={e => setAccount(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-          <option value="">All Accounts</option>
-          {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
-        </select>
-        <select value={category} onChange={e => setCategory(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-          <option value="">All Categories</option>
-          {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={service} onChange={e => setService(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-          <option value="">All Services</option>
-          {serviceOptions.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={status} onChange={e => setStatus(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-          <option value="">All Statuses</option>
-          {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
+          <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${account ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+            <option value="">All Accounts</option>
+            {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
+          <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+            <option value="">All Categories</option>
+            {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
+          <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+            <option value="">All Services</option>
+            {serviceOptions.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
+          <select value={status} onChange={e => setStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${status ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+            <option value="">All Statuses</option>
+            {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
         {(account || category || service || status || search) && (
-          <button onClick={() => { setAccount(''); setCategory(''); setService(''); setStatus(''); setSearch(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline">Clear filters</button>
+          <button onClick={() => { setAccount(''); setCategory(''); setService(''); setStatus(''); setSearch(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
         )}
-        {loading && <span className="text-xs text-slate-400">Loading…</span>}
+        {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
       </div>
 
       <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from AWS Accounts." />

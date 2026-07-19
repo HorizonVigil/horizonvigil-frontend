@@ -55,10 +55,13 @@ export function CostManagement() {
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
 
       <div className="flex justify-end mb-3">
-        <select value={account} onChange={e => setAccount(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-          <option value="">All Accounts</option>
-          {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
-        </select>
+        <label className="flex flex-col gap-1 items-start">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
+          <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${account ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+            <option value="">All Accounts</option>
+            {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
