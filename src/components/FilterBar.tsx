@@ -14,8 +14,13 @@ const RANGE_LABELS: Record<DateRangePreset, string> = {
  * + refresh) — spec §5. The Account filter lives here, not as a one-off
  * dropdown on individual pages, so it's in the same place on every screen
  * regardless of how many AWS accounts are connected.
+ *
+ * `showAccountFilter` defaults to true; pass false on pages whose data has
+ * no per-account dimension (Reports has no connection_id column at all) —
+ * otherwise the control renders but silently does nothing when changed,
+ * which is worse than not having it.
  */
-export function FilterBar({ title, breadcrumb }: { title: string; breadcrumb?: React.ReactNode }) {
+export function FilterBar({ title, breadcrumb, showAccountFilter = true }: { title: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean }) {
   const { region, setRegion, account, setAccount, connections, dateRange, setDateRange, refresh } = useFilters();
 
   return (
@@ -25,13 +30,15 @@ export function FilterBar({ title, breadcrumb }: { title: string; breadcrumb?: R
         <h1 className="text-xl font-semibold text-slate-900 dark:text-white mt-0.5">{title}</h1>
       </div>
       <div className="flex items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
-          <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="all">All Accounts</option>
-            {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
-          </select>
-        </label>
+        {showAccountFilter && (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
+            <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+              <option value="all">All Accounts</option>
+              {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+            </select>
+          </label>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Region</span>
           <select value={region} onChange={e => setRegion(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${region !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>

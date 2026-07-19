@@ -40,7 +40,14 @@ export function Resources() {
     if (fromUrl) setAccount(fromUrl);
   }, [searchParams, setAccount]);
 
+  // Guards against an older, slower load() call overwriting a newer one's
+  // state if filters change again before the first request resolves —
+  // without this, a stale response can land last and silently revert the
+  // cards/table to an out-of-date filter's data.
+  const requestId = useRef(0);
+
   const load = useCallback(async () => {
+    const thisRequest = ++requestId.current;
     setLoading(true);
     try {
       const filters = {
@@ -53,11 +60,12 @@ export function Resources() {
         api.getResourceStats(filters),
         api.getResourceTrend(30, filters),
       ]);
+      if (thisRequest !== requestId.current) return; // a newer request already landed
       setResources(resourcesRes.resources);
       setStats(statsRes);
       setTrend(trendRes.points);
     } finally {
-      setLoading(false);
+      if (thisRequest === requestId.current) setLoading(false);
     }
   }, [category, status, region, search, service, account]);
 
