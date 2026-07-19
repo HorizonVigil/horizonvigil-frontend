@@ -272,4 +272,4 @@ export interface ResourceMetric {
   unit: string | null; region: string; ts: string; value: number;
 }
 export interface MetricPoint { ts: string; value: number }
-export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; cloud_resources?: { resource_name: string | null; resource_type_key: string } }
+export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; cloud_resources?: { resource_name: string | null; resource_type_key: string; resource_id: string; region: string | null } }
