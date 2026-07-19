@@ -2,26 +2,131 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
-import { BarChart } from '../components/charts/BarChart';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { useTheme } from '../lib/theme';
+import { categoryColor, categoricalColor, CHROME, STATUS, pick } from '../components/charts/palette';
 import { useFilters } from '../lib/filterContext';
-import { api, type CloudResource, type ResourceCatalogEntry } from '../lib/api';
+import { api, type CloudResource, type ResourceCatalogEntry, type ResourceEvent } from '../lib/api';
+
+const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
+
+function CategoryIcon({ category, color }: { category: string; color: string }) {
+  const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  switch (category) {
+    case 'Compute':
+      return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" /></svg>;
+    case 'Storage':
+      return <svg {...common}><ellipse cx="12" cy="6" rx="7" ry="3" /><path d="M5 6v12c0 1.66 3.13 3 7 3s7-1.34 7-3V6" /><path d="M5 12c0 1.66 3.13 3 7 3s7-1.34 7-3" /></svg>;
+    case 'Database':
+      return <svg {...common}><ellipse cx="12" cy="5" rx="7" ry="3" /><path d="M5 5v14c0 1.66 3.13 3 7 3s7-1.34 7-3V5" /></svg>;
+    case 'Networking':
+      return <svg {...common}><circle cx="5" cy="6" r="2.2" /><circle cx="19" cy="6" r="2.2" /><circle cx="12" cy="18" r="2.2" /><path d="M6.8 7.4 10.5 16.2M17.2 7.4 13.5 16.2" /></svg>;
+    default:
+      return <svg {...common}><circle cx="6" cy="12" r="1.6" fill={color} stroke="none" /><circle cx="12" cy="12" r="1.6" fill={color} stroke="none" /><circle cx="18" cy="12" r="1.6" fill={color} stroke="none" /></svg>;
+  }
+}
+
+function CategoryStatCard({ label, value, percent, category, caption }: { label: string; value: number; percent: number; category: string; caption?: string }) {
+  const { theme } = useTheme();
+  const color = category === 'Total' ? pick(CHROME.primaryInk, theme === 'dark') : categoryColor(category, theme === 'dark');
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-start justify-between gap-2">
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{value.toLocaleString()}</span>
+        <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">{caption ?? `${percent.toFixed(1)}% of total`}</span>
+      </div>
+      {category !== 'Total' && (
+        <span className="shrink-0 h-9 w-9 rounded-full flex items-center justify-center" style={{ backgroundColor: `${color}1a` }}>
+          <CategoryIcon category={category} color={color} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Ranked magnitude list with a thin progress bar per row — same accent for every bar (dataviz: color follows the entity's identity elsewhere; here rank/length alone carries the meaning). */
+function RankedList({ rows, emptyMessage }: { rows: { label: string; value: number }[]; emptyMessage: string }) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const barColor = categoricalColor(0, isDark);
+  const trackColor = pick(CHROME.gridline, isDark);
+  const total = rows.reduce((s, r) => s + r.value, 0) || 1;
+  const max = Math.max(1, ...rows.map(r => r.value));
+  if (rows.length === 0) return <p className="text-sm text-slate-400 py-6 text-center">{emptyMessage}</p>;
+  return (
+    <table className="w-full text-sm">
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.label} className="border-b last:border-0 border-slate-100 dark:border-slate-800/60">
+            <td className="py-2 pr-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{r.label}</td>
+            <td className="py-2 pr-3 w-full">
+              <div className="h-1.5 rounded-full" style={{ backgroundColor: trackColor }}>
+                <div className="h-1.5 rounded-full" style={{ width: `${(r.value / max) * 100}%`, backgroundColor: barColor }} />
+              </div>
+            </td>
+            <td className="py-2 pr-2 text-right tabular-nums text-slate-800 dark:text-slate-100 font-medium whitespace-nowrap">{r.value.toLocaleString()}</td>
+            <td className="py-2 text-right tabular-nums text-slate-400 dark:text-slate-500 whitespace-nowrap">{((r.value / total) * 100).toFixed(1)}%</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const HEALTH_ICONS: Record<string, { tone: keyof typeof STATUS | 'neutral'; icon: React.ReactNode }> = {
+  Healthy: { tone: 'good', icon: <path d="M5 13l4 4L19 7" /> },
+  Warning: { tone: 'warning', icon: <path d="M12 9v4m0 4h.01M10.3 3.9 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /> },
+  Critical: { tone: 'critical', icon: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5m0 3h.01" /></> },
+  Unknown: { tone: 'neutral', icon: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2 1.8-2 3.5m0 3h.01" /></> },
+};
+
+function HealthRow({ label, count, percent }: { label: string; count: number; percent: number }) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const entry = HEALTH_ICONS[label];
+  const color = entry.tone === 'neutral' ? pick(CHROME.mutedInk, isDark) : pick(STATUS[entry.tone], isDark);
+  return (
+    <div className="flex items-center justify-between py-2 border-b last:border-0 border-slate-100 dark:border-slate-800/60">
+      <div className="flex items-center gap-2.5">
+        <span className="h-7 w-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}1a` }}>
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">{entry.icon}</svg>
+        </span>
+        <span className="text-sm text-slate-600 dark:text-slate-300">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">{count}</span>
+        <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums w-12 text-right">{percent.toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
+function timeAgo(ts: string): string {
+  const mins = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  return `${Math.round(mins / (60 * 24))}d ago`;
+}
 
 export function Resources() {
   // Account + Region live in the global FilterBar (top of every page) —
   // see filterContext.tsx. Category/Service/Status/Search stay local since
   // they're specific to this page's data shape.
   const { region, account, setAccount, connections, refreshToken } = useFilters();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [searchParams] = useSearchParams();
   const [resources, setResources] = useState<CloudResource[]>([]);
-  const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; defaultCount: number } | null>(null);
+  const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byService: Record<string, number>; byResourceType: Record<string, number>; defaultCount: number } | null>(null);
   const [trend, setTrend] = useState<{ date: string; created: number; deleted: number; net: number }[]>([]);
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
+  const [recentEvents, setRecentEvents] = useState<ResourceEvent[]>([]);
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
@@ -55,15 +160,17 @@ export function Resources() {
         region: region === 'all' ? undefined : region, search: search || undefined,
         service: service || undefined, connectionId: account === 'all' ? undefined : account,
       };
-      const [resourcesRes, statsRes, trendRes] = await Promise.all([
+      const [resourcesRes, statsRes, trendRes, eventsRes] = await Promise.all([
         api.getResources({ ...filters, limit: 500 }),
         api.getResourceStats(filters),
         api.getResourceTrend(30, filters),
+        api.getResourceRecentEvents(20, account === 'all' ? undefined : account),
       ]);
       if (thisRequest !== requestId.current) return; // a newer request already landed
       setResources(resourcesRes.resources);
       setStats(statsRes);
       setTrend(trendRes.points);
+      setRecentEvents(eventsRes.events);
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
     }
@@ -85,6 +192,28 @@ export function Resources() {
     return c ? (c.connectionName ?? c.awsAccountId) : connectionId;
   }, [connections]);
 
+  const total = stats?.total ?? 0;
+  const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: stats?.byCategory[c] ?? 0 }));
+  const othersCount = Math.max(0, total - coreCounts.reduce((s, c) => s + c.count, 0));
+
+  const healthCounts = useMemo(() => {
+    const counts = { Healthy: 0, Warning: 0, Critical: 0, Unknown: 0 };
+    for (const r of resources) {
+      if (r.status === 'active') counts.Healthy++;
+      else if (r.status === 'stopped') counts.Warning++;
+      else if (r.status === 'terminated' || r.status === 'deleted') counts.Critical++;
+      else counts.Unknown++;
+    }
+    return counts;
+  }, [resources]);
+  const healthTotal = Object.values(healthCounts).reduce((s, v) => s + v, 0) || 1;
+
+  const topServices = Object.entries(stats?.byService ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
+  const topResourceTypes = Object.entries(stats?.byResourceType ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
+
+  const trendAdded = trend.reduce((s, p) => s + p.created, 0);
+  const trendDeleted = trend.reduce((s, p) => s + p.deleted, 0);
+
   const columns: Column<CloudResource>[] = [
     { key: 'displayName', header: 'Service', render: r => r.displayName, sortValue: r => r.displayName },
     { key: 'account', header: 'Account', render: r => <span className="text-xs">{accountLabel(r.connectionId)}</span>, sortValue: r => accountLabel(r.connectionId) },
@@ -97,36 +226,72 @@ export function Resources() {
     { key: 'firstSeenAt', header: 'First Seen', render: r => new Date(r.firstSeenAt).toLocaleDateString(), sortValue: r => r.firstSeenAt },
   ];
 
+  const eventColumns: Column<ResourceEvent>[] = [
+    { key: 'resource', header: 'Resource', render: e => <span><span className="font-medium text-slate-700 dark:text-slate-200">{e.displayName}</span> <span className="font-mono text-xs text-slate-400">{e.awsResourceId.length > 28 ? `${e.awsResourceId.slice(0, 25)}…` : e.awsResourceId}</span></span> },
+    { key: 'account', header: 'Account', render: e => <span className="text-xs">{accountLabel(e.connectionId)}</span>, sortValue: e => accountLabel(e.connectionId) },
+    { key: 'action', header: 'Action', render: e => <Badge tone={e.eventType === 'created' ? 'good' : 'critical'}>{e.eventType === 'created' ? 'Created' : 'Deleted'}</Badge>, sortValue: e => e.eventType },
+    { key: 'time', header: 'Time', render: e => timeAgo(e.occurredAt), sortValue: e => e.occurredAt },
+  ];
+
   return (
     <div>
       <FilterBar title="Resources" breadcrumb={<Breadcrumb />} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Total Resources" value={(stats?.total ?? 0).toLocaleString()} caption={`${catalog.length || 241} types catalogued`} />
-        <StatCard label="Live-Scanned Types" value={String(liveTypes)} caption={`of ${catalog.length || 241} in taxonomy`} />
-        <StatCard label="Default Resources" value={(stats?.defaultCount ?? 0).toLocaleString()} caption="AWS-created, not hidden" />
-        <StatCard label="Regions With Resources" value={String(Object.keys(stats?.byRegion ?? {}).length)} />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+        <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live · ${stats?.defaultCount ?? 0} default`} />
+        {coreCounts.map(c => (
+          <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
+        ))}
+        <CategoryStatCard label="Others" value={othersCount} percent={total ? (othersCount / total) * 100 : 0} category="Others" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Distribution by Category</h3>
-          <Donut data={Object.entries(stats?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(stats?.total ?? 0), caption: 'resources' }} />
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
+          <Donut data={Object.entries(stats?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend — Added / Deleted (30d)</h3>
-          <LineChart series={[
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
+          <LineChart height={180} series={[
             { label: 'Created', points: trend.map(p => ({ x: p.date, y: p.created })) },
             { label: 'Deleted', points: trend.map(p => ({ x: p.date, y: p.deleted })) },
           ]} />
+          <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+            <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{total.toLocaleString()}</div><div className="text-[11px] text-slate-400">Total</div></div>
+            <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.good, isDark) }}>+{trendAdded}</div><div className="text-[11px] text-slate-400">Added</div></div>
+            <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.critical, isDark) }}>-{trendDeleted}</div><div className="text-[11px] text-slate-400">Deleted</div></div>
+            <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{trendAdded - trendDeleted >= 0 ? '+' : ''}{trendAdded - trendDeleted}</div><div className="text-[11px] text-slate-400">Net Change</div></div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
+          <Donut data={Object.entries(stats?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Resource Count</h3>
+          <RankedList rows={topServices} emptyMessage="No resources discovered yet." />
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution by Type</h3>
+          <RankedList rows={topResourceTypes} emptyMessage="No resources discovered yet." />
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Health</h3>
+          {(Object.keys(healthCounts) as (keyof typeof healthCounts)[]).map(k => (
+            <HealthRow key={k} label={k} count={healthCounts[k]} percent={(healthCounts[k] / healthTotal) * 100} />
+          ))}
         </div>
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
-        <BarChart data={Object.entries(stats?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} />
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Resource Changes</h3>
+        <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.awsResourceId}:${e.eventType}:${e.occurredAt}`} emptyMessage="No resource changes recorded yet." />
       </div>
 
+      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">All Resources</h3>
       <div className="flex flex-wrap items-end gap-3 mb-3">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>

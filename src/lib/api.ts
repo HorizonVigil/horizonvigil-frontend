@@ -177,7 +177,12 @@ class ApiClient {
     if (filters.service) qs.set('service', filters.service);
     if (filters.connectionId) qs.set('connection_id', filters.connectionId);
     const suffix = qs.toString() ? `?${qs}` : '';
-    return this.get<{ ok: boolean; total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byStatus: Record<string, number>; defaultCount: number }>('cloud', `/api/resources/stats${suffix}`);
+    return this.get<{ ok: boolean; total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byStatus: Record<string, number>; byService: Record<string, number>; byResourceType: Record<string, number>; defaultCount: number }>('cloud', `/api/resources/stats${suffix}`);
+  }
+  getResourceRecentEvents(limit = 20, connectionId?: string) {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (connectionId) qs.set('connection_id', connectionId);
+    return this.get<{ ok: boolean; events: ResourceEvent[] }>('cloud', `/api/resources/recent-events?${qs}`);
   }
   getResourceTrend(days = 30, filters: { category?: string; region?: string; status?: string; connectionId?: string } = {}) {
     const qs = new URLSearchParams({ days: String(days) });
@@ -206,6 +211,16 @@ class ApiClient {
     return this.get<{ ok: boolean; recommendations: CostRecommendation[] }>('cloud', `/api/cost/recommendations${suffix}`);
   }
   updateCostRecommendation(id: string, status: 'applied' | 'dismissed') { return this.put<{ ok: boolean }>('cloud', `/api/cost/recommendations/${id}`, { status }); }
+
+  getLatestMetrics(connectionId?: string) {
+    return this.get<{ ok: boolean; metrics: ResourceMetric[] }>('cloud', `/api/metrics/latest${connectionId ? `?connection_id=${connectionId}` : ''}`);
+  }
+  getResourceMetricNames(resourceId: string) {
+    return this.get<{ ok: boolean; metricNames: string[] }>('cloud', `/api/resources/${resourceId}/metric-names`);
+  }
+  getResourceMetricSeries(resourceId: string, metric: string, hours = 6) {
+    return this.get<{ ok: boolean; unit: string | null; points: MetricPoint[] }>('cloud', `/api/resources/${resourceId}/metrics?metric=${encodeURIComponent(metric)}&hours=${hours}`);
+  }
 }
 
 export const api = new ApiClient();
@@ -249,5 +264,12 @@ export interface CloudResource {
   firstSeenAt: string; lastSeenAt: string; deletedAt: string | null; consoleUrl?: string;
 }
 
+export interface ResourceEvent { connectionId: string; resourceTypeKey: string; displayName: string; awsResourceId: string; eventType: string; occurredAt: string }
 export interface CostAnomaly { id: string; connection_id: string; service: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: string }
+
+export interface ResourceMetric {
+  resource_id: string; resource_type_key: string; metric_name: string; namespace: string;
+  unit: string | null; region: string; ts: string; value: number;
+}
+export interface MetricPoint { ts: string; value: number }
 export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; cloud_resources?: { resource_name: string | null; resource_type_key: string } }
