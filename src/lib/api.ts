@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 const SERVICE_URLS: Record<string, string> = {
   org: import.meta.env.VITE_ORG_API_URL || 'https://cloudops360-1-org-api.workers.dev',
   cloud: import.meta.env.VITE_CLOUD_API_URL || 'https://cloudops360-1-cloud-api.workers.dev',
+  chat: import.meta.env.VITE_CHAT_API_URL || 'https://cloudops360-1-chat-api.workers.dev',
 };
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
@@ -220,6 +221,12 @@ class ApiClient {
   }
   getResourceMetricSeries(resourceId: string, metric: string, hours = 6) {
     return this.get<{ ok: boolean; unit: string | null; points: MetricPoint[] }>('cloud', `/api/resources/${resourceId}/metrics?metric=${encodeURIComponent(metric)}&hours=${hours}`);
+  }
+
+  // ── chat-api: rule-based Q&A over your own connected data — no external LLM ──
+
+  sendChatMessage(message: string, connectionId?: string) {
+    return this.post<{ ok: boolean; answer: string; intent: string }>('chat', '/api/chat', { message, connection_id: connectionId });
   }
 }
 
