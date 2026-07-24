@@ -82,6 +82,11 @@ export function AwsAccountDetail() {
           {sync.error}
         </div>
       )}
+      {sync?.status === 'done' && sync.warning && (
+        <div className="mb-4 -mt-2 rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          Sync completed, but {sync.warning.charAt(0).toLowerCase() + sync.warning.slice(1)} — resource inventory is up to date; cost data for this account may be incomplete until that's resolved.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Total Resources" value={resources.length.toLocaleString()} />

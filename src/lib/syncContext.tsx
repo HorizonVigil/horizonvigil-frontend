@@ -7,6 +7,11 @@ export interface SyncState {
   total: number;
   stepId: string;
   error?: string;
+  /** Discovery itself succeeded, but a secondary step (cost sync) didn't — surfaced
+   * separately from `error` since it shouldn't read as the whole sync having failed
+   * (e.g. AWS Cost Explorer not enabled yet for this account, a one-time AWS Billing
+   * console setting we can't turn on for the user — previously silently swallowed). */
+  warning?: string;
 }
 
 interface SyncContextType {
@@ -40,9 +45,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         await api.runDiscoverySteps(connectionId, (done, total, stepId) => {
           setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done, total, stepId } }));
         });
-        await api.syncConnectionCost(connectionId).catch(() => {});
+        const costResult = await api.syncConnectionCost(connectionId).catch(err => ({ ok: false as const, error: (err as Error).message }));
         await api.generateRecommendations(connectionId).catch(() => {});
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'done', done: 0, total: 0, stepId: '' } }));
+        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'done', done: 0, total: 0, stepId: '', warning: costResult.error ? `Cost sync: ${costResult.error}` : undefined } }));
       } catch (err) {
         setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 0, stepId: '', error: (err as Error).message || 'Sync failed.' } }));
       } finally {
