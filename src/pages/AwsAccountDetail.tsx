@@ -95,7 +95,7 @@ export function AwsAccountDetail() {
         <StatCard label="Services Scanned" value={connection.resourceSummary?.servicesTotal ?? '—'} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Breakdown</h3>
           <Donut data={Object.entries(categoryCounts).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(resources.length), caption: 'resources' }} />
@@ -118,6 +118,23 @@ export function AwsAccountDetail() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Per-Resource Cost</h3>
+          {connection.curReportName ? (
+            <div className="text-sm space-y-2">
+              <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Cost & Usage Report</span><span className="text-slate-800 dark:text-slate-100 font-mono text-xs">{connection.curReportName}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Last synced</span><span className="text-slate-800 dark:text-slate-100">{connection.curLastSyncedAt ? new Date(connection.curLastSyncedAt).toLocaleString() : 'Not yet'}</span></div>
+              <p className="text-xs text-slate-400">Real per-resource cost now shows on each resource's detail panel.</p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">
+              Not set up yet — Cost Explorer only gives service/region-level cost. For real per-resource cost, create a Cost & Usage Report
+              in AWS Billing → Cost & Usage Reports (check "Include resource IDs"), and add the optional S3-read statement shown when
+              connecting an account. CloudOps360 checks for it automatically on every sync.
+            </p>
+          )}
         </div>
       </div>
 

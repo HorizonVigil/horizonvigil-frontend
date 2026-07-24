@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
 import { api, type Project, type Environment } from '../lib/api';
-import { LEAST_PRIVILEGE_POLICY } from '../lib/leastPrivilegePolicy';
+import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
 
 // Every AWS region enabled by default (no opt-in required) — this list
 // previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
@@ -101,6 +101,11 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
             <button type="button" onClick={() => void navigator.clipboard.writeText(LEAST_PRIVILEGE_POLICY)} className="text-xs text-brand-600 dark:text-brand-400">Copy</button>
           </div>
           <pre className="text-[10px] leading-tight bg-slate-900 text-slate-200 rounded-lg p-3 overflow-auto max-h-48">{LEAST_PRIVILEGE_POLICY}</pre>
+          <p className="text-xs text-slate-400 mt-3">
+            Optional, add later: if you set up an AWS Cost & Usage Report (Billing console → Cost & Usage Reports, with "Include resource IDs" checked), add
+            this extra statement — scoped to that report's own S3 bucket only — to unlock real per-resource cost. Not required to connect.
+          </p>
+          <pre className="text-[10px] leading-tight bg-slate-900 text-slate-200 rounded-lg p-3 overflow-auto max-h-32 mt-1">{CUR_S3_READ_POLICY_STATEMENT}</pre>
         </div>
       )}
 

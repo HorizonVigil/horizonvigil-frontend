@@ -52,3 +52,22 @@ export const LEAST_PRIVILEGE_POLICY = `{
     ], "Resource": "*" }
   ]
 }`;
+
+/**
+ * Optional, separate from the base policy on purpose: the base policy never
+ * grants s3:GetObject anywhere (reading arbitrary object *content* is a real
+ * capability expansion, unlike the List*/Describe* metadata calls above) —
+ * so real per-resource cost (via Cost & Usage Report ingestion) only works
+ * once the customer has (1) created a CUR export with "Include resource IDs"
+ * checked in AWS Billing -> Cost & Usage Reports, and (2) attached this,
+ * scoped to that report's own bucket only, never "Resource": "*".
+ */
+export const CUR_S3_READ_POLICY_STATEMENT = `{
+  "Sid": "CurResourceCostReadOnly",
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:ListBucket"],
+  "Resource": [
+    "arn:aws:s3:::YOUR-CUR-BUCKET-NAME",
+    "arn:aws:s3:::YOUR-CUR-BUCKET-NAME/*"
+  ]
+}`;

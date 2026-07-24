@@ -194,6 +194,9 @@ class ApiClient {
     return this.get<{ ok: boolean; points: { date: string; created: number; deleted: number; net: number }[] }>('cloud', `/api/resources/trend?${qs}`);
   }
   getResourceCatalog() { return this.get<{ ok: boolean; catalog: ResourceCatalogEntry[]; categories: string[] }>('cloud', '/api/resource-catalog'); }
+  getResourceCost(resourceId: string, days = 30) {
+    return this.get<{ ok: boolean; hasCurData: boolean; totalCost: number; dailyCost: { date: string; cost: number }[] }>('cloud', `/api/resources/${resourceId}/cost?days=${days}`);
+  }
 
   // ── cloud-api: Cost ──────────────────────────────────────────────────────
 
@@ -269,6 +272,7 @@ export interface CloudConnection {
   resourceSummary?: { totalResources?: number; categoryCounts?: Record<string, number>; servicesScanned?: number; servicesTotal?: string; regionsScanned?: string[]; errors?: ({ message: string; severity: 'error' | 'info' } | string)[]; scannedAt?: string } | null;
   lastDiscoveryAt: string | null; lastFullScanAt: string | null; lastSyncAt: string | null; keyRotatedAt: string | null;
   keyRotationDueAt: string | null; errorMessage: string | null; createdAt: string;
+  curReportName: string | null; curS3Bucket: string | null; curLastSyncedAt: string | null;
 }
 
 export type ResourceCategory = 'Compute' | 'Storage' | 'Database' | 'Networking' | 'Security' | 'Containers' | 'Analytics' | 'Management' | 'Others';

@@ -133,6 +133,16 @@ export function Resources() {
   const [service, setService] = useState('');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cost, setCost] = useState<{ hasCurData: boolean; totalCost: number; dailyCost: { date: string; cost: number }[] } | null>(null);
+
+  // Real per-resource cost only exists once this connection's AWS account has
+  // a Cost & Usage Report set up (see curIngest.ts) — most won't yet, so
+  // `hasCurData: false` is the expected common case, not an error.
+  useEffect(() => {
+    setCost(null);
+    if (!selected) return;
+    void api.getResourceCost(selected.id).then(setCost);
+  }, [selected]);
 
   // ?account=<id> (e.g. "View all resources for this account" on the account
   // detail page) sets the *global* account filter once on arrival, so it's
@@ -342,6 +352,21 @@ export function Resources() {
             {selected.consoleUrl && (
               <a href={selected.consoleUrl} target="_blank" rel="noreferrer" className="text-brand-600 dark:text-brand-400 hover:underline text-xs">Open in AWS Console ↗</a>
             )}
+            <div>
+              <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-1.5">Cost</h4>
+              {!cost ? (
+                <p className="text-xs text-slate-400">Loading…</p>
+              ) : !cost.hasCurData ? (
+                <p className="text-xs text-slate-400">No per-resource cost data — this account doesn't have a Cost & Usage Report set up yet (Settings → Cost & Usage Reports in the AWS Billing console, with "Include resource IDs" checked). See the AWS Account page for the exact permissions needed.</p>
+              ) : cost.dailyCost.length === 0 ? (
+                <p className="text-xs text-slate-400">Cost & Usage Report is connected, but no cost recorded for this resource in the last 30 days.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">${cost.totalCost.toFixed(2)} over the last 30 days</p>
+                  <LineChart height={140} series={[{ label: 'Daily cost', points: cost.dailyCost.map(d => ({ x: d.date, y: d.cost })) }]} valueFormatter={v => `$${v.toFixed(2)}`} />
+                </>
+              )}
+            </div>
             {Object.keys(selected.tags ?? {}).length > 0 && (
               <div>
                 <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-1.5">Tags</h4>
