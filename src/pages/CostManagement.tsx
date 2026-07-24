@@ -20,6 +20,12 @@ export function CostManagement() {
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [tagKeys, setTagKeys] = useState<string[]>([]);
+  const [selectedTagKey, setSelectedTagKey] = useState('');
+  const [tagBreakdown, setTagBreakdown] = useState<{ tagValue: string; cost: number }[]>([]);
+  const [tagKeysError, setTagKeysError] = useState('');
+  const [tagBreakdownLoading, setTagBreakdownLoading] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -36,6 +42,30 @@ export function CostManagement() {
   }, [dateRange, region, account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+
+  // Showback-by-tag calls AWS Cost Explorer live for one specific account
+  // (its own tag keys, its own credentials) — it doesn't aggregate across
+  // "All Accounts" the way the stored cost_snapshots summary above does.
+  useEffect(() => {
+    setTagKeys([]);
+    setSelectedTagKey('');
+    setTagBreakdown([]);
+    setTagKeysError('');
+    if (account === 'all') return;
+    void api.getCostTagKeys(account).then(res => {
+      if (res.ok) setTagKeys(res.tagKeys);
+      else setTagKeysError(res.error ?? 'Could not load tag keys');
+    });
+  }, [account]);
+
+  useEffect(() => {
+    if (account === 'all' || !selectedTagKey) { setTagBreakdown([]); return; }
+    setTagBreakdownLoading(true);
+    void api.getCostByTag(account, selectedTagKey).then(res => {
+      setTagBreakdown(res.ok ? res.breakdown : []);
+      setTagBreakdownLoading(false);
+    });
+  }, [account, selectedTagKey]);
 
   const totalByService = summary?.byService.reduce((sum, s) => sum + s.cost, 0) ?? 0;
 
@@ -90,6 +120,50 @@ export function CostManagement() {
             {(!summary || summary.byRegion.length === 0) && <li className="text-slate-400 text-sm">No cost data synced yet.</li>}
           </ul>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Showback by Tag</h3>
+          {account !== 'all' && tagKeys.length > 0 && (
+            <select value={selectedTagKey} onChange={e => setSelectedTagKey(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
+              <option value="">Choose a tag key…</option>
+              {tagKeys.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          )}
+        </div>
+        {account === 'all' ? (
+          <p className="text-sm text-slate-400">Select a specific AWS account in the top filter bar to see cost broken down by one of its tags (e.g. Team, Environment) — this reads live from that account's own AWS Cost Explorer.</p>
+        ) : tagKeysError ? (
+          <p className="text-sm text-slate-400">{tagKeysError}</p>
+        ) : tagKeys.length === 0 ? (
+          <p className="text-sm text-slate-400">No cost-allocation tag keys found for this account. In AWS, a tag only appears here once it's activated as a cost allocation tag in Billing → Cost Allocation Tags — CloudOps360 can't turn that on for you.</p>
+        ) : !selectedTagKey ? (
+          <p className="text-sm text-slate-400">Pick a tag key above to see cost by its values (last 30 days).</p>
+        ) : tagBreakdownLoading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="py-2">{selectedTagKey}</th><th className="py-2 text-right">Cost (30d)</th><th className="py-2 text-right">% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tagBreakdown.map(t => {
+                const total = tagBreakdown.reduce((s, r) => s + r.cost, 0) || 1;
+                return (
+                  <tr key={t.tagValue} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                    <td className="py-2 text-slate-700 dark:text-slate-200">{t.tagValue}</td>
+                    <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(t.cost)}</td>
+                    <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{((t.cost / total) * 100).toFixed(1)}%</td>
+                  </tr>
+                );
+              })}
+              {tagBreakdown.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400">No cost data for this tag in the last 30 days.</td></tr>}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">

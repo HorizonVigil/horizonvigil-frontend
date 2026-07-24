@@ -213,6 +213,21 @@ class ApiClient {
   }
   updateCostRecommendation(id: string, status: 'applied' | 'dismissed') { return this.put<{ ok: boolean }>('cloud', `/api/cost/recommendations/${id}`, { status }); }
 
+  getCostTagKeys(connectionId: string) { return this.get<{ ok: boolean; tagKeys: string[]; error?: string }>('cloud', `/api/cost/tag-keys?connection_id=${connectionId}`); }
+  getCostByTag(connectionId: string, tagKey: string) {
+    return this.get<{ ok: boolean; tagKey: string; breakdown: { tagValue: string; cost: number }[]; error?: string }>('cloud', `/api/cost/by-tag?connection_id=${connectionId}&tag_key=${encodeURIComponent(tagKey)}`);
+  }
+
+  // ── cloud-api: Alerts ────────────────────────────────────────────────────
+
+  testSlackWebhook(webhookUrl: string) { return this.post<{ ok: boolean; error?: string }>('cloud', '/api/alerts/test-slack', { webhookUrl }); }
+
+  // ── cloud-api: Kubernetes cost ───────────────────────────────────────────
+
+  getClusterCosts(connectionId: string) {
+    return this.get<{ ok: boolean; clusters: { clusterName: string; instanceCount: number; estimatedMonthlyCost: number }[]; totalEc2Cost: number; unallocatedInstanceCount: number }>('cloud', `/api/k8s/cluster-costs?connection_id=${connectionId}`);
+  }
+
   getLatestMetrics(connectionId?: string) {
     return this.get<{ ok: boolean; metrics: ResourceMetric[] }>('cloud', `/api/metrics/latest${connectionId ? `?connection_id=${connectionId}` : ''}`);
   }
