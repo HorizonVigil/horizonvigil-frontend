@@ -8,7 +8,7 @@ interface ChatMessage {
   intent?: string;
 }
 
-const WELCOME = 'Hi — ask me about your connected AWS accounts, resources, cost, savings recommendations, or alarms. Most answers come straight from real data with nothing made up; if I can\'t match your question to something I track, I\'ll hand it to a small AI model (clearly marked) grounded in the same data.';
+const WELCOME = 'Hi — ask me about your connected AWS accounts, resources, cost, savings recommendations, alarms, or security findings. Most answers come straight from real data with nothing made up; if I can\'t match your question to something I track, I\'ll hand it to a small AI model (clearly marked) grounded in the same data.';
 
 /**
  * A floating assistant available on every page. Most answers come from

@@ -4,6 +4,7 @@ const SERVICE_URLS: Record<string, string> = {
   org: import.meta.env.VITE_ORG_API_URL || 'https://cloudops360-1-org-api.workers.dev',
   cloud: import.meta.env.VITE_CLOUD_API_URL || 'https://cloudops360-1-cloud-api.workers.dev',
   chat: import.meta.env.VITE_CHAT_API_URL || 'https://cloudops360-1-chat-api.workers.dev',
+  security: import.meta.env.VITE_SECURITY_API_URL || 'https://cloudops360-1-security-api.workers.dev',
 };
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
@@ -260,6 +261,55 @@ class ApiClient {
     return { blob: await response.blob(), filename: match?.[1] ?? `report-${id}` };
   }
 
+  // ── security-api: Vulnerability Management (GuardDuty/Security Hub/Inspector) ──
+
+  // Same stepped plan/step/finalize protocol as AWS discovery, on its own
+  // free-tier-safe Worker — see security-api's findingsIngest.ts.
+  planSecurityScan(connectionId: string) {
+    return this.post<{ ok: boolean; runStartedAt: string; steps: string[] }>('security', `/api/security/connections/${connectionId}/scan?mode=plan`);
+  }
+  securityScanStep(connectionId: string, stepId: string) {
+    return this.post<{ ok: boolean; stepId: string; findingCount: number; error?: string; errorSeverity?: 'error' | 'info' }>(
+      'security', `/api/security/connections/${connectionId}/scan?mode=step&step=${encodeURIComponent(stepId)}`,
+    );
+  }
+  finalizeSecurityScan(connectionId: string, runStartedAt: string) {
+    return this.post<{ ok: boolean; totalOpen: number; autoResolved: number }>(
+      'security', `/api/security/connections/${connectionId}/scan?mode=finalize&runStartedAt=${encodeURIComponent(runStartedAt)}`,
+    );
+  }
+  async runSecurityScanSteps(connectionId: string, onProgress?: (done: number, total: number, stepId: string) => void) {
+    const plan = await this.planSecurityScan(connectionId);
+    const errors: { stepId: string; message: string }[] = [];
+    for (let i = 0; i < plan.steps.length; i++) {
+      onProgress?.(i, plan.steps.length, plan.steps[i]);
+      const result = await this.securityScanStep(connectionId, plan.steps[i]);
+      if (result.error && result.errorSeverity !== 'info') errors.push({ stepId: plan.steps[i], message: result.error });
+    }
+    onProgress?.(plan.steps.length, plan.steps.length, 'finalizing');
+    const finalized = await this.finalizeSecurityScan(connectionId, plan.runStartedAt);
+    return { ...finalized, errors };
+  }
+
+  getFindings(filters: { severity?: string; status?: string; source?: string; region?: string; connectionId?: string; search?: string; limit?: number; offset?: number } = {}) {
+    const qs = new URLSearchParams();
+    if (filters.severity) qs.set('severity', filters.severity);
+    if (filters.status) qs.set('status', filters.status);
+    if (filters.source) qs.set('source', filters.source);
+    if (filters.region) qs.set('region', filters.region);
+    if (filters.connectionId) qs.set('connection_id', filters.connectionId);
+    if (filters.search) qs.set('search', filters.search);
+    qs.set('limit', String(filters.limit ?? 100));
+    qs.set('offset', String(filters.offset ?? 0));
+    return this.get<{ ok: boolean; findings: VulnerabilityFinding[]; total: number }>('security', `/api/security/findings?${qs}`);
+  }
+  getSecuritySummary() {
+    return this.get<{ ok: boolean; total: number; bySeverity: Record<string, number>; bySource: Record<string, number>; riskScore: number; trend: { date: string; count: number }[] }>('security', '/api/security/summary');
+  }
+  updateFindingStatus(id: string, status: 'open' | 'resolved' | 'suppressed') {
+    return this.request<{ ok: boolean }>('security', `/api/security/findings/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  }
+
   // ── chat-api: rule-based Q&A over your own connected data — no external LLM ──
 
   sendChatMessage(message: string, connectionId?: string) {
@@ -318,3 +368,11 @@ export interface ResourceMetric {
 }
 export interface MetricPoint { ts: string; value: number }
 export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; cloud_resources?: { resource_name: string | null; resource_type_key: string; resource_id: string; region: string | null } }
+
+export interface VulnerabilityFinding {
+  id: string; connection_id: string; finding_source: 'internal' | 'security_hub' | 'guardduty' | 'inspector';
+  aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational';
+  cvss_score: number | null; title: string; description: string | null; compliance_frameworks: string[];
+  status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null;
+  resource_arn: string | null; discovered_at: string; last_seen_at: string; resolved_at: string | null;
+}
