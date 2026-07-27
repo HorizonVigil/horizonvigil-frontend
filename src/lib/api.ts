@@ -241,6 +241,25 @@ class ApiClient {
     return this.get<{ ok: boolean; unit: string | null; points: MetricPoint[] }>('cloud', `/api/resources/${resourceId}/metrics?metric=${encodeURIComponent(metric)}&hours=${hours}`);
   }
 
+  // ── cloud-api: Reports ───────────────────────────────────────────────────
+
+  generateReport(id: string) { return this.post<{ ok: boolean; status: string }>('cloud', `/api/reports/${id}/generate`); }
+
+  /** Binary download — bypasses request<T>'s .json() parsing to fetch the
+   * raw PDF/CSV bytes with the same auth headers, then hands the caller a
+   * Blob plus the filename the server chose (from Content-Disposition). */
+  async downloadReport(id: string): Promise<{ blob: Blob; filename: string }> {
+    const baseUrl = SERVICE_URLS.cloud;
+    const response = await fetch(`${baseUrl}/api/reports/${id}/download`, { headers: await this.authHeaders() });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new ApiError(response.status, (error as { error?: string }).error || 'Download failed', error);
+    }
+    const disposition = response.headers.get('Content-Disposition') ?? '';
+    const match = /filename="([^"]+)"/.exec(disposition);
+    return { blob: await response.blob(), filename: match?.[1] ?? `report-${id}` };
+  }
+
   // ── chat-api: rule-based Q&A over your own connected data — no external LLM ──
 
   sendChatMessage(message: string, connectionId?: string) {
