@@ -31,6 +31,14 @@ export function ChatWidget() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, open]);
 
+  // Per-module "AI Copilot" sidebar entries (Cost, Monitoring, ...) open this
+  // same assistant rather than each having their own — see navConfig.ts.
+  useEffect(() => {
+    const openChat = () => setOpen(true);
+    window.addEventListener('cloudops:open-chat', openChat);
+    return () => window.removeEventListener('cloudops:open-chat', openChat);
+  }, []);
+
   async function send() {
     const text = input.trim();
     if (!text || sending) return;
