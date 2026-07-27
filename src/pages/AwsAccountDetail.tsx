@@ -169,7 +169,7 @@ export function AwsAccountDetail() {
         );
       })()}
 
-      <button onClick={() => navigate(`/resources?account=${connection.id}`)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
+      <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
     </div>
   );
 }

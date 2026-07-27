@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { WorkspaceBreadcrumb } from '../components/WorkspaceBreadcrumb';
 import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { DataTable, type Column } from '../components/DataTable';
@@ -14,7 +15,16 @@ import { api, type CloudResource, type ResourceCatalogEntry, type ResourceEvent 
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
 
-function CategoryIcon({ category, color }: { category: string; color: string }) {
+/** Best-effort human label for a catalog `service` key (e.g. "ec2" -> "EC2") —
+ * short keys are almost always AWS's own acronym, longer ones get title-cased.
+ * Not hand-curated per service; good enough for a breadcrumb/heading, not a
+ * claim of authoritative AWS branding. */
+export function serviceLabel(service: string): string {
+  if (service.length <= 5) return service.toUpperCase();
+  return service.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+export function CategoryIcon({ category, color }: { category: string; color: string }) {
   const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   switch (category) {
     case 'Compute':
@@ -122,6 +132,14 @@ export function Resources() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [searchParams] = useSearchParams();
+  const routeParams = useParams<{ category?: string; service?: string }>();
+  // Reached two ways: /resources/all (every filter free, the "view everything"
+  // fallback) or /resources/:category/:service (a service workspace, drilled
+  // down from ResourcesOverview/ResourcesCategory — category+service are then
+  // fixed by the URL, not user-editable dropdowns).
+  const presetCategory = routeParams.category && routeParams.category !== 'all' ? routeParams.category : '';
+  const presetService = routeParams.service ?? '';
+  const isWorkspaceView = !!presetCategory;
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byService: Record<string, number>; byResourceType: Record<string, number>; defaultCount: number } | null>(null);
   const [trend, setTrend] = useState<{ date: string; created: number; deleted: number; net: number }[]>([]);
@@ -154,6 +172,14 @@ export function Resources() {
     const fromUrl = searchParams.get('account');
     if (fromUrl) setAccount(fromUrl);
   }, [searchParams, setAccount]);
+
+  // Only re-syncs when the URL's category/service actually changes (i.e. real
+  // navigation between workspaces) — on /resources/all, presetCategory/
+  // presetService never change, so this never fights a manual dropdown pick.
+  useEffect(() => {
+    setCategory(presetCategory);
+    setService(presetService);
+  }, [presetCategory, presetService]);
 
   // Guards against an older, slower load() call overwriting a newer one's
   // state if filters change again before the first request resolves —
@@ -243,9 +269,13 @@ export function Resources() {
     { key: 'time', header: 'Time', render: e => timeAgo(e.occurredAt), sortValue: e => e.occurredAt },
   ];
 
+  const workspaceCrumb = isWorkspaceView
+    ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: presetCategory, to: `/resources/${presetCategory}` }, { label: serviceLabel(presetService) }]} />
+    : <Breadcrumb />;
+
   return (
     <div>
-      <FilterBar title="Resources" breadcrumb={<Breadcrumb />} />
+      <FilterBar title={isWorkspaceView ? serviceLabel(presetService) : 'Resources'} breadcrumb={workspaceCrumb} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
         <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live · ${stats?.defaultCount ?? 0} default`} />
@@ -301,26 +331,30 @@ export function Resources() {
         <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.awsResourceId}:${e.eventType}:${e.occurredAt}`} emptyMessage="No resource changes recorded yet." />
       </div>
 
-      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">All Resources</h3>
+      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
       <div className="flex flex-wrap items-end gap-3 mb-3">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
-          <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="">All Categories</option>
-            {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
-          <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="">All Services</option>
-            {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
-          </select>
-        </label>
+        {!isWorkspaceView && (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
+              <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Categories</option>
+                {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
+              <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Services</option>
+                {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
+              </select>
+            </label>
+          </>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
           <select value={status} onChange={e => setStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${status ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
@@ -328,8 +362,8 @@ export function Resources() {
             {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
-        {(category || service || status || search) && (
-          <button onClick={() => { setCategory(''); setService(''); setStatus(''); setSearch(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+        {(status || search || (!isWorkspaceView && (category || service))) && (
+          <button onClick={() => { setStatus(''); setSearch(''); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
         )}
         {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
       </div>

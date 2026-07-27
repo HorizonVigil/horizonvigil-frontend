@@ -13,6 +13,8 @@ import { Overview } from './pages/Overview';
 import { AwsAccounts } from './pages/AwsAccounts';
 import { AwsAccountDetail } from './pages/AwsAccountDetail';
 import { Resources } from './pages/Resources';
+import { ResourcesOverview } from './pages/resources/ResourcesOverview';
+import { ResourcesCategory } from './pages/resources/ResourcesCategory';
 import { CostManagement } from './pages/CostManagement';
 import { CostOptimization } from './pages/CostOptimization';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
@@ -45,7 +47,10 @@ export default function App() {
                         <Route path="/overview" element={<Overview />} />
                         <Route path="/aws-accounts" element={<AwsAccounts />} />
                         <Route path="/aws-accounts/:id" element={<AwsAccountDetail />} />
-                        <Route path="/resources" element={<Resources />} />
+                        <Route path="/resources" element={<ResourcesOverview />} />
+                        <Route path="/resources/all" element={<Resources />} />
+                        <Route path="/resources/:category" element={<ResourcesCategory />} />
+                        <Route path="/resources/:category/:service" element={<Resources />} />
                         <Route path="/cost-management" element={<CostManagement />} />
                         <Route path="/cost-optimization" element={<CostOptimization />} />
                         <Route path="/vulnerability-management" element={<VulnerabilityManagement />} />
