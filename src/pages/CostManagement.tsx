@@ -6,19 +6,97 @@ import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
+import { Modal } from '../components/Modal';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
-import { api, type CostAnomaly } from '../lib/api';
+import { useOrg } from '../lib/orgContext';
+import { api, type CostAnomaly, type Budget, type BudgetScopeType } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as const;
+
 export function CostManagement() {
   // Account + Region filters live in the global FilterBar now.
-  const { region, account, dateRange, refreshToken } = useFilters();
+  const { region, account, dateRange, refreshToken, connections } = useFilters();
+  const { currentOrg, folders, projects } = useOrg();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [budgetModalOpen, setBudgetModalOpen] = useState(false);
+  const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+  const [budgetName, setBudgetName] = useState('');
+  const [budgetScopeType, setBudgetScopeType] = useState<BudgetScopeType>('org');
+  const [budgetScopeId, setBudgetScopeId] = useState('');
+  const [budgetMonthlyLimit, setBudgetMonthlyLimit] = useState('');
+  const [budgetThresholds, setBudgetThresholds] = useState('50,80,100');
+  const [budgetError, setBudgetError] = useState('');
+
+  const loadBudgets = useCallback(async () => {
+    const { budgets: b } = await api.getBudgets();
+    setBudgets(b);
+  }, []);
+
+  useEffect(() => { void loadBudgets(); }, [loadBudgets, refreshToken]);
+
+  function scopeLabel(scopeType: BudgetScopeType, scopeId: string): string {
+    if (scopeType === 'org') return currentOrg?.name ?? 'Entire organization';
+    if (scopeType === 'folder') return folders.find(f => f.id === scopeId)?.name ?? 'Deleted folder';
+    if (scopeType === 'project') return projects.find(p => p.id === scopeId)?.name ?? 'Deleted project';
+    const conn = connections.find(c => c.id === scopeId);
+    return conn ? (conn.connectionName ?? conn.awsAccountId) : 'Deleted account';
+  }
+
+  function openCreateBudget() {
+    setEditingBudget(null);
+    setBudgetName('');
+    setBudgetScopeType('org');
+    setBudgetScopeId(currentOrg?.id ?? '');
+    setBudgetMonthlyLimit('');
+    setBudgetThresholds('50,80,100');
+    setBudgetError('');
+    setBudgetModalOpen(true);
+  }
+
+  function openEditBudget(b: Budget) {
+    setEditingBudget(b);
+    setBudgetName(b.name);
+    setBudgetScopeType(b.scopeType);
+    setBudgetScopeId(b.scopeId);
+    setBudgetMonthlyLimit(String(b.monthlyLimit));
+    setBudgetThresholds(b.alertThresholds.join(','));
+    setBudgetError('');
+    setBudgetModalOpen(true);
+  }
+
+  async function submitBudget(e: React.FormEvent) {
+    e.preventDefault();
+    setBudgetError('');
+    const monthlyLimit = Number(budgetMonthlyLimit);
+    const alertThresholds = budgetThresholds.split(',').map(t => Number(t.trim())).filter(t => !Number.isNaN(t) && t > 0);
+    try {
+      if (editingBudget) {
+        await api.updateBudget(editingBudget.id, { name: budgetName, monthlyLimit, alertThresholds });
+      } else {
+        await api.createBudget({ name: budgetName, scopeType: budgetScopeType, scopeId: budgetScopeId, monthlyLimit, alertThresholds });
+      }
+      setBudgetModalOpen(false);
+      await loadBudgets();
+    } catch (err) {
+      setBudgetError(err instanceof Error ? err.message : 'Could not save this budget.');
+    }
+  }
+
+  async function handleDeleteBudget(b: Budget) {
+    if (!(await confirm(`Delete the "${b.name}" budget? This doesn't affect any AWS resources or spend, only this tracker.`))) return;
+    await api.deleteBudget(b.id);
+    await loadBudgets();
+  }
 
   const [tagKeys, setTagKeys] = useState<string[]>([]);
   const [selectedTagKey, setSelectedTagKey] = useState('');
@@ -88,6 +166,45 @@ export function CostManagement() {
         <StatCard label="Forecasted Cost" value={money(summary?.forecastCost ?? 0)} caption="end of month" />
         <StatCard label="Avg Daily Cost" value={money(summary?.avgDailyCost ?? 0)} />
         <StatCard label="Open Anomalies" value={String(anomalies.filter(a => a.status === 'open').length)} />
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Budgets</h3>
+          <button onClick={openCreateBudget} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">New Budget</button>
+        </div>
+        {budgets.length === 0 ? (
+          <p className="text-sm text-slate-400">No budgets yet — set a monthly limit on your whole org, a folder, a project, or a single AWS account, and get an early warning before you go over.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {budgets.map(b => {
+              const percentUsed = b.monthlyLimit > 0 ? Math.min(100, (b.monthToDateCost / b.monthlyLimit) * 100) : 0;
+              const barColor = b.status === 'exceeded' ? 'bg-red-500' : b.status === 'warning' ? 'bg-amber-500' : 'bg-emerald-500';
+              return (
+                <div key={b.id} className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div>
+                      <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{b.name}</div>
+                      <div className="text-[11px] text-slate-400">{b.scopeType} — {scopeLabel(b.scopeType, b.scopeId)}</div>
+                    </div>
+                    <Badge tone={STATUS_TONE[b.status]}>{b.status}</Badge>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden my-2">
+                    <div className={`h-full ${barColor}`} style={{ width: `${percentUsed}%` }} />
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                    <span>{money(b.monthToDateCost)} of {money(b.monthlyLimit)}</span>
+                    <span>forecast {money(b.forecastCost)}</span>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-2 text-xs">
+                    <button onClick={() => openEditBudget(b)} className="text-slate-500 hover:underline">Edit</button>
+                    <button onClick={() => void handleDeleteBudget(b)} className="text-slate-500 hover:underline">Delete</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
@@ -192,6 +309,59 @@ export function CostManagement() {
         {(!summary || summary.byService.length === 0) && <p className="text-sm text-slate-400 mt-3">No cost data yet — sync cost from an AWS account's detail page.</p>}
       </div>
       {loading && <p className="text-xs text-slate-400 mt-3">Loading…</p>}
+
+      <Modal open={budgetModalOpen} onClose={() => setBudgetModalOpen(false)} title={editingBudget ? 'Edit Budget' : 'New Budget'}>
+        <form onSubmit={submitBudget} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Name</span>
+            <input required value={budgetName} onChange={e => setBudgetName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          {!editingBudget && (
+            <>
+              <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Scope</span>
+                <select value={budgetScopeType} onChange={e => { const t = e.target.value as BudgetScopeType; setBudgetScopeType(t); setBudgetScopeId(t === 'org' ? (currentOrg?.id ?? '') : ''); }} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+                  <option value="org">Entire organization</option>
+                  <option value="folder">A folder</option>
+                  <option value="project">A project</option>
+                  <option value="connection">A single AWS account</option>
+                </select>
+              </label>
+              {budgetScopeType === 'folder' && (
+                <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Folder</span>
+                  <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+                    <option value="">Choose a folder…</option>
+                    {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {budgetScopeType === 'project' && (
+                <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Project</span>
+                  <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+                    <option value="">Choose a project…</option>
+                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {budgetScopeType === 'connection' && (
+                <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">AWS Account</span>
+                  <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+                    <option value="">Choose an account…</option>
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+                  </select>
+                </label>
+              )}
+            </>
+          )}
+          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Monthly limit (USD)</span>
+            <input required type="number" min="0.01" step="0.01" value={budgetMonthlyLimit} onChange={e => setBudgetMonthlyLimit(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Alert thresholds (% of limit, comma-separated)</span>
+            <input required value={budgetThresholds} onChange={e => setBudgetThresholds(e.target.value)} placeholder="50,80,100" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          {budgetError && <p className="text-xs text-red-500">{budgetError}</p>}
+          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2">{editingBudget ? 'Save' : 'Create'}</button>
+        </form>
+      </Modal>
+      {confirmDialog}
     </div>
   );
 }

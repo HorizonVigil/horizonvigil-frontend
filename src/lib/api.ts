@@ -217,6 +217,17 @@ class ApiClient {
   }
   updateCostRecommendation(id: string, status: 'applied' | 'dismissed') { return this.put<{ ok: boolean }>('cloud', `/api/cost/recommendations/${id}`, { status }); }
 
+  // ── cloud-api: Budgets ──────────────────────────────────────────────────
+
+  getBudgets() { return this.get<{ ok: boolean; budgets: Budget[] }>('cloud', '/api/budgets'); }
+  createBudget(data: { name: string; scopeType: BudgetScopeType; scopeId: string; monthlyLimit: number; alertThresholds?: number[] }) {
+    return this.post<{ ok: boolean; budget: Budget }>('cloud', '/api/budgets', data);
+  }
+  updateBudget(id: string, data: { name?: string; monthlyLimit?: number; alertThresholds?: number[] }) {
+    return this.put<{ ok: boolean; budget: Budget }>('cloud', `/api/budgets/${id}`, data);
+  }
+  deleteBudget(id: string) { return this.delete<{ ok: boolean }>('cloud', `/api/budgets/${id}`); }
+
   getCostTagKeys(connectionId: string) { return this.get<{ ok: boolean; tagKeys: string[]; error?: string }>('cloud', `/api/cost/tag-keys?connection_id=${connectionId}`); }
   getCostByTag(connectionId: string, tagKey: string) {
     return this.get<{ ok: boolean; tagKey: string; breakdown: { tagValue: string; cost: number }[]; error?: string }>('cloud', `/api/cost/by-tag?connection_id=${connectionId}&tag_key=${encodeURIComponent(tagKey)}`);
@@ -368,6 +379,13 @@ export interface ResourceMetric {
 }
 export interface MetricPoint { ts: string; value: number }
 export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; cloud_resources?: { resource_name: string | null; resource_type_key: string; resource_id: string; region: string | null } }
+
+export type BudgetScopeType = 'org' | 'folder' | 'project' | 'connection';
+export interface Budget {
+  id: string; orgId: string; scopeType: BudgetScopeType; scopeId: string; name: string;
+  monthlyLimit: number; alertThresholds: number[]; createdAt: string;
+  monthToDateCost: number; forecastCost: number; status: 'ok' | 'warning' | 'exceeded'; connectionCount: number;
+}
 
 export interface VulnerabilityFinding {
   id: string; connection_id: string; finding_source: 'internal' | 'security_hub' | 'guardduty' | 'inspector';
