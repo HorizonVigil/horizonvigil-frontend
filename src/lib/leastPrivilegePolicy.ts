@@ -56,7 +56,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
 /**
  * Optional, separate from the base policy on purpose: the base policy never
  * grants s3:GetObject anywhere (reading arbitrary object *content* is a real
- * capability expansion, unlike the List*/Describe* metadata calls above) —
+ * capability expansion, unlike the List* / Describe* metadata calls above) —
  * so real per-resource cost (via Cost & Usage Report ingestion) only works
  * once the customer has (1) created a CUR export with "Include resource IDs"
  * checked in AWS Billing -> Cost & Usage Reports, and (2) attached this,
