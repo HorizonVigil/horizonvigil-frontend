@@ -126,7 +126,7 @@ export function CostOptimization() {
       {tab === 'Overview' ? (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           <p>{recommendations.length} open recommendation{recommendations.length === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
-          <p className="mt-2">Recommendations are generated from your discovered resource inventory (idle instances, unattached volumes, unreleased IPs, stale snapshots) each time you run “Sync Now” on an AWS account. Reserved Instance and Savings Plan recommendations require Cost Explorer's recommendation API and aren't wired up yet.</p>
+          <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account — from your discovered resource inventory (idle instances, unattached volumes, unreleased IPs, stale snapshots), and from AWS Cost Explorer's own Reserved Instance and Savings Plan recommendation APIs. RI/Savings Plan recommendations only appear once an account has 30 days of steady enough on-demand usage for AWS to have something to recommend — a new or low-usage account legitimately shows none yet, which is expected, not a bug.</p>
           <p className="mt-2">CloudOps360 only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you the exact AWS CLI command to run yourself.</p>
         </div>
       ) : (
