@@ -264,29 +264,48 @@ export function Settings() {
           {brandingError && <p className="text-xs text-red-500">{brandingError}</p>}
         </form>
 
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Billing &amp; License</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Billing</h3>
+          <div className="grid grid-cols-3 gap-3 mb-3">
             <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
               <span className="text-xs text-slate-400 block">Plan</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100 capitalize">{billing?.plan ?? license?.plan ?? '—'}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100 capitalize">{billing?.plan ?? '—'}</span>
             </div>
             <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
               <span className="text-xs text-slate-400 block">Seats</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seats ?? license?.seats ?? '—'}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seats ?? '—'}</span>
             </div>
             <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
               <span className="text-xs text-slate-400 block">Seats Used</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seatsUsed ?? license?.seatsUsed ?? '—'}</span>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-              <span className="text-xs text-slate-400 block">Connection / User Limits</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100">{planLimits ? `${planLimits.connections} conn / ${planLimits.users} users` : '—'}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seatsUsed ?? '—'}</span>
             </div>
           </div>
-          {billing?.notIntegrated && (
-            <p className="text-xs text-slate-400 rounded-md bg-slate-50 dark:bg-slate-800/60 px-3 py-2">{billing.reason}</p>
-          )}
+          <div>
+            <span className="text-xs text-slate-400 block mb-1">Invoices</span>
+            {billing && billing.invoices.length === 0 && !billing.notIntegrated && <p className="text-sm text-slate-400">No invoices yet.</p>}
+            {billing?.notIntegrated && (
+              <p className="text-xs text-slate-400 rounded-md bg-slate-50 dark:bg-slate-800/60 px-3 py-2">{billing.reason}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">License</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+              <span className="text-xs text-slate-400 block">Plan</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100 capitalize">{license?.plan ?? '—'}</span>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+              <span className="text-xs text-slate-400 block">Seats (used / total)</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{license ? `${license.seatsUsed} / ${license.seats}` : '—'}</span>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 col-span-2">
+              <span className="text-xs text-slate-400 block">Connection / User Limits</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">{planLimits ? `${planLimits.connections} connections / ${planLimits.users} users` : '—'}</span>
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 mt-3">Plan limits are informational — not enforced in this pass.</p>
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">

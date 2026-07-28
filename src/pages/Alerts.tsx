@@ -21,12 +21,18 @@ const CHANNEL_TARGET_LABEL: Record<string, string> = {
   email: 'Email address', slack: 'Slack webhook URL', webhook: 'Webhook URL', sms: 'Phone number', pagerduty: 'PagerDuty integration key',
 };
 
-type Tab = 'alerts' | 'rules' | 'channels' | 'escalations' | 'maintenance';
+// One tab per navConfig submenu item under Alerts — Active Alerts and Alert
+// History used to be a single "Alerts" tab with a buried view toggle, which
+// meant the "Alert History" submenu item landed on the same default (Active)
+// view as "Active Alerts" with no visible differentiation. Splitting them
+// into their own top-level tabs makes each submenu item's promise real.
+type Tab = 'active' | 'rules' | 'channels' | 'escalations' | 'history' | 'maintenance';
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'alerts', label: 'Alerts' },
+  { key: 'active', label: 'Active Alerts' },
   { key: 'rules', label: 'Alert Rules' },
   { key: 'channels', label: 'Notification Channels' },
   { key: 'escalations', label: 'Escalation Policies' },
+  { key: 'history', label: 'Alert History' },
   { key: 'maintenance', label: 'Maintenance Windows' },
 ];
 
@@ -47,8 +53,7 @@ export function Alerts() {
   const { account, connections, refreshToken } = useFilters();
   const { confirm, dialog: confirmDialog } = useConfirm();
 
-  const [activeTab, setActiveTab] = useState<Tab>('alerts');
-  const [alertView, setAlertView] = useState<'active' | 'history'>('active');
+  const [activeTab, setActiveTab] = useState<Tab>('active');
   const [activeAlerts, setActiveAlerts] = useState<AlertRow[]>([]);
   const [historyAlerts, setHistoryAlerts] = useState<AlertRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -312,8 +317,6 @@ export function Alerts() {
     },
   ];
 
-  const shownAlerts = alertView === 'active' ? activeAlerts : historyAlerts;
-
   return (
     <div>
       <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} />
@@ -346,17 +349,25 @@ export function Alerts() {
         ))}
       </div>
 
-      {activeTab === 'alerts' && (
+      {activeTab === 'active' && (
         <div>
-          <div className="flex items-center gap-2 mb-3">
-            <button onClick={() => setAlertView('active')} className={`text-xs px-2.5 py-1.5 rounded-md border ${alertView === 'active' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>Active</button>
-            <button onClick={() => setAlertView('history')} className={`text-xs px-2.5 py-1.5 rounded-md border ${alertView === 'history' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>History</button>
-          </div>
           <DataTable
             columns={alertColumns}
-            rows={shownAlerts}
+            rows={activeAlerts}
             rowKey={a => a.id}
-            emptyMessage={alertView === 'active' ? 'No active alerts right now.' : 'No alert history yet.'}
+            emptyMessage="No active alerts right now."
+          />
+        </div>
+      )}
+
+      {activeTab === 'history' && (
+        <div>
+          <p className="text-xs text-slate-400 mb-3">Every alert that has been triggered, regardless of current status — including ones since acknowledged or resolved.</p>
+          <DataTable
+            columns={alertColumns}
+            rows={historyAlerts}
+            rowKey={a => a.id}
+            emptyMessage="No alert history yet."
           />
         </div>
       )}

@@ -8,6 +8,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution } from '../lib/api';
 
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
+type Editable = Runbook | Workflow | ScheduledJob | Webhook;
 
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -20,6 +21,7 @@ export function Automation() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [history, setHistory] = useState<AutomationExecution[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<Editable | null>(null);
   const [newSecret, setNewSecret] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -42,6 +44,13 @@ export function Automation() {
   async function handleExecuteRunbook(id: string) { await api.executeRunbook(id); await load(); setTab('history'); }
   async function handleExecuteWorkflow(id: string) { await api.executeWorkflow(id); await load(); setTab('history'); }
 
+  async function handleToggleWorkflow(w: Workflow) { await api.updateWorkflow(w.id, { enabled: !w.enabled }); await load(); }
+  async function handleToggleJob(j: ScheduledJob) { await api.updateScheduledJob(j.id, { enabled: !j.enabled }); await load(); }
+  async function handleToggleWebhook(w: Webhook) { await api.updateWebhook(w.id, { enabled: !w.enabled }); await load(); }
+
+  function openEdit(item: Editable) { setEditing(item); setCreateOpen(true); }
+  function closeModal() { setCreateOpen(false); setEditing(null); }
+
   const runbookColumns: Column<Runbook>[] = [
     { key: 'name', header: 'Name', render: r => r.name, sortValue: r => r.name },
     { key: 'category', header: 'Category', render: r => <Badge tone="neutral">{r.category}</Badge>, sortValue: r => r.category },
@@ -50,6 +59,7 @@ export function Automation() {
     { key: 'actions', header: '', render: r => (
       <div className="flex gap-2 text-xs">
         <button onClick={e => { e.stopPropagation(); void handleExecuteRunbook(r.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
+        <button onClick={e => { e.stopPropagation(); openEdit(r); }} className="text-slate-500 hover:underline">Edit</button>
         <button onClick={e => { e.stopPropagation(); void handleDeleteRunbook(r.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
@@ -57,11 +67,18 @@ export function Automation() {
 
   const workflowColumns: Column<Workflow>[] = [
     { key: 'name', header: 'Name', render: w => w.name, sortValue: w => w.name },
-    { key: 'enabled', header: 'Enabled', render: w => <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>, sortValue: w => (w.enabled ? 1 : 0) },
+    {
+      key: 'enabled', header: 'Enabled', render: w => (
+        <button onClick={e => { e.stopPropagation(); void handleToggleWorkflow(w); }} title="Click to toggle">
+          <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>
+        </button>
+      ), sortValue: w => (w.enabled ? 1 : 0),
+    },
     { key: 'steps', header: 'Steps', render: w => Array.isArray(w.steps) ? w.steps.length : 0, sortValue: w => Array.isArray(w.steps) ? w.steps.length : 0 },
     { key: 'actions', header: '', render: w => (
       <div className="flex gap-2 text-xs">
         <button onClick={e => { e.stopPropagation(); void handleExecuteWorkflow(w.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
+        <button onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
         <button onClick={e => { e.stopPropagation(); void handleDeleteWorkflow(w.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
@@ -71,19 +88,37 @@ export function Automation() {
     { key: 'name', header: 'Name', render: j => j.name, sortValue: j => j.name },
     { key: 'type', header: 'Type', render: j => j.job_type, sortValue: j => j.job_type },
     { key: 'cron', header: 'Schedule', render: j => <span className="font-mono text-xs">{j.schedule_cron}</span>, sortValue: j => j.schedule_cron },
-    { key: 'enabled', header: 'Enabled', render: j => <Badge tone={j.enabled ? 'good' : 'neutral'}>{j.enabled ? 'Enabled' : 'Disabled'}</Badge>, sortValue: j => (j.enabled ? 1 : 0) },
+    {
+      key: 'enabled', header: 'Enabled', render: j => (
+        <button onClick={e => { e.stopPropagation(); void handleToggleJob(j); }} title="Click to toggle">
+          <Badge tone={j.enabled ? 'good' : 'neutral'}>{j.enabled ? 'Enabled' : 'Disabled'}</Badge>
+        </button>
+      ), sortValue: j => (j.enabled ? 1 : 0),
+    },
     { key: 'nextRun', header: 'Next Run', render: j => j.next_run_at ? new Date(j.next_run_at).toLocaleString() : '—', sortValue: j => j.next_run_at ?? '' },
-    { key: 'actions', header: '', render: j => <button onClick={e => { e.stopPropagation(); void handleDeleteJob(j.id); }} className="text-xs text-red-500 hover:underline">Delete</button> },
+    { key: 'actions', header: '', render: j => (
+      <div className="flex gap-2 text-xs">
+        <button onClick={e => { e.stopPropagation(); openEdit(j); }} className="text-slate-500 hover:underline">Edit</button>
+        <button onClick={e => { e.stopPropagation(); void handleDeleteJob(j.id); }} className="text-red-500 hover:underline">Delete</button>
+      </div>
+    ) },
   ];
 
   const webhookColumns: Column<Webhook>[] = [
     { key: 'name', header: 'Name', render: w => w.name, sortValue: w => w.name },
     { key: 'url', header: 'URL', render: w => <span className="font-mono text-xs truncate max-w-xs inline-block">{w.url}</span>, sortValue: w => w.url },
     { key: 'events', header: 'Events', render: w => w.events.join(', ') || '—', sortValue: w => w.events.join(',') },
-    { key: 'enabled', header: 'Enabled', render: w => <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>, sortValue: w => (w.enabled ? 1 : 0) },
+    {
+      key: 'enabled', header: 'Enabled', render: w => (
+        <button onClick={e => { e.stopPropagation(); void handleToggleWebhook(w); }} title="Click to toggle">
+          <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>
+        </button>
+      ), sortValue: w => (w.enabled ? 1 : 0),
+    },
     { key: 'actions', header: '', render: w => (
       <div className="flex gap-2 text-xs">
         <button onClick={async e => { e.stopPropagation(); const res = await api.triggerTestWebhook(w.id); alert(res.delivered ? `Delivered (HTTP ${res.httpStatus})` : `Failed: ${res.error ?? 'unknown error'}`); }} className="text-brand-600 dark:text-brand-400 hover:underline">Test</button>
+        <button onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
         <button onClick={e => { e.stopPropagation(); void handleDeleteWebhook(w.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
@@ -128,7 +163,7 @@ export function Automation() {
           ))}
         </div>
         {(tab === 'runbooks' || tab === 'workflows' || tab === 'scheduled' || tab === 'webhooks') && (
-          <button onClick={() => setCreateOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ New</button>
+          <button onClick={() => { setEditing(null); setCreateOpen(true); }} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ New</button>
         )}
       </div>
 
@@ -143,7 +178,8 @@ export function Automation() {
       <CreateModal
         tab={tab}
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        editing={editing}
+        onClose={closeModal}
         onCreated={load}
         onWebhookSecret={setNewSecret}
       />
@@ -159,8 +195,8 @@ export function Automation() {
   );
 }
 
-function CreateModal({ tab, open, onClose, onCreated, onWebhookSecret }: {
-  tab: Tab; open: boolean; onClose: () => void; onCreated: () => void; onWebhookSecret: (secret: string) => void;
+function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }: {
+  tab: Tab; open: boolean; editing: Editable | null; onClose: () => void; onCreated: () => void; onWebhookSecret: (secret: string) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -171,6 +207,19 @@ function CreateModal({ tab, open, onClose, onCreated, onWebhookSecret }: {
   const [error, setError] = useState<string | null>(null);
 
   const creatable = tab === 'runbooks' || tab === 'workflows' || tab === 'scheduled' || tab === 'webhooks';
+
+  // Prefill from the item being edited (or reset to blank defaults for a new
+  // one) whenever the modal is opened — covers both "+ New" and row "Edit".
+  useEffect(() => {
+    if (!open) return;
+    if (editing && tab === 'runbooks') { const r = editing as Runbook; setName(r.name); setDescription(r.description ?? ''); }
+    else if (editing && tab === 'workflows') { const w = editing as Workflow; setName(w.name); setDescription(w.description ?? ''); }
+    else if (editing && tab === 'scheduled') { const j = editing as ScheduledJob; setName(j.name); setJobType(j.job_type); setCron(j.schedule_cron); }
+    else if (editing && tab === 'webhooks') { const w = editing as Webhook; setName(w.name); setUrl(w.url); }
+    else { setName(''); setDescription(''); setCron('0 * * * *'); setJobType('custom'); setUrl(''); }
+    setError(null);
+  }, [open, editing, tab]);
+
   if (!creatable) return null;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -178,12 +227,19 @@ function CreateModal({ tab, open, onClose, onCreated, onWebhookSecret }: {
     setLoading(true);
     setError(null);
     try {
-      if (tab === 'runbooks') await api.createRunbook({ name: name.trim(), description: description.trim() || undefined });
-      else if (tab === 'workflows') await api.createWorkflow({ name: name.trim(), description: description.trim() || undefined });
-      else if (tab === 'scheduled') await api.createScheduledJob({ name: name.trim(), jobType, scheduleCron: cron });
-      else if (tab === 'webhooks') {
-        const { secret } = await api.createWebhook({ name: name.trim(), url: url.trim() });
-        onWebhookSecret(secret);
+      if (editing) {
+        if (tab === 'runbooks') await api.updateRunbook(editing.id, { name: name.trim(), description: description.trim() || undefined });
+        else if (tab === 'workflows') await api.updateWorkflow(editing.id, { name: name.trim(), description: description.trim() || undefined });
+        else if (tab === 'scheduled') await api.updateScheduledJob(editing.id, { name: name.trim(), jobType, scheduleCron: cron });
+        else if (tab === 'webhooks') await api.updateWebhook(editing.id, { name: name.trim(), url: url.trim() });
+      } else {
+        if (tab === 'runbooks') await api.createRunbook({ name: name.trim(), description: description.trim() || undefined });
+        else if (tab === 'workflows') await api.createWorkflow({ name: name.trim(), description: description.trim() || undefined });
+        else if (tab === 'scheduled') await api.createScheduledJob({ name: name.trim(), jobType, scheduleCron: cron });
+        else if (tab === 'webhooks') {
+          const { secret } = await api.createWebhook({ name: name.trim(), url: url.trim() });
+          onWebhookSecret(secret);
+        }
       }
       setName(''); setDescription(''); setUrl('');
       onCreated();
@@ -195,7 +251,9 @@ function CreateModal({ tab, open, onClose, onCreated, onWebhookSecret }: {
     }
   }
 
-  const title = tab === 'runbooks' ? 'New Runbook' : tab === 'workflows' ? 'New Workflow' : tab === 'scheduled' ? 'New Scheduled Job' : 'New Webhook';
+  const title = editing
+    ? (tab === 'runbooks' ? 'Edit Runbook' : tab === 'workflows' ? 'Edit Workflow' : tab === 'scheduled' ? 'Edit Scheduled Job' : 'Edit Webhook')
+    : (tab === 'runbooks' ? 'New Runbook' : tab === 'workflows' ? 'New Workflow' : tab === 'scheduled' ? 'New Scheduled Job' : 'New Webhook');
 
   return (
     <Modal open={open} onClose={onClose} title={title}>
@@ -233,7 +291,7 @@ function CreateModal({ tab, open, onClose, onCreated, onWebhookSecret }: {
         )}
         {error && <p className="text-sm text-red-500">{error}</p>}
         <button type="submit" disabled={loading || !name.trim()} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">
-          {loading ? 'Creating…' : 'Create'}
+          {loading ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save Changes' : 'Create')}
         </button>
       </form>
     </Modal>

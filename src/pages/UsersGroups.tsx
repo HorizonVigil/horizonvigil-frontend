@@ -6,6 +6,8 @@ import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry } from '../lib/api';
 
+type MyPermissions = { role: Role; description: string; effectivePermissions: { role: Role; description: string } };
+
 const ROLES: Role[] = ['owner', 'admin', 'editor', 'viewer', 'billing_admin'];
 
 export function UsersGroups() {
@@ -16,6 +18,7 @@ export function UsersGroups() {
   const [roles, setRoles] = useState<{ role: Role; description: string }[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [auditLog, setAuditLog] = useState<ActivityEntry[]>([]);
+  const [myPermissions, setMyPermissions] = useState<MyPermissions | null>(null);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('viewer');
@@ -30,12 +33,13 @@ export function UsersGroups() {
   const [addMemberUserId, setAddMemberUserId] = useState('');
 
   const load = useCallback(async () => {
-    const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes] = await Promise.all([
+    const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes, perms] = await Promise.all([
       api.getMembers(),
       api.getGroups(),
       api.getRoles(),
       api.getApiKeys(),
-      api.getUserAuditLog({ page: 1, limit: 10 }),
+      api.getUserAuditLog({ page: 1, limit: 15 }),
+      api.getMyPermissions(),
     ]);
     setMembers(m);
     setPendingInvites(pi);
@@ -43,6 +47,7 @@ export function UsersGroups() {
     setRoles(r);
     setApiKeys(keys);
     setAuditLog(auditRes.items);
+    setMyPermissions(perms);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -219,7 +224,7 @@ export function UsersGroups() {
         {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Groups</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-4">
@@ -274,6 +279,25 @@ export function UsersGroups() {
             {roles.length === 0 && <li className="py-2 text-sm text-slate-400">No role definitions available.</li>}
           </ul>
         </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Your Permissions</h3>
+          {myPermissions ? (
+            <div className="flex flex-col gap-3">
+              <div>
+                <span className="text-xs text-slate-400 block mb-1">Your role in this organization</span>
+                <Badge tone="neutral">{myPermissions.role.replace(/_/g, ' ')}</Badge>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-300">{myPermissions.description}</p>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs text-slate-400 block mb-1">Effective permissions</span>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{myPermissions.effectivePermissions.description}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">Loading permissions…</p>
+          )}
+        </div>
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -307,7 +331,7 @@ export function UsersGroups() {
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mt-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent User Activity</h3>
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Logs</h3>
         <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
           {auditLog.map(entry => (
             <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">

@@ -213,6 +213,7 @@ export function OrganizationManagement() {
 
       {currentOrg && (
         <form onSubmit={handleSaveOrg} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5 flex flex-wrap items-end gap-4 text-sm">
+          <h3 className="w-full text-sm font-medium text-slate-600 dark:text-slate-300 -mb-1">Organizations</h3>
           <label className="flex flex-col gap-1">
             <span className="text-slate-400 text-xs">Organization Name</span>
             <input value={orgName} onChange={e => setOrgName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white" />

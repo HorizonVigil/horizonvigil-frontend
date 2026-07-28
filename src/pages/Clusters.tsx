@@ -8,9 +8,25 @@ import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
 import { api, type CloudResource } from '../lib/api';
 
+// One tab per real AWS resource type the sidebar promises (ECS Clusters, ECS
+// Services, ECS Tasks, EKS Clusters, Nodes) — previously ECS/EKS clusters were
+// merged into one table and Services/Nodes were only reachable by clicking
+// into a specific cluster's drawer, so those two submenu items landed on the
+// same generic view no matter what you clicked. Split out so each type has
+// its own findable, filterable table.
+const TABS = ['ECS Clusters', 'ECS Services', 'ECS Tasks', 'EKS Clusters', 'Nodes'] as const;
+type Tab = typeof TABS[number];
+
+function costCell(c: CloudResource) {
+  if (c.cost_monthly == null) return <span className="text-slate-400 text-xs">no cost data</span>;
+  return <span className="tabular-nums font-medium">${c.cost_monthly.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
+}
+
 export function Clusters() {
   const { account, refreshToken } = useFilters();
-  const [clusters, setClusters] = useState<CloudResource[]>([]);
+  const [tab, setTab] = useState<Tab>('ECS Clusters');
+  const [ecsClusters, setEcsClusters] = useState<CloudResource[]>([]);
+  const [eksClusters, setEksClusters] = useState<CloudResource[]>([]);
   // The containers domain exposes individual EKS nodes (not aggregated node
   // groups the way the old API did) — see getEksNodes() in api.ts.
   const [eksNodes, setEksNodes] = useState<CloudResource[]>([]);
@@ -32,7 +48,8 @@ export function Clusters() {
       api.getEksPods(),
       api.getEksHelmReleases(),
     ]);
-    setClusters([...eksRes.items, ...ecsClusterRes.items]);
+    setEksClusters(eksRes.items);
+    setEcsClusters(ecsClusterRes.items);
     setEksNodes(nodesRes.items);
     setEcsServices(svcRes.items);
     setEcsTasks(taskRes.items);
@@ -49,60 +66,97 @@ export function Clusters() {
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
-  const columns: Column<CloudResource>[] = [
+  const ecsClusterNameByArn = new Map(ecsClusters.map(c => [c.resource_id, c.resource_name ?? c.resource_id]));
+
+  const ecsClusterColumns: Column<CloudResource>[] = [
     { key: 'name', header: 'Cluster', render: c => c.resource_name ?? c.resource_id, sortValue: c => c.resource_name ?? '' },
-    { key: 'type', header: 'Type', render: c => c.resource_type_key === 'eks_cluster' ? 'EKS' : 'ECS', sortValue: c => c.resource_type_key },
     { key: 'region', header: 'Region', render: c => c.region ?? 'global', sortValue: c => c.region ?? '' },
     { key: 'status', header: 'Status', render: c => <Badge>{c.state ?? c.status}</Badge>, sortValue: c => c.state ?? c.status },
-    {
-      key: 'nodes', header: 'Nodes / Services', render: c => c.resource_type_key === 'eks_cluster'
-        ? `${eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length} nodes`
-        : `${ecsServices.filter(s => s.relationships?.clusterArn === c.resource_id).length} services`,
-    },
-    { key: 'version', header: 'Version', render: c => (c.metadata?.version as string) ?? '—' },
-    {
-      key: 'cost', header: 'Est. Monthly Cost', render: c => {
-        if (c.cost_monthly == null) return <span className="text-slate-400 text-xs">no cost data</span>;
-        return <span className="tabular-nums font-medium">${c.cost_monthly.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
-      },
-      sortValue: c => c.cost_monthly ?? 0,
-    },
+    { key: 'services', header: 'Services', render: c => ecsServices.filter(s => s.relationships?.clusterArn === c.resource_id).length, sortValue: c => ecsServices.filter(s => s.relationships?.clusterArn === c.resource_id).length },
+    { key: 'tasks', header: 'Tasks', render: c => ecsTasks.filter(t => t.relationships?.clusterArn === c.resource_id).length, sortValue: c => ecsTasks.filter(t => t.relationships?.clusterArn === c.resource_id).length },
+    { key: 'cost', header: 'Est. Monthly Cost', render: costCell, sortValue: c => c.cost_monthly ?? 0 },
   ];
+
+  const eksClusterColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Cluster', render: c => c.resource_name ?? c.resource_id, sortValue: c => c.resource_name ?? '' },
+    { key: 'region', header: 'Region', render: c => c.region ?? 'global', sortValue: c => c.region ?? '' },
+    { key: 'status', header: 'Status', render: c => <Badge>{c.state ?? c.status}</Badge>, sortValue: c => c.state ?? c.status },
+    { key: 'nodes', header: 'Nodes', render: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length, sortValue: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length },
+    { key: 'version', header: 'Version', render: c => (c.metadata?.version as string) ?? '—' },
+    { key: 'cost', header: 'Est. Monthly Cost', render: costCell, sortValue: c => c.cost_monthly ?? 0 },
+  ];
+
+  const ecsServiceColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Service', render: s => s.resource_name ?? s.resource_id, sortValue: s => s.resource_name ?? '' },
+    { key: 'cluster', header: 'Cluster', render: s => ecsClusterNameByArn.get(s.relationships?.clusterArn as string) ?? (s.relationships?.clusterArn as string) ?? '—', sortValue: s => (s.relationships?.clusterArn as string) ?? '' },
+    { key: 'running', header: 'Running / Desired', render: s => `${(s.metadata?.runningCount as number) ?? 0} / ${(s.metadata?.desiredCount as number) ?? 0}` },
+    { key: 'region', header: 'Region', render: s => s.region ?? '—', sortValue: s => s.region ?? '' },
+    { key: 'status', header: 'Status', render: s => <Badge>{s.state ?? s.status}</Badge>, sortValue: s => s.state ?? s.status },
+  ];
+
+  const ecsTaskColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Task', render: t => t.resource_name ?? t.resource_id, sortValue: t => t.resource_name ?? '' },
+    { key: 'cluster', header: 'Cluster', render: t => ecsClusterNameByArn.get(t.relationships?.clusterArn as string) ?? (t.relationships?.clusterArn as string) ?? '—', sortValue: t => (t.relationships?.clusterArn as string) ?? '' },
+    { key: 'region', header: 'Region', render: t => t.region ?? '—', sortValue: t => t.region ?? '' },
+    { key: 'status', header: 'Status', render: t => <Badge>{t.state ?? t.status}</Badge>, sortValue: t => t.state ?? t.status },
+  ];
+
+  const nodeColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Node', render: n => n.resource_name ?? n.resource_id, sortValue: n => n.resource_name ?? '' },
+    { key: 'cluster', header: 'Cluster', render: n => (n.relationships?.clusterName as string) ?? '—', sortValue: n => (n.relationships?.clusterName as string) ?? '' },
+    { key: 'instanceType', header: 'Instance Type', render: n => (n.metadata?.instanceType as string) ?? '—' },
+    { key: 'region', header: 'Region', render: n => n.region ?? '—', sortValue: n => n.region ?? '' },
+    { key: 'status', header: 'Status', render: n => <Badge>{n.state ?? n.status}</Badge>, sortValue: n => n.state ?? n.status },
+  ];
+
+  const totalClusters = ecsClusters.length + eksClusters.length;
 
   return (
     <div>
       <FilterBar title="EKS / ECS Clusters" breadcrumb={<Breadcrumb />} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Total Clusters" value={String(clusters.length)} />
-        <StatCard label="EKS Clusters" value={String(clusters.filter(c => c.resource_type_key === 'eks_cluster').length)} />
-        <StatCard label="ECS Clusters" value={String(clusters.filter(c => c.resource_type_key === 'ecs_cluster').length)} />
-        <StatCard label="Nodes / Services" value={String(eksNodes.length + ecsServices.length)} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+        <StatCard label="Total Clusters" value={String(totalClusters)} />
+        <StatCard label="ECS Clusters" value={String(ecsClusters.length)} />
+        <StatCard label="ECS Services" value={String(ecsServices.length)} />
+        <StatCard label="EKS Clusters" value={String(eksClusters.length)} />
+        <StatCard label="Nodes" value={String(eksNodes.length)} />
       </div>
 
-      <p className="text-xs text-slate-400 mb-3">
-        Est. Monthly Cost is each cluster resource's own synced cost figure — this rebuild doesn't compute a
-        proportional EC2-to-cluster cost allocation the way the previous version did, so it will read "no cost
-        data" for accounts without a direct per-resource cost sync yet.
-      </p>
+      <div className="flex gap-1 text-sm flex-wrap mb-4">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
 
-      <DataTable columns={columns} rows={clusters} rowKey={c => c.id} onRowClick={setSelected} emptyMessage="No EKS or ECS clusters discovered yet." />
-
-      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mt-6 mb-2">ECS Tasks</h3>
-      <DataTable
-        columns={[
-          { key: 'name', header: 'Task', render: t => t.resource_name ?? t.resource_id, sortValue: t => t.resource_name ?? '' },
-          { key: 'cluster', header: 'Cluster', render: t => (t.relationships?.clusterArn as string) ?? '—' },
-          { key: 'region', header: 'Region', render: t => t.region ?? '—', sortValue: t => t.region ?? '' },
-          { key: 'status', header: 'Status', render: t => <Badge>{t.state ?? t.status}</Badge>, sortValue: t => t.state ?? t.status },
-        ]}
-        rows={ecsTasks}
-        rowKey={t => t.id}
-        emptyMessage="No ECS tasks discovered yet."
-      />
+      {tab === 'ECS Clusters' && (
+        <DataTable columns={ecsClusterColumns} rows={ecsClusters} rowKey={c => c.id} onRowClick={setSelected} emptyMessage="No ECS clusters discovered yet." />
+      )}
+      {tab === 'EKS Clusters' && (
+        <>
+          <p className="text-xs text-slate-400 mb-3">
+            Est. Monthly Cost is each cluster resource's own synced cost figure — this doesn't compute a
+            proportional EC2-to-cluster cost allocation, so it will read "no cost data" for accounts without a
+            direct per-resource cost sync yet.
+          </p>
+          <DataTable columns={eksClusterColumns} rows={eksClusters} rowKey={c => c.id} onRowClick={setSelected} emptyMessage="No EKS clusters discovered yet." />
+        </>
+      )}
+      {tab === 'ECS Services' && (
+        <DataTable columns={ecsServiceColumns} rows={ecsServices} rowKey={s => s.id} onRowClick={setSelected} emptyMessage="No ECS services discovered yet." />
+      )}
+      {tab === 'ECS Tasks' && (
+        <DataTable columns={ecsTaskColumns} rows={ecsTasks} rowKey={t => t.id} onRowClick={setSelected} emptyMessage="No ECS tasks discovered yet." />
+      )}
+      {tab === 'Nodes' && (
+        <DataTable columns={nodeColumns} rows={eksNodes} rowKey={n => n.id} onRowClick={setSelected} emptyMessage="No EKS nodes discovered yet." />
+      )}
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mt-5">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Kubernetes Workloads</h3>
+        <p className="text-xs text-slate-400 mb-2">Covers the Namespaces, Deployments, Pods and Helm Releases submenu items — none are buildable yet because no Kubernetes API access to any cluster exists in this build (that needs a control-plane connection per EKS cluster, not just the AWS API).</p>
         <ul className="text-xs text-slate-400 flex flex-col gap-1.5">
           {k8sWorkloads.map(w => (
             <li key={w.label}><span className="text-slate-500 dark:text-slate-400 font-medium">{w.label}:</span> {w.reason}</li>
