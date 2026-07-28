@@ -67,7 +67,7 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: 'AWS Accounts', icon: '☁', to: ACCOUNTS,
+    label: 'AWS Accounts', icon: '☁ ACCOUNTS', to: ACCOUNTS,
     children: [
       { label: 'Account Inventory', to: ACCOUNTS, real: true },
       { label: 'Account Explorer', to: ACCOUNTS, real: true },
