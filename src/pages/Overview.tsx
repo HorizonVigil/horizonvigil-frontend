@@ -6,9 +6,10 @@ import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { BarChart } from '../components/charts/BarChart';
+import { useNavigate } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
-import { api, type OverviewDashboard, type ActivityEntry } from '../lib/api';
+import { api, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -17,28 +18,40 @@ function money(n: number): string {
 export function Overview() {
   const { folders, projects } = useOrg();
   const { refreshToken } = useFilters();
+  const navigate = useNavigate();
   const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
   const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
   const [costByService, setCostByService] = useState<Record<string, number>>({});
   const [forecast, setForecast] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
 
   const load = useCallback(async () => {
-    const [dash, resourcesDash, costAnalytics, costForecast, activityRes] = await Promise.all([
+    const [dash, resourcesDash, costAnalytics, costForecast, activityRes, quickActionsRes, favoritesRes] = await Promise.all([
       api.getOverviewDashboard(),
       api.getResourcesDashboard(),
       api.getCostAnalytics(),
       api.getCostForecast(),
       api.getRecentActivity(1, 8),
+      api.getQuickActions(),
+      api.getFavorites(),
     ]);
     setDashboard(dash);
     setResourceTrend(resourcesDash.trend30d);
     setCostByService(costAnalytics.byService);
     setForecast(costForecast.projectedTotal);
     setActivity(activityRes.items);
+    setQuickActions(quickActionsRes.actions);
+    setFavorites(favoritesRes.favorites);
   }, []);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+
+  async function removeFavorite(id: string) {
+    await api.removeFavorite(id);
+    setFavorites(prev => prev.filter(f => f.id !== id));
+  }
 
   const topServices = Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 6);
 
@@ -59,6 +72,24 @@ export function Overview() {
         <StatCard label="Cost (MTD)" value={money(dashboard?.cost.monthToDate ?? 0)} />
         <StatCard label="Forecasted Cost" value={forecast !== null ? money(forecast) : '—'} caption="linear projection" />
       </div>
+
+      {quickActions.length > 0 && (
+        <div className="mb-5">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Quick Actions</h3>
+          <div className="flex flex-wrap gap-2">
+            {quickActions.map(qa => (
+              <button
+                key={qa.key}
+                onClick={() => navigate(qa.path)}
+                title={qa.description}
+                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                {qa.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
@@ -99,6 +130,21 @@ export function Overview() {
             )}
           </ul>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Favorites</h3>
+        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+          {favorites.map(f => (
+            <li key={f.id} className="flex items-center justify-between py-2 text-sm">
+              <button onClick={() => navigate(f.path)} className="text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">{f.type}</span> {f.label}
+              </button>
+              <button onClick={() => void removeFavorite(f.id)} className="text-xs text-slate-400 hover:text-red-500">Remove</button>
+            </li>
+          ))}
+          {favorites.length === 0 && <li className="py-2 text-sm text-slate-400">No favorites yet — pin items from other pages to find them here quickly.</li>}
+        </ul>
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">

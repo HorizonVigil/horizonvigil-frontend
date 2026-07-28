@@ -24,6 +24,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
 export function Reports() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledReport[]>([]);
+  const [exportCenter, setExportCenter] = useState<ReportRow[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('cost');
@@ -33,12 +34,14 @@ export function Reports() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ items }, { items: sched }] = await Promise.all([
+    const [{ items }, { items: sched }, { items: delivered }] = await Promise.all([
       api.getReports({ limit: 200 }),
       api.getScheduledReports({ limit: 100 }),
+      api.getExportCenter({ status: 'delivered', limit: 50 }),
     ]);
     setReports(items);
     setScheduled(sched);
+    setExportCenter(delivered);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -134,6 +137,20 @@ export function Reports() {
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Reports by Category</h3>
         <Donut data={CATEGORIES.map(c => ({ label: CATEGORY_LABELS[c], value: byCategory[c] ?? 0 })).filter(d => d.value > 0)} />
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Export Center</h3>
+        <p className="text-xs text-slate-400 mb-3">Every report that's finished generating and is ready to download, in one place.</p>
+        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+          {exportCenter.map(r => (
+            <li key={r.id} className="flex items-center justify-between py-2 text-sm">
+              <span className="text-slate-700 dark:text-slate-200">{r.name} <Badge tone="neutral">{CATEGORY_LABELS[r.category as Category] ?? r.category}</Badge></span>
+              <button onClick={() => void download(r.id)} disabled={busyId === r.id} className="text-brand-600 dark:text-brand-400 hover:underline text-xs disabled:opacity-50">{busyId === r.id ? 'Downloading…' : `Download ${r.format.toUpperCase()}`}</button>
+            </li>
+          ))}
+          {exportCenter.length === 0 && <li className="py-2 text-sm text-slate-400">No delivered reports yet — generated reports show up here once ready.</li>}
+        </ul>
       </div>
 
       <div className="flex justify-end mb-3">
