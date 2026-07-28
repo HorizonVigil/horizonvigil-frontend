@@ -27,7 +27,7 @@ export function AppRail() {
       </div>
 
       {/* Navigation */}
-     <nav className="sidebar-scroll flex-1 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
         <div className="flex flex-col gap-1">
           {NAV_MODULES.map((mod) =>
             mod.to ? (
