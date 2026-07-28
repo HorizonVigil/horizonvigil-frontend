@@ -10,7 +10,7 @@ export function AppRail() {
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
       className={`${
-        expanded ? 'w-30' : 'w-16'
+        expanded ? 'w-30' : 'w-5'
       } h-screen sticky top-0 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all duration-300`}
     >
       {/* Header */}
