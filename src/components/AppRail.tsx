@@ -6,13 +6,19 @@ export function AppRail() {
   const [expanded, setExpanded] = useState<boolean>(false);
 
   return (
-    <aside
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
-      className={`${
-        expanded ? 'w-64' : 'w-16'
-      } h-screen sticky top-0 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all duration-300`}
-    >
+    <>
+      {/* Permanent spacer — the rail itself is `fixed` below so it can grow
+          on hover without pushing Sidebar/main content sideways every time
+          the mouse crosses it. Without this, expanding to w-64 reflowed the
+          entire page layout on every hover. */}
+      <div className="w-16 h-screen shrink-0" aria-hidden="true" />
+      <aside
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
+        className={`${
+          expanded ? 'w-64 shadow-xl' : 'w-16'
+        } fixed left-0 top-0 z-30 h-screen flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all duration-300`}
+      >
       {/* Header */}
       <div className="h-16 flex items-center px-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
         <div className="h-9 w-9 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
@@ -81,6 +87,7 @@ export function AppRail() {
           )}
         </div>
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }

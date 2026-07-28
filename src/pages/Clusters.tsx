@@ -15,19 +15,36 @@ export function Clusters() {
   // groups the way the old API did) — see getEksNodes() in api.ts.
   const [eksNodes, setEksNodes] = useState<CloudResource[]>([]);
   const [ecsServices, setEcsServices] = useState<CloudResource[]>([]);
+  const [ecsTasks, setEcsTasks] = useState<CloudResource[]>([]);
+  const [k8sWorkloads, setK8sWorkloads] = useState<{ label: string; reason: string }[]>([]);
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
-    const [eksRes, ecsClusterRes, nodesRes, svcRes] = await Promise.all([
+    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, namespaces, deployments, pods, helmReleases] = await Promise.all([
       api.getEksClusters({ connectionId, limit: 200 }),
       api.getEcsClusters({ connectionId, limit: 200 }),
       api.getEksNodes({ connectionId, limit: 500 }),
       api.getEcsServices({ connectionId, limit: 500 }),
+      api.getEcsTasks({ connectionId, limit: 500 }),
+      api.getEksNamespaces(),
+      api.getEksDeployments(),
+      api.getEksPods(),
+      api.getEksHelmReleases(),
     ]);
     setClusters([...eksRes.items, ...ecsClusterRes.items]);
     setEksNodes(nodesRes.items);
     setEcsServices(svcRes.items);
+    setEcsTasks(taskRes.items);
+    // These four always come back { items: [], notIntegrated: true, reason } — no
+    // Kubernetes API access to any cluster exists in this build. Shown honestly
+    // below rather than as silent empty tables with no explanation.
+    setK8sWorkloads([
+      { label: 'Namespaces', reason: namespaces.reason },
+      { label: 'Deployments', reason: deployments.reason },
+      { label: 'Pods', reason: pods.reason },
+      { label: 'Helm Releases', reason: helmReleases.reason },
+    ]);
   }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -70,6 +87,28 @@ export function Clusters() {
       </p>
 
       <DataTable columns={columns} rows={clusters} rowKey={c => c.id} onRowClick={setSelected} emptyMessage="No EKS or ECS clusters discovered yet." />
+
+      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mt-6 mb-2">ECS Tasks</h3>
+      <DataTable
+        columns={[
+          { key: 'name', header: 'Task', render: t => t.resource_name ?? t.resource_id, sortValue: t => t.resource_name ?? '' },
+          { key: 'cluster', header: 'Cluster', render: t => (t.relationships?.clusterArn as string) ?? '—' },
+          { key: 'region', header: 'Region', render: t => t.region ?? '—', sortValue: t => t.region ?? '' },
+          { key: 'status', header: 'Status', render: t => <Badge>{t.state ?? t.status}</Badge>, sortValue: t => t.state ?? t.status },
+        ]}
+        rows={ecsTasks}
+        rowKey={t => t.id}
+        emptyMessage="No ECS tasks discovered yet."
+      />
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mt-5">
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Kubernetes Workloads</h3>
+        <ul className="text-xs text-slate-400 flex flex-col gap-1.5">
+          {k8sWorkloads.map(w => (
+            <li key={w.label}><span className="text-slate-500 dark:text-slate-400 font-medium">{w.label}:</span> {w.reason}</li>
+          ))}
+        </ul>
+      </div>
 
       <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.resource_name ?? ''}>
         {selected && (

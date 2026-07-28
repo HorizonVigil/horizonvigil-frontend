@@ -7,7 +7,7 @@ import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution } from '../lib/api';
 
-type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'webhooks' | 'integrations' | 'history';
+type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
 
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -15,6 +15,7 @@ export function Automation() {
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
+  const [remediation, setRemediation] = useState<AutomationExecution[]>([]);
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [history, setHistory] = useState<AutomationExecution[]>([]);
@@ -22,11 +23,13 @@ export function Automation() {
   const [newSecret, setNewSecret] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [r, w, s, h, i, e] = await Promise.all([
+    const [r, w, s, rem, h, i, e] = await Promise.all([
       api.getRunbooks({ limit: 100 }), api.getWorkflows({ limit: 100 }), api.getScheduledJobs({ limit: 100 }),
+      api.getRemediationHistory({ limit: 100 }),
       api.getWebhooks({ limit: 100 }), api.getAutomationIntegrations({ limit: 100 }), api.getExecutionHistory({ limit: 100 }),
     ]);
-    setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items); setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
+    setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items); setRemediation(rem.items);
+    setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -118,9 +121,9 @@ export function Automation() {
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
-          {(['runbooks', 'workflows', 'scheduled', 'webhooks', 'integrations', 'history'] as Tab[]).map(t => (
+          {(['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-              {t === 'runbooks' ? 'Runbooks' : t === 'workflows' ? 'Workflows' : t === 'scheduled' ? 'Scheduled Jobs' : t === 'webhooks' ? 'Webhooks' : t === 'integrations' ? 'Integrations' : 'Execution History'}
+              {t === 'runbooks' ? 'Runbooks' : t === 'workflows' ? 'Workflows' : t === 'scheduled' ? 'Scheduled Jobs' : t === 'remediation' ? 'Remediation' : t === 'webhooks' ? 'Webhooks' : t === 'integrations' ? 'Integrations' : 'Execution History'}
             </button>
           ))}
         </div>
@@ -132,6 +135,7 @@ export function Automation() {
       {tab === 'runbooks' && <DataTable columns={runbookColumns} rows={runbooks} rowKey={r => r.id} emptyMessage="No runbooks yet." />}
       {tab === 'workflows' && <DataTable columns={workflowColumns} rows={workflows} rowKey={w => w.id} emptyMessage="No workflows yet." />}
       {tab === 'scheduled' && <DataTable columns={jobColumns} rows={scheduledJobs} rowKey={j => j.id} emptyMessage="No scheduled jobs yet." />}
+      {tab === 'remediation' && <DataTable columns={historyColumns} rows={remediation} rowKey={e => e.id} emptyMessage="No remediation has run yet — these come from Cost Optimization/Vulnerability Management actions routed through automation." />}
       {tab === 'webhooks' && <DataTable columns={webhookColumns} rows={webhooks} rowKey={w => w.id} emptyMessage="No webhooks yet." />}
       {tab === 'integrations' && <DataTable columns={integrationColumns} rows={integrations} rowKey={i => i.id} emptyMessage="No integrations configured." />}
       {tab === 'history' && <DataTable columns={historyColumns} rows={history} rowKey={e => e.id} emptyMessage="No automation has run yet." />}

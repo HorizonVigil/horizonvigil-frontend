@@ -11,6 +11,16 @@ import { api, type ReportRow, type ScheduledReport } from '../lib/api';
 const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance'] as const;
 type Category = typeof CATEGORIES[number];
 
+// Matches the sidebar's wording (Executive/Cost/Security/Compliance/Inventory Reports) —
+// the backend's actual category values are the plainer names on the right.
+const CATEGORY_LABELS: Record<Category, string> = {
+  cost: 'Cost',
+  security: 'Security',
+  resource: 'Inventory',
+  operational: 'Executive',
+  compliance: 'Compliance',
+};
+
 export function Reports() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledReport[]>([]);
@@ -78,7 +88,7 @@ export function Reports() {
 
   const columns: Column<ReportRow>[] = [
     { key: 'name', header: 'Report', render: r => r.name, sortValue: r => r.name },
-    { key: 'category', header: 'Category', render: r => <Badge tone="neutral">{r.category}</Badge>, sortValue: r => r.category },
+    { key: 'category', header: 'Category', render: r => <Badge tone="neutral">{CATEGORY_LABELS[r.category as Category] ?? r.category}</Badge>, sortValue: r => r.category },
     { key: 'format', header: 'Format', render: r => r.format.toUpperCase(), sortValue: r => r.format },
     {
       key: 'status', header: 'Status', render: r => (
@@ -102,7 +112,7 @@ export function Reports() {
 
   const scheduledColumns: Column<ScheduledReport>[] = [
     { key: 'name', header: 'Name', render: s => s.name, sortValue: s => s.name },
-    { key: 'category', header: 'Category', render: s => <Badge tone="neutral">{s.report_category}</Badge>, sortValue: s => s.report_category },
+    { key: 'category', header: 'Category', render: s => <Badge tone="neutral">{CATEGORY_LABELS[s.report_category as Category] ?? s.report_category}</Badge>, sortValue: s => s.report_category },
     { key: 'cadence', header: 'Cadence', render: s => s.cadence.replace('_', ' '), sortValue: s => s.cadence },
     { key: 'format', header: 'Format', render: s => s.format.toUpperCase(), sortValue: s => s.format },
     { key: 'nextRun', header: 'Next Run', render: s => s.next_run_at ? new Date(s.next_run_at).toLocaleDateString() : '—', sortValue: s => s.next_run_at ?? '' },
@@ -123,7 +133,7 @@ export function Reports() {
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Reports by Category</h3>
-        <Donut data={CATEGORIES.map(c => ({ label: c, value: byCategory[c] ?? 0 })).filter(d => d.value > 0)} />
+        <Donut data={CATEGORIES.map(c => ({ label: CATEGORY_LABELS[c], value: byCategory[c] ?? 0 })).filter(d => d.value > 0)} />
       </div>
 
       <div className="flex justify-end mb-3">
@@ -147,7 +157,7 @@ export function Reports() {
           </label>
           <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Category</span>
             <select value={category} onChange={e => setCategory(e.target.value as Category)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Format</span>
