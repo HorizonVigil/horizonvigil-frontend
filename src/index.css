@@ -36,7 +36,7 @@ body {
 }
 
 .apprail-scroll::-webkit-scrollbar-thumb {
-  @apply bg-slate-400 dark:bg-slate-600 rounded-full;
+ @apply bg-gray-300 rounded-full;
 }
 
 .apprail-scroll {
