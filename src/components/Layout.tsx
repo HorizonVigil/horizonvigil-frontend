@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router-dom';
+import { AppRail } from './AppRail';
 import { Sidebar } from './Sidebar';
 import { ChatWidget } from './ChatWidget';
 import { useTheme } from '../lib/theme';
@@ -7,6 +8,7 @@ export function Layout() {
   const { theme, toggleTheme } = useTheme();
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950">
+      <AppRail />
       <Sidebar />
       <div className="flex-1 min-w-0">
         <div className="flex justify-end px-6 pt-3">

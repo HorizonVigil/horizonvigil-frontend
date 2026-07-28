@@ -322,3 +322,20 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
 ];
+
+/** True if `pathname` belongs to this module — its own landing page or any real child route. */
+export function moduleMatchesPath(mod: NavModule, pathname: string): boolean {
+  if (mod.to && pathname.startsWith(mod.to)) return true;
+  return mod.children.some(c => c.to && pathname.startsWith(c.to));
+}
+
+/**
+ * Which of the 15 domain apps the current route belongs to — the single
+ * source of truth for both AppRail (which icon is "active") and Sidebar
+ * (which module's own sub-nav to render). Falls back to Overview so the
+ * shell never renders with no module selected (e.g. on a route no module
+ * claims, though App.tsx's catch-all already sends unknown paths to /overview).
+ */
+export function findActiveModule(pathname: string): NavModule {
+  return NAV_MODULES.find(m => moduleMatchesPath(m, pathname)) ?? NAV_MODULES[0];
+}
