@@ -6,6 +6,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type CostRecommendation, type RecommendationListParams, type CostAnomaly } from '../lib/api';
 
 function money(n: number): string {
@@ -21,7 +22,7 @@ export function CostOptimization() {
   // tab and (since there's no single "everything" endpoint anymore) the
   // top stat cards' High Priority count.
   const [savingsOpportunities, setSavingsOpportunities] = useState<CostRecommendation[]>([]);
-  const [tab, setTab] = useState<typeof TABS[number]>('Overview');
+  const [tab, setTab] = useTabParam<typeof TABS[number]>(TABS, 'Overview');
   const [tabRows, setTabRows] = useState<CostRecommendation[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
   const [selected, setSelected] = useState<CostRecommendation | null>(null);

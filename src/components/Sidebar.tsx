@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
-import { findActiveModule } from '../lib/navConfig';
+import { findActiveModule, isChildActive } from '../lib/navConfig';
 
 /**
  * This domain's OWN sidebar — scoped to whichever module AppRail says is
@@ -117,8 +117,11 @@ export function Sidebar() {
             ) : child.real && child.to ? (
               <NavLink
                 to={child.to}
-                end
-                className={({ isActive }) => `block truncate rounded-md px-2 py-1.5 text-sm ${isActive ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                // NavLink's own isActive only looks at pathname — most siblings
+                // in a module now share one pathname with different ?tab=
+                // values, so highlighting is computed manually via isChildActive
+                // (pathname + tab query param) instead of the isActive callback.
+                className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, location.pathname, location.search) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 {child.label}
               </NavLink>

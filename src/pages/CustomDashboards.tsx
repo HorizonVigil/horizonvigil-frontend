@@ -3,15 +3,17 @@ import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type CustomDashboard, type DashboardWidgetCatalogEntry } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 type Tab = 'mine' | 'shared' | 'templates' | 'widgets';
+const TAB_KEYS: Tab[] = ['mine', 'shared', 'templates', 'widgets'];
 
 export function CustomDashboards() {
   const { user } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [tab, setTab] = useState<Tab>('mine');
+  const [tab, setTab] = useTabParam<Tab>(TAB_KEYS, 'mine');
   const [mine, setMine] = useState<CustomDashboard[]>([]);
   const [shared, setShared] = useState<CustomDashboard[]>([]);
   const [templates, setTemplates] = useState<CustomDashboard[]>([]);

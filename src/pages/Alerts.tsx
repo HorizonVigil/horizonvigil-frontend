@@ -8,6 +8,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters } from '../lib/filterContext';
+import { useTabParam } from '../lib/useTabParam';
 import {
   api,
   type AlertRow, type AlertRule, type NotificationChannel, type EscalationPolicy, type MaintenanceWindow,
@@ -35,6 +36,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'history', label: 'Alert History' },
   { key: 'maintenance', label: 'Maintenance Windows' },
 ];
+const TAB_KEYS = TABS.map((t) => t.key);
 
 interface EscalationStepDraft { afterMinutes: number; channelId: string }
 
@@ -53,7 +55,7 @@ export function Alerts() {
   const { account, connections, refreshToken } = useFilters();
   const { confirm, dialog: confirmDialog } = useConfirm();
 
-  const [activeTab, setActiveTab] = useState<Tab>('active');
+  const [activeTab, setActiveTab] = useTabParam<Tab>(TAB_KEYS, 'active');
   const [activeAlerts, setActiveAlerts] = useState<AlertRow[]>([]);
   const [historyAlerts, setHistoryAlerts] = useState<AlertRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);

@@ -6,6 +6,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type CloudResource } from '../lib/api';
 
 // One tab per real AWS resource type the sidebar promises (ECS Clusters, ECS
@@ -24,7 +25,7 @@ function costCell(c: CloudResource) {
 
 export function Clusters() {
   const { account, refreshToken } = useFilters();
-  const [tab, setTab] = useState<Tab>('ECS Clusters');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'ECS Clusters');
   const [ecsClusters, setEcsClusters] = useState<CloudResource[]>([]);
   const [eksClusters, setEksClusters] = useState<CloudResource[]>([]);
   // The containers domain exposes individual EKS nodes (not aggregated node

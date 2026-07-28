@@ -9,6 +9,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type CloudConnection, type AccountSummary, type CrossAccountRole } from '../lib/api';
 
 const TABS = ['Inventory', 'Organizations', 'Cross-Account Roles', 'Credentials', 'Sync Status', 'Health'] as const;
@@ -22,7 +23,7 @@ export function AwsAccounts() {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { syncStates, startSync } = useSync();
-  const [tab, setTab] = useState<Tab>('Inventory');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Inventory');
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
 

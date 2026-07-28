@@ -5,14 +5,16 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution } from '../lib/api';
 
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
+const TAB_KEYS: Tab[] = ['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'];
 type Editable = Runbook | Workflow | ScheduledJob | Webhook;
 
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [tab, setTab] = useState<Tab>('runbooks');
+  const [tab, setTab] = useTabParam<Tab>(TAB_KEYS, 'runbooks');
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
