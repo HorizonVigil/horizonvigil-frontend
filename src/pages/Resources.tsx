@@ -8,6 +8,7 @@ import { LineChart } from '../components/charts/LineChart';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { Modal } from '../components/Modal';
 import { useTheme } from '../lib/theme';
 import { categoryColor, categoricalColor, CHROME, STATUS, pick } from '../components/charts/palette';
 import { useFilters } from '../lib/filterContext';
@@ -156,6 +157,25 @@ export function Resources() {
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Tags Explorer
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagKeys, setTagKeys] = useState<{ key: string; resourceCount: number; sampleValues: string[] }[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
+
+  // Dependency Graph (opened from the resource Drawer)
+  const [graph, setGraph] = useState<{ nodes: { id: string; resourceId: string; label: string | null; resourceTypeKey: string; category: string }[]; edges: { from: string; to: string; relation: string }[]; hops: number } | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+
+  // Bulk Operations
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkTagKey, setBulkTagKey] = useState('');
+  const [bulkTagValue, setBulkTagValue] = useState('');
+  const [bulkOperation, setBulkOperation] = useState<'add_tag' | 'remove_tag'>('add_tag');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
+
   // ?account=<id> (e.g. "View all resources for this account" on the account
   // detail page) sets the *global* account filter once on arrival, so it's
   // reflected consistently in the top bar rather than a page-local override.
@@ -221,6 +241,58 @@ export function Resources() {
   }, [account]);
   useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
 
+  // Tags Explorer — fetched on demand the first time the section is opened,
+  // then refreshed whenever it's open and something else triggers a refresh.
+  useEffect(() => {
+    if (!tagsOpen) return;
+    setTagsLoading(true);
+    void api.getResourceTags().then(r => setTagKeys(r.keys)).finally(() => setTagsLoading(false));
+  }, [tagsOpen, refreshToken]);
+
+  // Clear any previously-loaded graph when the drawer's target resource changes,
+  // so switching resources doesn't briefly show the last one's dependency graph.
+  useEffect(() => { setGraph(null); }, [selected?.id]);
+
+  async function loadDependencyGraph(resourceId: string) {
+    setGraphLoading(true);
+    setGraph(null);
+    try {
+      const g = await api.getDependencyGraph(resourceId);
+      setGraph(g);
+    } finally {
+      setGraphLoading(false);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function submitBulkOperation(e: React.FormEvent) {
+    e.preventDefault();
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const res = await api.bulkTagResources({
+        resourceIds: [...selectedIds],
+        operation: bulkOperation,
+        tagKey: bulkTagKey.trim(),
+        tagValue: bulkOperation === 'add_tag' ? bulkTagValue.trim() : undefined,
+      });
+      setBulkResult(`Updated ${res.updatedCount} of ${res.requestedCount} selected resources.`);
+      setSelectedIds(new Set());
+      await load();
+    } catch (err) {
+      setBulkResult(err instanceof Error ? err.message : 'Bulk operation failed.');
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const catalogByKey = useMemo(() => new Map(catalog.map(c => [c.key, c])), [catalog]);
   const liveTypes = catalog.filter(c => c.scanner_status === 'live').length;
   // A service with zero live-scanned types will always return 0 rows if
@@ -269,6 +341,11 @@ export function Resources() {
   const trendDeleted = trend.reduce((s, p) => s + p.deleted, 0);
 
   const columns: Column<CloudResource>[] = [
+    ...(bulkMode ? [{
+      key: 'select', header: '', render: (r: CloudResource) => (
+        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} onClick={e => e.stopPropagation()} />
+      ),
+    } as Column<CloudResource>] : []),
     { key: 'displayName', header: 'Service', render: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key, sortValue: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key },
     { key: 'account', header: 'Account', render: r => <span className="text-xs">{accountLabel(r.connection_id)}</span>, sortValue: r => accountLabel(r.connection_id) },
     { key: 'resourceId', header: 'Resource ID', render: r => <span className="font-mono text-xs">{r.resource_id.length > 40 ? `${r.resource_id.slice(0, 37)}…` : r.resource_id}</span>, sortValue: r => r.resource_id },
@@ -349,7 +426,43 @@ export function Resources() {
         <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
       </div>
 
-      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+        <button onClick={() => setTagsOpen(o => !o)} className="w-full flex items-center justify-between text-left">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Tags Explorer</h3>
+          <span className="text-xs text-slate-400">{tagsOpen ? '▾ Hide' : '▸ Show'}</span>
+        </button>
+        {tagsOpen && (
+          tagsLoading ? <p className="text-sm text-slate-400 mt-3">Loading…</p> : (
+            <div className="mt-3 flex flex-col gap-2">
+              {tagKeys.map(t => (
+                <div key={t.key} className="flex items-center justify-between border-b last:border-0 border-slate-100 dark:border-slate-800/60 py-1.5 text-sm">
+                  <span className="text-slate-700 dark:text-slate-200 font-medium">{t.key}</span>
+                  <span className="text-xs text-slate-400 truncate max-w-md">{t.sampleValues.slice(0, 4).join(', ')}{t.sampleValues.length > 4 ? '…' : ''}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">{t.resourceCount} resources</span>
+                </div>
+              ))}
+              {tagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
+            </div>
+          )
+        )}
+      </div>
+
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
+        <div className="flex items-center gap-2">
+          {bulkMode && selectedIds.size > 0 && (
+            <button onClick={() => { setBulkResult(null); setBulkModalOpen(true); }} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">
+              Bulk Tag {selectedIds.size} selected
+            </button>
+          )}
+          <button
+            onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}
+            className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          >
+            {bulkMode ? 'Exit Bulk Operations' : 'Bulk Operations'}
+          </button>
+        </div>
+      </div>
       <div className="flex flex-wrap items-end gap-3 mb-3">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
@@ -424,12 +537,65 @@ export function Resources() {
               </div>
             )}
             <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="font-medium text-slate-700 dark:text-slate-200">Dependency Graph</h4>
+                {!graph && !graphLoading && (
+                  <button onClick={() => void loadDependencyGraph(selected.id)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Load</button>
+                )}
+              </div>
+              {graphLoading && <p className="text-xs text-slate-400">Loading…</p>}
+              {graph && (
+                <div className="text-xs">
+                  <p className="text-slate-400 mb-2">1-hop neighbors from this resource's stored relationships.</p>
+                  {graph.nodes.length <= 1 ? (
+                    <p className="text-slate-400">No related resources found for this one yet.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {graph.edges.map((e, i) => {
+                        const target = graph.nodes.find(n => n.id === e.to);
+                        return (
+                          <li key={i} className="flex items-center justify-between border-b last:border-0 border-slate-100 dark:border-slate-800/60 py-1">
+                            <span className="text-slate-600 dark:text-slate-300">{target?.label ?? target?.resourceId ?? e.to}</span>
+                            <span className="text-slate-400">{e.relation}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            <div>
               <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-1.5">Raw Metadata</h4>
               <pre className="text-xs bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify(selected.metadata, null, 2)}</pre>
             </div>
           </div>
         )}
       </Drawer>
+
+      <Modal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} title={`Bulk Tag ${selectedIds.size} Resources`}>
+        <form onSubmit={submitBulkOperation} className="flex flex-col gap-3">
+          <p className="text-xs text-slate-400">Only tag add/remove is supported — CloudOps360 has read-only AWS access, so it can't start, stop, or terminate resources in bulk.</p>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Operation</span>
+            <select value={bulkOperation} onChange={e => setBulkOperation(e.target.value as 'add_tag' | 'remove_tag')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="add_tag">Add tag</option>
+              <option value="remove_tag">Remove tag</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Tag key</span>
+            <input required value={bulkTagKey} onChange={e => setBulkTagKey(e.target.value)} placeholder="e.g. Owner" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          {bulkOperation === 'add_tag' && (
+            <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Tag value</span>
+              <input required value={bulkTagValue} onChange={e => setBulkTagValue(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            </label>
+          )}
+          {bulkResult && <p className="text-xs text-slate-500 dark:text-slate-400">{bulkResult}</p>}
+          <button type="submit" disabled={bulkBusy} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">
+            {bulkBusy ? 'Applying…' : 'Apply'}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }

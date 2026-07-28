@@ -121,23 +121,27 @@ export function CostManagement() {
     await loadBudgets();
   }
 
-  // Showback by tag — reads from stored cost_snapshots across the whole org
-  // for the selected tag key + date range. There's no backend endpoint that
-  // lists which tag keys exist, so this is a typeahead over common ones
-  // rather than a populated dropdown, and it isn't scoped by the Account
-  // filter (getShowback has no connectionId param).
+  // Allocation / Chargeback / Showback — all three read the same underlying
+  // cost-by-tag aggregation, just with different framing per their real
+  // product meaning (Allocation: neutral breakdown; Chargeback: "amount
+  // owed" per cost center; Showback: visibility-only, non-billing). There's
+  // no backend endpoint that lists which tag keys exist, so this is a
+  // typeahead over common ones rather than a populated dropdown, and none of
+  // the three are scoped by the Account filter (none take a connectionId).
+  const [allocationMode, setAllocationMode] = useState<'allocation' | 'chargeback' | 'showback'>('allocation');
   const [tagKey, setTagKey] = useState('CostCenter');
-  const [showback, setShowback] = useState<CostAllocation | null>(null);
-  const [showbackLoading, setShowbackLoading] = useState(false);
+  const [allocation, setAllocation] = useState<CostAllocation | null>(null);
+  const [allocationLoading, setAllocationLoading] = useState(false);
 
   useEffect(() => {
-    if (!tagKey.trim()) { setShowback(null); return; }
-    setShowbackLoading(true);
+    if (!tagKey.trim()) { setAllocation(null); return; }
+    setAllocationLoading(true);
     const { from, to } = rangeToFromTo(dateRange);
-    void api.getShowback({ tagKey: tagKey.trim(), from, to })
-      .then(setShowback)
-      .finally(() => setShowbackLoading(false));
-  }, [tagKey, dateRange, refreshToken]);
+    const call = allocationMode === 'chargeback' ? api.getChargeback({ tagKey: tagKey.trim(), from, to })
+      : allocationMode === 'showback' ? api.getShowback({ tagKey: tagKey.trim(), from, to })
+      : api.getCostAllocation({ tagKey: tagKey.trim(), from, to });
+    void call.then(setAllocation).finally(() => setAllocationLoading(false));
+  }, [tagKey, dateRange, allocationMode, refreshToken]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,7 +184,7 @@ export function CostManagement() {
   const byRegionEntries = Object.entries(analytics?.byRegion ?? {}).sort(([, a], [, b]) => b - a);
   const totalCost = analytics?.totalCost ?? 0;
   const avgDailyCost = daily.length > 0 ? daily.reduce((sum, d) => sum + d.cost, 0) / daily.length : 0;
-  const showbackTotal = showback?.totalCost ?? 0;
+  const allocationTotal = allocation?.totalCost ?? 0;
 
   const anomalyColumns: Column<CostAnomaly>[] = [
     { key: 'service', header: 'Service', render: a => a.service, sortValue: a => a.service },
@@ -288,7 +292,13 @@ export function CostManagement() {
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Showback by Tag</h3>
+          <div className="flex gap-1">
+            {(['allocation', 'chargeback', 'showback'] as const).map(m => (
+              <button key={m} onClick={() => setAllocationMode(m)} className={`text-xs px-2.5 py-1.5 rounded-md ${allocationMode === m ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+                {m === 'allocation' ? 'Cost Allocation' : m === 'chargeback' ? 'Chargeback' : 'Showback'}
+              </button>
+            ))}
+          </div>
           <input
             list="tag-key-suggestions"
             value={tagKey}
@@ -300,23 +310,30 @@ export function CostManagement() {
             {TAG_KEY_SUGGESTIONS.map(k => <option key={k} value={k} />)}
           </datalist>
         </div>
-        {showbackLoading ? (
+        <p className="text-xs text-slate-400 mb-3">
+          {allocationMode === 'chargeback'
+            ? 'Framed as amount owed per cost center — for internal billback, not an actual AWS invoice.'
+            : allocationMode === 'showback'
+            ? 'Visibility only — showback numbers are informational and never billed to a team or cost center.'
+            : 'Neutral cost breakdown by tag value, the same numbers Chargeback and Showback both frame differently.'}
+        </p>
+        {allocationLoading ? (
           <p className="text-sm text-slate-400">Loading…</p>
-        ) : !showback || showback.buckets.length === 0 ? (
+        ) : !allocation || allocation.buckets.length === 0 ? (
           <p className="text-sm text-slate-400">No cost data for this tag key in the selected date range. In AWS, a tag only appears here once it's activated as a cost allocation tag in Billing → Cost Allocation Tags — try CostCenter, Environment, Team, or Project, or type your own.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                <th className="py-2">{showback.tagKey}</th><th className="py-2 text-right">Cost</th><th className="py-2 text-right">% of Total</th>
+                <th className="py-2">{allocation.tagKey}</th><th className="py-2 text-right">{allocationMode === 'chargeback' ? 'Amount Owed' : 'Cost'}</th><th className="py-2 text-right">% of Total</th>
               </tr>
             </thead>
             <tbody>
-              {showback.buckets.map(b => (
+              {allocation.buckets.map(b => (
                 <tr key={b.tagValue} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{b.tagValue}</td>
                   <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(b.totalCost)}</td>
-                  <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{showbackTotal > 0 ? ((b.totalCost / showbackTotal) * 100).toFixed(1) : '0.0'}%</td>
+                  <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{allocationTotal > 0 ? ((b.totalCost / allocationTotal) * 100).toFixed(1) : '0.0'}%</td>
                 </tr>
               ))}
             </tbody>

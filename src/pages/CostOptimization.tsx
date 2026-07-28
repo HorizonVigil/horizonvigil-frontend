@@ -6,13 +6,13 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
-import { api, type CostRecommendation, type RecommendationListParams } from '../lib/api';
+import { api, type CostRecommendation, type RecommendationListParams, type CostAnomaly } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 }
 
-const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'History'] as const;
+const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'History'] as const;
 
 export function CostOptimization() {
   const { account, refreshToken } = useFilters();
@@ -26,6 +26,7 @@ export function CostOptimization() {
   const [tabLoading, setTabLoading] = useState(false);
   const [selected, setSelected] = useState<CostRecommendation | null>(null);
   const [copied, setCopied] = useState(false);
+  const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -44,7 +45,7 @@ export function CostOptimization() {
   // getSavingsPlans, getOptimizationHistory) instead of one list filtered
   // client-side by `category` — so tab switches fetch fresh.
   useEffect(() => {
-    if (tab === 'Overview' || tab === 'Recommendations') { setTabRows([]); return; }
+    if (tab === 'Overview' || tab === 'Recommendations' || tab === 'Cost Anomalies') { setTabRows([]); return; }
     let cancelled = false;
     setTabLoading(true);
     const connectionId = account === 'all' ? undefined : account;
@@ -58,6 +59,21 @@ export function CostOptimization() {
     void call.then(res => { if (!cancelled) setTabRows(res.items); }).finally(() => { if (!cancelled) setTabLoading(false); });
     return () => { cancelled = true; };
   }, [tab, account, refreshToken]);
+
+  useEffect(() => {
+    if (tab !== 'Cost Anomalies') return;
+    let cancelled = false;
+    const connectionId = account === 'all' ? undefined : account;
+    void api.getCostAnomalies({ connectionId, limit: 200 }).then(res => { if (!cancelled) setAnomalies(res.items); });
+    return () => { cancelled = true; };
+  }, [tab, account, refreshToken]);
+
+  async function handleAnomalyStatus(id: string, status: 'acknowledged' | 'resolved') {
+    await api.updateCostAnomaly(id, status);
+    const connectionId = account === 'all' ? undefined : account;
+    const res = await api.getCostAnomalies({ connectionId, limit: 200 });
+    setAnomalies(res.items);
+  }
 
   const potentialMonthly = dashboard?.totalPotentialMonthlySavings ?? 0;
   const potentialAnnual = potentialMonthly * 12;
@@ -111,6 +127,24 @@ export function CostOptimization() {
   };
   const columns: Column<CostRecommendation>[] = tab === 'History' ? [...baseColumns, statusColumn] : [...baseColumns, actionsColumn];
 
+  const anomalyColumns: Column<CostAnomaly>[] = [
+    { key: 'service', header: 'Service', render: a => a.service, sortValue: a => a.service },
+    { key: 'usage_date', header: 'Date', render: a => a.usage_date, sortValue: a => a.usage_date },
+    { key: 'expected_cost', header: 'Expected', render: a => money(a.expected_cost), sortValue: a => a.expected_cost },
+    { key: 'actual_cost', header: 'Actual', render: a => money(a.actual_cost), sortValue: a => a.actual_cost },
+    { key: 'percent_change', header: '% Change', render: a => <span className="text-amber-500 font-medium">+{a.percent_change.toFixed(0)}%</span>, sortValue: a => a.percent_change },
+    { key: 'dollar_impact', header: '$ Impact', render: a => money(a.dollar_impact), sortValue: a => a.dollar_impact },
+    { key: 'status', header: 'Status', render: a => <Badge>{a.status}</Badge>, sortValue: a => a.status },
+    {
+      key: 'actions', header: 'Actions', render: a => (
+        <div className="flex gap-2 text-xs">
+          {a.status === 'open' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'acknowledged'); }} className="text-amber-600 dark:text-amber-400 hover:underline">Acknowledge</button>}
+          {a.status !== 'resolved' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'resolved'); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Resolve</button>}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div>
       <FilterBar title="Cost Optimization" breadcrumb={<Breadcrumb />} />
@@ -139,6 +173,8 @@ export function CostOptimization() {
             <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection on the Cost Management page.</p>
           )}
         </div>
+      ) : tab === 'Cost Anomalies' ? (
+        <DataTable columns={anomalyColumns} rows={anomalies} rowKey={a => a.id} emptyMessage="No anomalies detected — day-over-day service cost spikes >50% will show up here." />
       ) : (
         <>
           <DataTable columns={columns} rows={displayedRows} rowKey={r => r.id} emptyMessage={tab === 'History' ? 'No applied or dismissed recommendations yet.' : 'No recommendations in this category yet.'} />
