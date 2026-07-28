@@ -22,10 +22,11 @@ import { Clusters } from './pages/Clusters';
 import { Monitoring } from './pages/Monitoring';
 import { Alerts } from './pages/Alerts';
 import { Reports } from './pages/Reports';
-import { Integrations } from './pages/Integrations';
 import { UsersGroups } from './pages/UsersGroups';
 import { OrganizationManagement } from './pages/OrganizationManagement';
 import { Settings } from './pages/Settings';
+import { CustomDashboards } from './pages/CustomDashboards';
+import { Automation } from './pages/Automation';
 
 export default function App() {
   return (
@@ -58,10 +59,12 @@ export default function App() {
                         <Route path="/monitoring" element={<Monitoring />} />
                         <Route path="/alerts" element={<Alerts />} />
                         <Route path="/reports" element={<Reports />} />
-                        <Route path="/integrations" element={<Integrations />} />
+                        <Route path="/integrations" element={<Navigate to="/automation" replace />} />
                         <Route path="/users-groups" element={<UsersGroups />} />
                         <Route path="/organization" element={<OrganizationManagement />} />
                         <Route path="/settings" element={<Settings />} />
+                        <Route path="/custom-dashboards" element={<CustomDashboards />} />
+                        <Route path="/automation" element={<Automation />} />
                       </Route>
                     </Route>
                   </Route>

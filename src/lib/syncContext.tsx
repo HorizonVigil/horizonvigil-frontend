@@ -7,10 +7,6 @@ export interface SyncState {
   total: number;
   stepId: string;
   error?: string;
-  /** Discovery itself succeeded, but a secondary step (cost sync) didn't — surfaced
-   * separately from `error` since it shouldn't read as the whole sync having failed
-   * (e.g. AWS Cost Explorer not enabled yet for this account, a one-time AWS Billing
-   * console setting we can't turn on for the user — previously silently swallowed). */
   warning?: string;
 }
 
@@ -22,34 +18,40 @@ interface SyncContextType {
 const SyncContext = createContext<SyncContextType | null>(null);
 
 /**
- * Mounted once at the app root (above the router), so a sync started from
- * AwsAccounts.tsx keeps running to completion even after the user navigates
- * to another page and that component unmounts — the promise chain lives
- * here, not in whichever page triggered it. Without this, navigating away
- * mid-sync didn't actually stop the sync (it's just a JS promise chain that
- * runs to completion regardless), but coming back showed a fresh "Sync Now"
- * button with no memory that one was already running — inviting a second,
- * concurrent sync of the same connection.
+ * Mounted once at the app root so a check started from AwsAccounts.tsx keeps
+ * running even if that component unmounts mid-request.
+ *
+ * This used to drive a multi-step AWS discovery scan (plan -> step*N ->
+ * finalize) against a customer's live AWS account. That scanning engine
+ * isn't part of this rebuild (see docs/about-project.md) — aws-accounts-api
+ * only has a single honest `/test` endpoint that confirms stored credentials
+ * are present and well-formed, no live `sts:GetCallerIdentity` call. This
+ * still exposes the same `{status,done,total,stepId}` shape so call sites
+ * that used to render step progress don't need special-casing, but done/total
+ * are always 0/1 -> 1/1 in one jump since there's only one step now.
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const runningIds = useRef<Set<string>>(new Set());
 
   const startSync = useCallback((connectionId: string) => {
-    if (runningIds.current.has(connectionId)) return; // already running — ignore a duplicate trigger
+    if (runningIds.current.has(connectionId)) return;
     runningIds.current.add(connectionId);
-    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 0, stepId: '' } }));
+    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'test' } }));
 
     (async () => {
       try {
-        await api.runDiscoverySteps(connectionId, (done, total, stepId) => {
-          setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done, total, stepId } }));
-        });
-        const costResult = await api.syncConnectionCost(connectionId).catch(err => ({ ok: false as const, error: (err as Error).message }));
-        await api.generateRecommendations(connectionId).catch(() => {});
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'done', done: 0, total: 0, stepId: '', warning: costResult.error ? `Cost sync: ${costResult.error}` : undefined } }));
+        const result = await api.testAccount(connectionId);
+        setSyncStates(prev => ({
+          ...prev,
+          [connectionId]: {
+            status: 'done', done: 1, total: 1, stepId: '',
+            warning: result.credentialsPresent ? result.message : undefined,
+            error: result.credentialsPresent ? undefined : result.message,
+          },
+        }));
       } catch (err) {
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 0, stepId: '', error: (err as Error).message || 'Sync failed.' } }));
+        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Test failed.' } }));
       } finally {
         runningIds.current.delete(connectionId);
       }
@@ -65,13 +67,10 @@ export function useSync() {
   return ctx;
 }
 
-/** Calls `onComplete` once when any of `connectionIds` transitions out of 'running' — used to refresh a page's data when a background sync (possibly started from elsewhere) finishes. */
+/** Calls `onComplete` once when any of `connectionIds` transitions out of 'running'. */
 export function useSyncCompletion(connectionIds: string[], onComplete: () => void) {
   const { syncStates } = useSync();
   const prevStatus = useRef<Record<string, string | undefined>>({});
-  // Refreshed every render (not just on syncStates changes) so the effect
-  // below always calls the latest onComplete/connectionIds without needing
-  // them in its dependency array — they're new references every render.
   const latest = useRef({ connectionIds, onComplete });
   latest.current = { connectionIds, onComplete };
 

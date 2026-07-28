@@ -33,7 +33,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // by every page that wants an Account filter — every page reads the same
   // list, and it refetches whenever something bumps refreshToken (e.g. the
   // FilterBar's Refresh button, or connecting/disconnecting an account).
-  useEffect(() => { void api.getConnections().then(r => setConnections(r.connections)); }, [refreshToken]);
+  useEffect(() => { void api.getAccounts({ limit: 200 }).then(r => setConnections(r.items)); }, [refreshToken]);
 
   return (
     <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, setRegion, setAccount, setDateRange, refresh }}>

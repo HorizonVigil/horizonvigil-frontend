@@ -11,7 +11,7 @@ import { Drawer } from '../components/Drawer';
 import { useTheme } from '../lib/theme';
 import { categoryColor, categoricalColor, CHROME, STATUS, pick } from '../components/charts/palette';
 import { useFilters } from '../lib/filterContext';
-import { api, type CloudResource, type ResourceCatalogEntry, type ResourceEvent } from '../lib/api';
+import { api, type CloudResource, type ResourceCatalogEntry, type ResourceLifecycleEvent } from '../lib/api';
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
 
@@ -141,26 +141,20 @@ export function Resources() {
   const presetService = routeParams.service ?? '';
   const isWorkspaceView = !!presetCategory;
   const [resources, setResources] = useState<CloudResource[]>([]);
-  const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number>; byRegion: Record<string, number>; byService: Record<string, number>; byResourceType: Record<string, number>; defaultCount: number } | null>(null);
-  const [trend, setTrend] = useState<{ date: string; created: number; deleted: number; net: number }[]>([]);
+  // Org-wide aggregate — the new resources-api only exposes unfiltered totals
+  // (no per-filter aggregate endpoint), so these stat cards/charts reflect
+  // the whole org, not the local category/service/search filters below.
+  const [dashboard, setDashboard] = useState<{ total: number; byCategory: Record<string, number>; byStatus: Record<string, number>; byRegion: Record<string, number>; trend30d: { date: string; created: number; deleted: number }[] } | null>(null);
+  // Flattened from getResourceExplorer() — exact, org-wide per-service counts.
+  const [explorerServices, setExplorerServices] = useState<Record<string, number>>({});
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
-  const [recentEvents, setRecentEvents] = useState<ResourceEvent[]>([]);
+  const [recentEvents, setRecentEvents] = useState<ResourceLifecycleEvent[]>([]);
   const [category, setCategory] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [service, setService] = useState('');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
-  const [cost, setCost] = useState<{ hasCurData: boolean; totalCost: number; dailyCost: { date: string; cost: number }[] } | null>(null);
-
-  // Real per-resource cost only exists once this connection's AWS account has
-  // a Cost & Usage Report set up (see curIngest.ts) — most won't yet, so
-  // `hasCurData: false` is the expected common case, not an error.
-  useEffect(() => {
-    setCost(null);
-    if (!selected) return;
-    void api.getResourceCost(selected.id).then(setCost);
-  }, [selected]);
 
   // ?account=<id> (e.g. "View all resources for this account" on the account
   // detail page) sets the *global* account filter once on arrival, so it's
@@ -196,40 +190,53 @@ export function Resources() {
         region: region === 'all' ? undefined : region, search: search || undefined,
         service: service || undefined, connectionId: account === 'all' ? undefined : account,
       };
-      const [resourcesRes, statsRes, trendRes, eventsRes] = await Promise.all([
-        api.getResources({ ...filters, limit: 500 }),
-        api.getResourceStats(filters),
-        api.getResourceTrend(30, filters),
-        api.getResourceRecentEvents(20, account === 'all' ? undefined : account),
-      ]);
+      // Generous limit so DataTable can page through this client-side, like before.
+      const inventory = await api.getResourceInventory({ ...filters, limit: 200 });
       if (thisRequest !== requestId.current) return; // a newer request already landed
-      setResources(resourcesRes.resources);
-      setStats(statsRes);
-      setTrend(trendRes.points);
-      setRecentEvents(eventsRes.events);
+      setResources(inventory.items);
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
     }
   }, [category, status, region, search, service, account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
-  useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.catalog)); }, []);
 
-  const liveTypes = catalog.filter(c => c.scannerStatus === 'live').length;
+  const loadGlobal = useCallback(async () => {
+    const [dash, explorer] = await Promise.all([api.getResourcesDashboard(), api.getResourceExplorer()]);
+    setDashboard(dash);
+    const svc: Record<string, number> = {};
+    for (const cat of explorer.categories) for (const s of cat.services) svc[s.service] = (svc[s.service] ?? 0) + s.count;
+    setExplorerServices(svc);
+  }, []);
+  useEffect(() => { void loadGlobal(); }, [loadGlobal, refreshToken]);
+
+  useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.items)); }, []);
+
+  // The timeline endpoint doesn't take a connectionId filter, so pull a wider
+  // window and filter client-side when a specific account is selected.
+  const loadEvents = useCallback(async () => {
+    const timeline = await api.getResourceTimeline({ limit: 100 });
+    const filtered = account === 'all' ? timeline.items : timeline.items.filter(e => e.connection_id === account);
+    setRecentEvents(filtered.slice(0, 20));
+  }, [account]);
+  useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
+
+  const catalogByKey = useMemo(() => new Map(catalog.map(c => [c.key, c])), [catalog]);
+  const liveTypes = catalog.filter(c => c.scanner_status === 'live').length;
   // A service with zero live-scanned types will always return 0 rows if
   // selected — surfaced as disabled + labeled rather than left to look like
   // an unexplained empty result once picked.
   const serviceOptions = useMemo(() => {
-    const liveServices = new Set(catalog.filter(c => c.scannerStatus === 'live').map(c => c.service));
+    const liveServices = new Set(catalog.filter(c => c.scanner_status === 'live').map(c => c.service));
     return [...new Set(catalog.map(c => c.service))].sort().map(s => ({ service: s, live: liveServices.has(s) }));
   }, [catalog]);
   const accountLabel = useCallback((connectionId: string) => {
     const c = connections.find(c => c.id === connectionId);
-    return c ? (c.connectionName ?? c.awsAccountId) : connectionId;
+    return c ? (c.connection_name ?? c.aws_account_id) : connectionId;
   }, [connections]);
 
-  const total = stats?.total ?? 0;
-  const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: stats?.byCategory[c] ?? 0 }));
+  const total = dashboard?.total ?? 0;
+  const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: dashboard?.byCategory[c] ?? 0 }));
   const othersCount = Math.max(0, total - coreCounts.reduce((s, c) => s + c.count, 0));
 
   const healthCounts = useMemo(() => {
@@ -244,29 +251,40 @@ export function Resources() {
   }, [resources]);
   const healthTotal = Object.values(healthCounts).reduce((s, v) => s + v, 0) || 1;
 
-  const topServices = Object.entries(stats?.byService ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
-  const topResourceTypes = Object.entries(stats?.byResourceType ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
+  const topServices = Object.entries(explorerServices).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
+  // No org-wide by-resource-type aggregate exists in the new API — derived
+  // from the currently loaded (filtered, up to 200) resource rows, same
+  // sampling approach already used for Resource Health below.
+  const topResourceTypes = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of resources) {
+      const label = catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key;
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
+  }, [resources, catalogByKey]);
 
+  const trend = dashboard?.trend30d ?? [];
   const trendAdded = trend.reduce((s, p) => s + p.created, 0);
   const trendDeleted = trend.reduce((s, p) => s + p.deleted, 0);
 
   const columns: Column<CloudResource>[] = [
-    { key: 'displayName', header: 'Service', render: r => r.displayName, sortValue: r => r.displayName },
-    { key: 'account', header: 'Account', render: r => <span className="text-xs">{accountLabel(r.connectionId)}</span>, sortValue: r => accountLabel(r.connectionId) },
-    { key: 'resourceId', header: 'Resource ID', render: r => <span className="font-mono text-xs">{r.resourceId.length > 40 ? `${r.resourceId.slice(0, 37)}…` : r.resourceId}</span>, sortValue: r => r.resourceId },
-    { key: 'resourceName', header: 'Name / Tag', render: r => r.resourceName ?? r.tags?.Name ?? '—', sortValue: r => r.resourceName ?? '' },
+    { key: 'displayName', header: 'Service', render: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key, sortValue: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key },
+    { key: 'account', header: 'Account', render: r => <span className="text-xs">{accountLabel(r.connection_id)}</span>, sortValue: r => accountLabel(r.connection_id) },
+    { key: 'resourceId', header: 'Resource ID', render: r => <span className="font-mono text-xs">{r.resource_id.length > 40 ? `${r.resource_id.slice(0, 37)}…` : r.resource_id}</span>, sortValue: r => r.resource_id },
+    { key: 'resourceName', header: 'Name / Tag', render: r => r.resource_name ?? r.tags?.Name ?? '—', sortValue: r => r.resource_name ?? '' },
     { key: 'region', header: 'Region', render: r => r.region ?? 'global', sortValue: r => r.region ?? '' },
     { key: 'category', header: 'Category', render: r => r.category, sortValue: r => r.category },
     { key: 'status', header: 'Status', render: r => <Badge>{r.status}</Badge>, sortValue: r => r.status },
-    { key: 'isDefault', header: 'Default', render: r => r.isDefault ? <Badge tone="neutral">Default</Badge> : '—', sortValue: r => (r.isDefault ? 1 : 0) },
-    { key: 'firstSeenAt', header: 'First Seen', render: r => new Date(r.firstSeenAt).toLocaleDateString(), sortValue: r => r.firstSeenAt },
+    { key: 'isDefault', header: 'Default', render: r => r.is_default ? <Badge tone="neutral">Default</Badge> : '—', sortValue: r => (r.is_default ? 1 : 0) },
+    { key: 'firstSeenAt', header: 'First Seen', render: r => new Date(r.first_seen_at).toLocaleDateString(), sortValue: r => r.first_seen_at },
   ];
 
-  const eventColumns: Column<ResourceEvent>[] = [
-    { key: 'resource', header: 'Resource', render: e => <span><span className="font-medium text-slate-700 dark:text-slate-200">{e.displayName}</span> <span className="font-mono text-xs text-slate-400">{e.awsResourceId.length > 28 ? `${e.awsResourceId.slice(0, 25)}…` : e.awsResourceId}</span></span> },
-    { key: 'account', header: 'Account', render: e => <span className="text-xs">{accountLabel(e.connectionId)}</span>, sortValue: e => accountLabel(e.connectionId) },
-    { key: 'action', header: 'Action', render: e => <Badge tone={e.eventType === 'created' ? 'good' : 'critical'}>{e.eventType === 'created' ? 'Created' : 'Deleted'}</Badge>, sortValue: e => e.eventType },
-    { key: 'time', header: 'Time', render: e => timeAgo(e.occurredAt), sortValue: e => e.occurredAt },
+  const eventColumns: Column<ResourceLifecycleEvent>[] = [
+    { key: 'resource', header: 'Resource', render: e => <span><span className="font-medium text-slate-700 dark:text-slate-200">{catalogByKey.get(e.resource_type_key)?.display_name ?? e.resource_type_key}</span> <span className="font-mono text-xs text-slate-400">{e.aws_resource_id.length > 28 ? `${e.aws_resource_id.slice(0, 25)}…` : e.aws_resource_id}</span></span> },
+    { key: 'account', header: 'Account', render: e => <span className="text-xs">{accountLabel(e.connection_id)}</span>, sortValue: e => accountLabel(e.connection_id) },
+    { key: 'action', header: 'Action', render: e => <Badge tone={e.event_type === 'created' ? 'good' : 'critical'}>{e.event_type === 'created' ? 'Created' : 'Deleted'}</Badge>, sortValue: e => e.event_type },
+    { key: 'time', header: 'Time', render: e => timeAgo(e.occurred_at), sortValue: e => e.occurred_at },
   ];
 
   const workspaceCrumb = isWorkspaceView
@@ -278,7 +296,7 @@ export function Resources() {
       <FilterBar title={isWorkspaceView ? serviceLabel(presetService) : 'Resources'} breadcrumb={workspaceCrumb} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-        <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live · ${stats?.defaultCount ?? 0} default`} />
+        <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live`} />
         {coreCounts.map(c => (
           <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
         ))}
@@ -288,7 +306,7 @@ export function Resources() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
-          <Donut data={Object.entries(stats?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+          <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
@@ -305,7 +323,7 @@ export function Resources() {
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
-          <Donut data={Object.entries(stats?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+          <Donut data={Object.entries(dashboard?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
         </div>
       </div>
 
@@ -328,7 +346,7 @@ export function Resources() {
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Resource Changes</h3>
-        <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.awsResourceId}:${e.eventType}:${e.occurredAt}`} emptyMessage="No resource changes recorded yet." />
+        <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
       </div>
 
       <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
@@ -370,35 +388,25 @@ export function Resources() {
 
       <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from AWS Accounts." />
 
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.resourceName ?? selected?.resourceId ?? ''}>
+      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.resource_name ?? selected?.resource_id ?? ''}>
         {selected && (
           <div className="flex flex-col gap-4 text-sm">
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Type">{selected.displayName}</Field>
+              <Field label="Type">{catalogByKey.get(selected.resource_type_key)?.display_name ?? selected.resource_type_key}</Field>
               <Field label="Category">{selected.category}</Field>
               <Field label="Region">{selected.region ?? 'global'}</Field>
               <Field label="Status"><Badge>{selected.status}</Badge></Field>
-              <Field label="Account">{accountLabel(selected.connectionId)}</Field>
-              <Field label="Default">{selected.isDefault ? 'Yes' : 'No'}</Field>
-              <Field label="First Seen">{new Date(selected.firstSeenAt).toLocaleString()}</Field>
-              <Field label="Last Seen">{new Date(selected.lastSeenAt).toLocaleString()}</Field>
+              <Field label="Account">{accountLabel(selected.connection_id)}</Field>
+              <Field label="Default">{selected.is_default ? 'Yes' : 'No'}</Field>
+              <Field label="First Seen">{new Date(selected.first_seen_at).toLocaleString()}</Field>
+              <Field label="Last Seen">{new Date(selected.last_seen_at).toLocaleString()}</Field>
             </div>
-            {selected.consoleUrl && (
-              <a href={selected.consoleUrl} target="_blank" rel="noreferrer" className="text-brand-600 dark:text-brand-400 hover:underline text-xs">Open in AWS Console ↗</a>
-            )}
             <div>
               <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-1.5">Cost</h4>
-              {!cost ? (
-                <p className="text-xs text-slate-400">Loading…</p>
-              ) : !cost.hasCurData ? (
-                <p className="text-xs text-slate-400">No per-resource cost data — this account doesn't have a Cost & Usage Report set up yet (Settings → Cost & Usage Reports in the AWS Billing console, with "Include resource IDs" checked). See the AWS Account page for the exact permissions needed.</p>
-              ) : cost.dailyCost.length === 0 ? (
-                <p className="text-xs text-slate-400">Cost & Usage Report is connected, but no cost recorded for this resource in the last 30 days.</p>
+              {selected.cost_monthly !== null ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">${selected.cost_monthly.toLocaleString(undefined, { maximumFractionDigits: 2 })} / month (estimated)</p>
               ) : (
-                <>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">${cost.totalCost.toFixed(2)} over the last 30 days</p>
-                  <LineChart height={140} series={[{ label: 'Daily cost', points: cost.dailyCost.map(d => ({ x: d.date, y: d.cost })) }]} valueFormatter={v => `$${v.toFixed(2)}`} />
-                </>
+                <p className="text-xs text-slate-400">No cost data available for this resource yet. Per-resource cost trend charts require Monitoring, which isn't part of this domain.</p>
               )}
             </div>
             {Object.keys(selected.tags ?? {}).length > 0 && (

@@ -8,9 +8,9 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
-import { useFilters, dateRangeToDays } from '../lib/filterContext';
+import { useFilters, dateRangeToDays, type DateRangePreset } from '../lib/filterContext';
 import { useOrg } from '../lib/orgContext';
-import { api, type CostAnomaly, type Budget, type BudgetScopeType } from '../lib/api';
+import { api, type CostAnomaly, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -18,14 +18,37 @@ function money(n: number): string {
 
 const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as const;
 
+// A few common cost-allocation tag keys to suggest — there's no backend
+// endpoint anymore that lists which tag keys are actually active for an
+// org, so this is just a typeahead starting point (free text still works).
+const TAG_KEY_SUGGESTIONS = ['CostCenter', 'Environment', 'Team', 'Project'];
+
+/** Converts the FilterBar's day-count preset into ISO from/to dates for the cost-management-api's date-scoped endpoints. */
+function rangeToFromTo(range: DateRangePreset): { from: string; to: string } {
+  const days = dateRangeToDays(range);
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - days + 1);
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
+function aggregateDaily(rows: CostSnapshot[]): { date: string; cost: number }[] {
+  const byDate = new Map<string, number>();
+  for (const r of rows) byDate.set(r.usage_date, (byDate.get(r.usage_date) ?? 0) + Number(r.unblended_cost));
+  return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, cost]) => ({ date, cost }));
+}
+
 export function CostManagement() {
   // Account + Region filters live in the global FilterBar now.
   const { region, account, dateRange, refreshToken, connections } = useFilters();
   const { currentOrg, folders, projects } = useOrg();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const [summary, setSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
-  const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [analytics, setAnalytics] = useState<Awaited<ReturnType<typeof api.getCostAnalytics>> | null>(null);
+  const [forecast, setForecast] = useState<Awaited<ReturnType<typeof api.getCostForecast>> | null>(null);
+  const [daily, setDaily] = useState<{ date: string; cost: number }[]>([]);
+  const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
 
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
@@ -38,8 +61,8 @@ export function CostManagement() {
   const [budgetError, setBudgetError] = useState('');
 
   const loadBudgets = useCallback(async () => {
-    const { budgets: b } = await api.getBudgets();
-    setBudgets(b);
+    const { items } = await api.getBudgets({ limit: 200 });
+    setBudgets(items);
   }, []);
 
   useEffect(() => { void loadBudgets(); }, [loadBudgets, refreshToken]);
@@ -49,7 +72,7 @@ export function CostManagement() {
     if (scopeType === 'folder') return folders.find(f => f.id === scopeId)?.name ?? 'Deleted folder';
     if (scopeType === 'project') return projects.find(p => p.id === scopeId)?.name ?? 'Deleted project';
     const conn = connections.find(c => c.id === scopeId);
-    return conn ? (conn.connectionName ?? conn.awsAccountId) : 'Deleted account';
+    return conn ? (conn.connection_name ?? conn.aws_account_id) : 'Deleted account';
   }
 
   function openCreateBudget() {
@@ -66,10 +89,10 @@ export function CostManagement() {
   function openEditBudget(b: Budget) {
     setEditingBudget(b);
     setBudgetName(b.name);
-    setBudgetScopeType(b.scopeType);
-    setBudgetScopeId(b.scopeId);
-    setBudgetMonthlyLimit(String(b.monthlyLimit));
-    setBudgetThresholds(b.alertThresholds.join(','));
+    setBudgetScopeType(b.scope_type);
+    setBudgetScopeId(b.scope_id);
+    setBudgetMonthlyLimit(String(b.monthly_limit));
+    setBudgetThresholds(b.alert_thresholds.join(','));
     setBudgetError('');
     setBudgetModalOpen(true);
   }
@@ -98,22 +121,39 @@ export function CostManagement() {
     await loadBudgets();
   }
 
-  const [tagKeys, setTagKeys] = useState<string[]>([]);
-  const [selectedTagKey, setSelectedTagKey] = useState('');
-  const [tagBreakdown, setTagBreakdown] = useState<{ tagValue: string; cost: number }[]>([]);
-  const [tagKeysError, setTagKeysError] = useState('');
-  const [tagBreakdownLoading, setTagBreakdownLoading] = useState(false);
+  // Showback by tag — reads from stored cost_snapshots across the whole org
+  // for the selected tag key + date range. There's no backend endpoint that
+  // lists which tag keys exist, so this is a typeahead over common ones
+  // rather than a populated dropdown, and it isn't scoped by the Account
+  // filter (getShowback has no connectionId param).
+  const [tagKey, setTagKey] = useState('CostCenter');
+  const [showback, setShowback] = useState<CostAllocation | null>(null);
+  const [showbackLoading, setShowbackLoading] = useState(false);
+
+  useEffect(() => {
+    if (!tagKey.trim()) { setShowback(null); return; }
+    setShowbackLoading(true);
+    const { from, to } = rangeToFromTo(dateRange);
+    void api.getShowback({ tagKey: tagKey.trim(), from, to })
+      .then(setShowback)
+      .finally(() => setShowbackLoading(false));
+  }, [tagKey, dateRange, refreshToken]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const connectionId = account === 'all' ? undefined : account;
-      const [summaryRes, anomaliesRes] = await Promise.all([
-        api.getCostSummary(dateRangeToDays(dateRange), region === 'all' ? undefined : region, connectionId),
-        api.getCostAnomalies(connectionId),
+      const { from, to } = rangeToFromTo(dateRange);
+      const [analyticsRes, forecastRes, explorerRes, anomaliesRes] = await Promise.all([
+        api.getCostAnalytics({ from, to }),
+        api.getCostForecast(),
+        api.getCostExplorer({ connectionId, region: region === 'all' ? undefined : region, from, to, limit: 200 }),
+        api.getCostAnomalies({ connectionId, limit: 200 }),
       ]);
-      setSummary(summaryRes);
-      setAnomalies(anomaliesRes.anomalies);
+      setAnalytics(analyticsRes);
+      setForecast(forecastRes);
+      setDaily(aggregateDaily(explorerRes.items));
+      setAnomalies(anomaliesRes.items);
     } finally {
       setLoading(false);
     }
@@ -121,31 +161,26 @@ export function CostManagement() {
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
-  // Showback-by-tag calls AWS Cost Explorer live for one specific account
-  // (its own tag keys, its own credentials) — it doesn't aggregate across
-  // "All Accounts" the way the stored cost_snapshots summary above does.
-  useEffect(() => {
-    setTagKeys([]);
-    setSelectedTagKey('');
-    setTagBreakdown([]);
-    setTagKeysError('');
-    if (account === 'all') return;
-    void api.getCostTagKeys(account).then(res => {
-      if (res.ok) setTagKeys(res.tagKeys);
-      else setTagKeysError(res.error ?? 'Could not load tag keys');
-    });
-  }, [account]);
+  async function handleAnomalyStatus(id: string, status: 'acknowledged' | 'resolved') {
+    await api.updateCostAnomaly(id, status);
+    await load();
+  }
 
-  useEffect(() => {
-    if (account === 'all' || !selectedTagKey) { setTagBreakdown([]); return; }
-    setTagBreakdownLoading(true);
-    void api.getCostByTag(account, selectedTagKey).then(res => {
-      setTagBreakdown(res.ok ? res.breakdown : []);
-      setTagBreakdownLoading(false);
-    });
-  }, [account, selectedTagKey]);
+  async function handleDownloadCsv() {
+    const { from, to } = rangeToFromTo(dateRange);
+    const { blob, filename } = await api.downloadCostReportCsv({ from, to });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
 
-  const totalByService = summary?.byService.reduce((sum, s) => sum + s.cost, 0) ?? 0;
+  const byServiceEntries = Object.entries(analytics?.byService ?? {}).sort(([, a], [, b]) => b - a);
+  const byAccountEntries = Object.entries(analytics?.byAccount ?? {}).sort(([, a], [, b]) => b - a);
+  const byRegionEntries = Object.entries(analytics?.byRegion ?? {}).sort(([, a], [, b]) => b - a);
+  const totalCost = analytics?.totalCost ?? 0;
+  const avgDailyCost = daily.length > 0 ? daily.reduce((sum, d) => sum + d.cost, 0) / daily.length : 0;
+  const showbackTotal = showback?.totalCost ?? 0;
 
   const anomalyColumns: Column<CostAnomaly>[] = [
     { key: 'service', header: 'Service', render: a => a.service, sortValue: a => a.service },
@@ -155,16 +190,28 @@ export function CostManagement() {
     { key: 'percent_change', header: '% Change', render: a => <span className="text-amber-500 font-medium">+{a.percent_change.toFixed(0)}%</span>, sortValue: a => a.percent_change },
     { key: 'dollar_impact', header: '$ Impact', render: a => money(a.dollar_impact), sortValue: a => a.dollar_impact },
     { key: 'status', header: 'Status', render: a => <Badge>{a.status}</Badge>, sortValue: a => a.status },
+    {
+      key: 'actions', header: 'Actions', render: a => (
+        <div className="flex gap-2 text-xs">
+          {a.status === 'open' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'acknowledged'); }} className="text-amber-600 dark:text-amber-400 hover:underline">Acknowledge</button>}
+          {a.status !== 'resolved' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'resolved'); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Resolve</button>}
+        </div>
+      ),
+    },
   ];
 
   return (
     <div>
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
 
+      <div className="flex justify-end mb-3">
+        <button onClick={() => void handleDownloadCsv()} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">Export CSV Report</button>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Cost (MTD)" value={money(summary?.mtdCost ?? 0)} />
-        <StatCard label="Forecasted Cost" value={money(summary?.forecastCost ?? 0)} caption="end of month" />
-        <StatCard label="Avg Daily Cost" value={money(summary?.avgDailyCost ?? 0)} />
+        <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} />
+        <StatCard label="Forecasted Cost" value={money(forecast?.projectedTotal ?? 0)} caption="Forecast (linear estimate)" />
+        <StatCard label="Avg Daily Cost" value={money(avgDailyCost)} caption="selected range" />
         <StatCard label="Open Anomalies" value={String(anomalies.filter(a => a.status === 'open').length)} />
       </div>
 
@@ -178,14 +225,14 @@ export function CostManagement() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {budgets.map(b => {
-              const percentUsed = b.monthlyLimit > 0 ? Math.min(100, (b.monthToDateCost / b.monthlyLimit) * 100) : 0;
+              const percentUsed = Math.min(100, Math.max(0, b.percentOfLimit));
               const barColor = b.status === 'exceeded' ? 'bg-red-500' : b.status === 'warning' ? 'bg-amber-500' : 'bg-emerald-500';
               return (
                 <div key={b.id} className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div>
                       <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{b.name}</div>
-                      <div className="text-[11px] text-slate-400">{b.scopeType} — {scopeLabel(b.scopeType, b.scopeId)}</div>
+                      <div className="text-[11px] text-slate-400">{b.scope_type} — {scopeLabel(b.scope_type, b.scope_id)}</div>
                     </div>
                     <Badge tone={STATUS_TONE[b.status]}>{b.status}</Badge>
                   </div>
@@ -193,8 +240,8 @@ export function CostManagement() {
                     <div className={`h-full ${barColor}`} style={{ width: `${percentUsed}%` }} />
                   </div>
                   <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                    <span>{money(b.monthToDateCost)} of {money(b.monthlyLimit)}</span>
-                    <span>forecast {money(b.forecastCost)}</span>
+                    <span>{money(b.currentSpend)} of {money(b.monthly_limit)}</span>
+                    <span>forecast {money(b.projectedSpend)}</span>
                   </div>
                   <div className="flex justify-end gap-2 mt-2 text-xs">
                     <button onClick={() => openEditBudget(b)} className="text-slate-500 hover:underline">Edit</button>
@@ -210,11 +257,11 @@ export function CostManagement() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost Over Time</h3>
-          <LineChart series={[{ label: 'Daily Cost', points: (summary?.daily ?? []).map(d => ({ x: d.date, y: d.cost })) }]} valueFormatter={money} />
+          <LineChart series={[{ label: 'Daily Cost', points: daily.map(d => ({ x: d.date, y: d.cost })) }]} valueFormatter={money} />
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost by Service</h3>
-          <Donut data={(summary?.byService ?? []).slice(0, 8).map(s => ({ label: s.service, value: s.cost }))} centerLabel={{ value: money(totalByService).replace('.00', ''), caption: 'total' }} />
+          <Donut data={byServiceEntries.slice(0, 8).map(([service, cost]) => ({ label: service, value: cost }))} centerLabel={{ value: money(totalCost).replace('.00', ''), caption: 'total' }} />
         </div>
       </div>
 
@@ -222,19 +269,19 @@ export function CostManagement() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost by Account</h3>
           <ul className="flex flex-col gap-2 text-sm">
-            {(summary?.byAccount ?? []).map(a => (
-              <li key={a.accountId} className="flex justify-between"><span className="text-slate-600 dark:text-slate-300 font-mono text-xs">{a.accountId}</span><span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(a.cost)}</span></li>
+            {byAccountEntries.map(([accountId, cost]) => (
+              <li key={accountId} className="flex justify-between"><span className="text-slate-600 dark:text-slate-300 font-mono text-xs">{accountId}</span><span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(cost)}</span></li>
             ))}
-            {(!summary || summary.byAccount.length === 0) && <li className="text-slate-400 text-sm">No cost data synced yet.</li>}
+            {byAccountEntries.length === 0 && <li className="text-slate-400 text-sm">No cost data synced yet.</li>}
           </ul>
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost by Region</h3>
           <ul className="flex flex-col gap-2 text-sm">
-            {(summary?.byRegion ?? []).map(r => (
-              <li key={r.region} className="flex justify-between"><span className="text-slate-600 dark:text-slate-300">{r.region}</span><span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(r.cost)}</span></li>
+            {byRegionEntries.map(([regionName, cost]) => (
+              <li key={regionName} className="flex justify-between"><span className="text-slate-600 dark:text-slate-300">{regionName}</span><span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(cost)}</span></li>
             ))}
-            {(!summary || summary.byRegion.length === 0) && <li className="text-slate-400 text-sm">No cost data synced yet.</li>}
+            {byRegionEntries.length === 0 && <li className="text-slate-400 text-sm">No cost data synced yet.</li>}
           </ul>
         </div>
       </div>
@@ -242,42 +289,36 @@ export function CostManagement() {
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Showback by Tag</h3>
-          {account !== 'all' && tagKeys.length > 0 && (
-            <select value={selectedTagKey} onChange={e => setSelectedTagKey(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-              <option value="">Choose a tag key…</option>
-              {tagKeys.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-          )}
+          <input
+            list="tag-key-suggestions"
+            value={tagKey}
+            onChange={e => setTagKey(e.target.value)}
+            placeholder="Tag key (e.g. CostCenter)"
+            className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200"
+          />
+          <datalist id="tag-key-suggestions">
+            {TAG_KEY_SUGGESTIONS.map(k => <option key={k} value={k} />)}
+          </datalist>
         </div>
-        {account === 'all' ? (
-          <p className="text-sm text-slate-400">Select a specific AWS account in the top filter bar to see cost broken down by one of its tags (e.g. Team, Environment) — this reads live from that account's own AWS Cost Explorer.</p>
-        ) : tagKeysError ? (
-          <p className="text-sm text-slate-400">{tagKeysError}</p>
-        ) : tagKeys.length === 0 ? (
-          <p className="text-sm text-slate-400">No cost-allocation tag keys found for this account. In AWS, a tag only appears here once it's activated as a cost allocation tag in Billing → Cost Allocation Tags — CloudOps360 can't turn that on for you.</p>
-        ) : !selectedTagKey ? (
-          <p className="text-sm text-slate-400">Pick a tag key above to see cost by its values (last 30 days).</p>
-        ) : tagBreakdownLoading ? (
+        {showbackLoading ? (
           <p className="text-sm text-slate-400">Loading…</p>
+        ) : !showback || showback.buckets.length === 0 ? (
+          <p className="text-sm text-slate-400">No cost data for this tag key in the selected date range. In AWS, a tag only appears here once it's activated as a cost allocation tag in Billing → Cost Allocation Tags — try CostCenter, Environment, Team, or Project, or type your own.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                <th className="py-2">{selectedTagKey}</th><th className="py-2 text-right">Cost (30d)</th><th className="py-2 text-right">% of Total</th>
+                <th className="py-2">{showback.tagKey}</th><th className="py-2 text-right">Cost</th><th className="py-2 text-right">% of Total</th>
               </tr>
             </thead>
             <tbody>
-              {tagBreakdown.map(t => {
-                const total = tagBreakdown.reduce((s, r) => s + r.cost, 0) || 1;
-                return (
-                  <tr key={t.tagValue} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                    <td className="py-2 text-slate-700 dark:text-slate-200">{t.tagValue}</td>
-                    <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(t.cost)}</td>
-                    <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{((t.cost / total) * 100).toFixed(1)}%</td>
-                  </tr>
-                );
-              })}
-              {tagBreakdown.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400">No cost data for this tag in the last 30 days.</td></tr>}
+              {showback.buckets.map(b => (
+                <tr key={b.tagValue} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="py-2 text-slate-700 dark:text-slate-200">{b.tagValue}</td>
+                  <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(b.totalCost)}</td>
+                  <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{showbackTotal > 0 ? ((b.totalCost / showbackTotal) * 100).toFixed(1) : '0.0'}%</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
@@ -297,16 +338,16 @@ export function CostManagement() {
             </tr>
           </thead>
           <tbody>
-            {(summary?.byService ?? []).map(s => (
-              <tr key={s.service} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                <td className="py-2 text-slate-700 dark:text-slate-200">{s.service}</td>
-                <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(s.cost)}</td>
-                <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{totalByService > 0 ? ((s.cost / totalByService) * 100).toFixed(1) : '0.0'}%</td>
+            {byServiceEntries.map(([service, cost]) => (
+              <tr key={service} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                <td className="py-2 text-slate-700 dark:text-slate-200">{service}</td>
+                <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(cost)}</td>
+                <td className="py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{totalCost > 0 ? ((cost / totalCost) * 100).toFixed(1) : '0.0'}%</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {(!summary || summary.byService.length === 0) && <p className="text-sm text-slate-400 mt-3">No cost data yet — sync cost from an AWS account's detail page.</p>}
+        {byServiceEntries.length === 0 && <p className="text-sm text-slate-400 mt-3">No cost data yet — sync cost from an AWS account's detail page.</p>}
       </div>
       {loading && <p className="text-xs text-slate-400 mt-3">Loading…</p>}
 
@@ -345,7 +386,7 @@ export function CostManagement() {
                 <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">AWS Account</span>
                   <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
                     <option value="">Choose an account…</option>
-                    {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.connection_name ?? c.aws_account_id}</option>)}
                   </select>
                 </label>
               )}

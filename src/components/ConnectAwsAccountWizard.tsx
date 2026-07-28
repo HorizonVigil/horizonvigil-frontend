@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
-import { api, type Project, type Environment } from '../lib/api';
+import { api, type ProjectRow, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
 
 // Every AWS region enabled by default (no opt-in required) — this list
@@ -19,7 +19,7 @@ const REGIONS = [
 ];
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 
-export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }: { open: boolean; onClose: () => void; onConnected: () => void; projects: Project[] }) {
+export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }: { open: boolean; onClose: () => void; onConnected: () => void; projects: ProjectRow[] }) {
   const [method, setMethod] = useState<'access_key' | 'cross_account_role'>('cross_account_role');
   const [showPolicy, setShowPolicy] = useState(false);
   const [form, setForm] = useState({
@@ -44,7 +44,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
     if (scanRegions.length === 0) { setError('Select at least one region to scan.'); return; }
     setLoading(true);
     try {
-      await api.createConnection({
+      await api.createAccount({
         connectionMethod: method,
         awsAccountId: form.awsAccountId.trim(),
         accessKeyId: method === 'access_key' ? form.accessKeyId.trim() : undefined,
@@ -84,13 +84,13 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
           <li>IAM → Users → Create user (e.g. <code>cloudops360-readonly</code>), programmatic access only — no console password.</li>
           <li>Attach managed policies <code>ReadOnlyAccess</code> + <code>SecurityAudit</code>, or the <button type="button" onClick={() => setShowPolicy(v => !v)} className="text-brand-600 dark:text-brand-400 underline">hardened custom policy</button> below.</li>
           <li>Download the access key CSV immediately — the secret is shown once.</li>
-          <li>Paste the Account ID + keys here. We validate via <code>sts:GetCallerIdentity</code> and encrypt the secret at rest — it's never shown again.</li>
+          <li>Paste the Account ID + keys here. We encrypt the secret at rest and never show it again — live validation against AWS isn't performed yet, only that the credentials are present and well-formed.</li>
         </ol>
       ) : (
         <ol className="text-xs text-slate-500 dark:text-slate-400 list-decimal list-inside space-y-1 mb-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg p-3">
           <li>In your AWS account, create an IAM role trusting CloudOps360's platform account, with the external ID below.</li>
           <li>Attach <code>ReadOnlyAccess</code> + <code>SecurityAudit</code>, or the hardened custom policy.</li>
-          <li>Paste the role ARN and external ID here — we call <code>sts:AssumeRole</code> for each scan, nothing to rotate.</li>
+          <li>Paste the role ARN and external ID here — nothing long-lived to store or rotate. (Live scanning via <code>sts:AssumeRole</code> isn't wired up yet in this build.)</li>
         </ol>
       )}
 

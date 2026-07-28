@@ -38,7 +38,7 @@ function CreateFirstOrg({ onCreated }: { onCreated: () => void }) {
     setLoading(true);
     setError(null);
     try {
-      await api.createOrg(name.trim());
+      await api.createOrganization(name.trim());
       onCreated();
     } catch (err) {
       setError((err as Error).message);

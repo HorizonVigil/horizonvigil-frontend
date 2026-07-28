@@ -19,24 +19,24 @@ export function ResourcesOverview() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
-  const [stats, setStats] = useState<{ total: number; byCategory: Record<string, number> } | null>(null);
+  const [byCategory, setByCategory] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    void api.getResourceCatalog().then(r => setCatalog(r.catalog));
-    void api.getResourceStats().then(r => setStats(r));
+    void api.getResourceCatalog().then(r => setCatalog(r.items));
+    void api.getResourceExplorer().then(r => setByCategory(Object.fromEntries(r.categories.map(c => [c.category, c.total]))));
   }, []);
 
   const categoryMeta = useMemo(() => {
-    const byCategory = new Map<string, { services: Set<string>; live: Set<string> }>();
-    for (const c of CATEGORIES) byCategory.set(c, { services: new Set(), live: new Set() });
+    const byCat = new Map<string, { services: Set<string>; live: Set<string> }>();
+    for (const c of CATEGORIES) byCat.set(c, { services: new Set(), live: new Set() });
     for (const entry of catalog) {
-      const bucket = byCategory.get(entry.category);
+      const bucket = byCat.get(entry.category);
       if (!bucket) continue;
       bucket.services.add(entry.service);
-      if (entry.scannerStatus === 'live') bucket.live.add(entry.service);
+      if (entry.scanner_status === 'live') bucket.live.add(entry.service);
     }
-    return byCategory;
+    return byCat;
   }, [catalog]);
 
   function submitSearch(e: React.FormEvent) {
@@ -66,7 +66,7 @@ export function ResourcesOverview() {
         {CATEGORIES.map(cat => {
           const meta = categoryMeta.get(cat)!;
           const color = categoryColor(cat, isDark);
-          const count = stats?.byCategory[cat] ?? 0;
+          const count = byCategory[cat] ?? 0;
           return (
             <Link key={cat} to={`/resources/${cat}`} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center gap-3 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition">
               <span className="shrink-0 h-10 w-10 rounded-full flex items-center justify-center" style={{ backgroundColor: `${color}1a` }}>

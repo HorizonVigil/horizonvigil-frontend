@@ -93,15 +93,15 @@ export function Sidebar() {
 
   const projectCountByFolder = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const p of projects) if (p.folderId) counts.set(p.folderId, (counts.get(p.folderId) ?? 0) + 1);
+    for (const p of projects) if (p.folder_id) counts.set(p.folder_id, (counts.get(p.folder_id) ?? 0) + 1);
     return counts;
   }, [projects]);
 
   const filteredFolders = search ? folders.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : folders;
   const filteredProjects = search ? projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase())) : projects;
 
-  const rootFolders = filteredFolders.filter(f => !f.parentFolderId);
-  const rootProjects = filteredProjects.filter(p => !p.folderId);
+  const rootFolders = filteredFolders.filter(f => !f.parent_folder_id);
+  const rootProjects = filteredProjects.filter(p => !p.folder_id);
 
   function toggleFolder(id: string) {
     setCollapsedFolders(prev => {
@@ -112,8 +112,8 @@ export function Sidebar() {
   }
 
   function renderFolder(folder: typeof folders[number]) {
-    const childFolders = filteredFolders.filter(f => f.parentFolderId === folder.id);
-    const childProjects = filteredProjects.filter(p => p.folderId === folder.id);
+    const childFolders = filteredFolders.filter(f => f.parent_folder_id === folder.id);
+    const childProjects = filteredProjects.filter(p => p.folder_id === folder.id);
     const isCollapsed = collapsedFolders.has(folder.id);
     const isActive = scope?.type === 'folder' && scope.id === folder.id;
     return (

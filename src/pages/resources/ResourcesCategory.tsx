@@ -11,28 +11,34 @@ import { serviceLabel } from '../Resources';
 export function ResourcesCategory() {
   const { category = '' } = useParams<{ category: string }>();
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
-  const [stats, setStats] = useState<{ byService: Record<string, number> } | null>(null);
+  // getResourceExplorer() has no per-category variant, but it's a small,
+  // cheap-to-fetch aggregate (every category + its services in one call) —
+  // this is where the exact, org-wide per-service resource counts come from.
+  const [byService, setByService] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    void api.getResourceCatalog().then(r => setCatalog(r.catalog));
-    void api.getResourceStats({ category }).then(r => setStats(r));
+    void api.getResourceCatalog({ category }).then(r => setCatalog(r.items));
+    void api.getResourceExplorer().then(r => {
+      const entry = r.categories.find(c => c.category === category);
+      setByService(Object.fromEntries((entry?.services ?? []).map(s => [s.service, s.count])));
+    });
   }, [category]);
 
   const services = useMemo(() => {
-    const byService = new Map<string, { live: boolean; typeCount: number }>();
-    for (const entry of catalog.filter(c => c.category === category)) {
-      const existing = byService.get(entry.service);
+    const byServiceMeta = new Map<string, { live: boolean; typeCount: number }>();
+    for (const entry of catalog) {
+      const existing = byServiceMeta.get(entry.service);
       if (existing) {
-        existing.live = existing.live || entry.scannerStatus === 'live';
+        existing.live = existing.live || entry.scanner_status === 'live';
         existing.typeCount += 1;
       } else {
-        byService.set(entry.service, { live: entry.scannerStatus === 'live', typeCount: 1 });
+        byServiceMeta.set(entry.service, { live: entry.scanner_status === 'live', typeCount: 1 });
       }
     }
-    return [...byService.entries()]
-      .map(([service, meta]) => ({ service, ...meta, count: stats?.byService[service] ?? 0 }))
+    return [...byServiceMeta.entries()]
+      .map(([service, meta]) => ({ service, ...meta, count: byService[service] ?? 0 }))
       .sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0) || b.count - a.count || a.service.localeCompare(b.service));
-  }, [catalog, category, stats]);
+  }, [catalog, byService]);
 
   return (
     <div>

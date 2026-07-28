@@ -12,8 +12,8 @@ export function Breadcrumb() {
   } else if (scope?.type === 'project') {
     const project = projects.find(p => p.id === scope.id);
     if (project) {
-      if (project.folderId) {
-        const folder = folders.find(f => f.id === project.folderId);
+      if (project.folder_id) {
+        const folder = folders.find(f => f.id === project.folder_id);
         if (folder) parts.push(folder.name);
       }
       parts.push(project.name);

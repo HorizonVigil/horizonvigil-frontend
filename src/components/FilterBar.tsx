@@ -41,7 +41,7 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true }: { tit
             <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
             <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
               <option value="all">All Accounts</option>
-              {connections.map(c => <option key={c.id} value={c.id}>{c.connectionName ?? c.awsAccountId}</option>)}
+              {connections.map(c => <option key={c.id} value={c.id}>{c.connection_name ?? c.aws_account_id}</option>)}
             </select>
           </label>
         )}

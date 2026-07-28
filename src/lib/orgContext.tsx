@@ -1,30 +1,31 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { api, type Organization, type Folder, type Project } from './api';
+import { api, type OrganizationRow, type FolderRow, type ProjectRow } from './api';
 import { useAuth } from './auth';
 
 export type ScopeType = 'org' | 'folder' | 'project';
 export interface Scope { type: ScopeType; id: string; name: string }
 
 interface OrgContextType {
-  orgs: Organization[];
-  currentOrg: Organization | null;
-  folders: Folder[];
-  projects: Project[];
+  orgs: OrganizationRow[];
+  currentOrg: OrganizationRow | null;
+  folders: FolderRow[];
+  projects: ProjectRow[];
   scope: Scope | null;
   isLoading: boolean;
-  setCurrentOrg: (org: Organization) => void;
+  setCurrentOrg: (org: OrganizationRow) => void;
   setScope: (scope: Scope | null) => void;
   refresh: () => Promise<void>;
+  createOrg: (name: string) => Promise<void>;
 }
 
 const OrgContext = createContext<OrgContextType | null>(null);
 
 export function OrgProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [currentOrg, setCurrentOrgState] = useState<Organization | null>(null);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [orgs, setOrgs] = useState<OrganizationRow[]>([]);
+  const [currentOrg, setCurrentOrgState] = useState<OrganizationRow | null>(null);
+  const [folders, setFolders] = useState<FolderRow[]>([]);
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [scope, setScope] = useState<Scope | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -32,17 +33,25 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (!isAuthenticated) { setIsLoading(false); return; }
     setIsLoading(true);
     try {
-      const { orgs: fetchedOrgs } = await api.getOrgs();
+      // getMyOrganizations is the one bootstrap call that needs no X-Org-Id yet —
+      // everything after this picks one org and every subsequent call is scoped to it.
+      const { organizations: fetchedOrgs } = await api.getMyOrganizations();
       setOrgs(fetchedOrgs);
       const storedOrgId = api.getCurrentOrgId();
       const active = fetchedOrgs.find(o => o.id === storedOrgId) ?? fetchedOrgs[0] ?? null;
       if (active) {
         api.setCurrentOrgId(active.id);
         setCurrentOrgState(active);
-        const [{ folders: f }, { projects: p }] = await Promise.all([api.getFolders(active.id), api.getProjects(active.id)]);
+        const [{ folders: f }, { projects: p }] = await Promise.all([api.getFolders(), api.getProjects()]);
         setFolders(f);
         setProjects(p);
         setScope({ type: 'org', id: active.id, name: active.name });
+      } else {
+        api.setCurrentOrgId(null);
+        setCurrentOrgState(null);
+        setFolders([]);
+        setProjects([]);
+        setScope(null);
       }
     } finally {
       setIsLoading(false);
@@ -51,15 +60,21 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const setCurrentOrg = useCallback((org: Organization) => {
+  const setCurrentOrg = useCallback((org: OrganizationRow) => {
     api.setCurrentOrgId(org.id);
     setCurrentOrgState(org);
     setScope({ type: 'org', id: org.id, name: org.name });
     void refresh();
   }, [refresh]);
 
+  const createOrg = useCallback(async (name: string) => {
+    const org = await api.createOrganization(name);
+    setOrgs(prev => [...prev, org]);
+    setCurrentOrg(org);
+  }, [setCurrentOrg]);
+
   return (
-    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, isLoading, setCurrentOrg, setScope, refresh }}>
+    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, isLoading, setCurrentOrg, setScope, refresh, createOrg }}>
       {children}
     </OrgContext.Provider>
   );

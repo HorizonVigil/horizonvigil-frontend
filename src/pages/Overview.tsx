@@ -7,67 +7,78 @@ import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { BarChart } from '../components/charts/BarChart';
 import { useOrg } from '../lib/orgContext';
-import { useFilters, dateRangeToDays } from '../lib/filterContext';
-import { api, type AuditLogEntry } from '../lib/api';
+import { useFilters } from '../lib/filterContext';
+import { api, type OverviewDashboard, type ActivityEntry } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
 export function Overview() {
-  const { currentOrg, folders, projects } = useOrg();
-  const { account, dateRange, refreshToken } = useFilters();
-  const [costSummary, setCostSummary] = useState<Awaited<ReturnType<typeof api.getCostSummary>> | null>(null);
-  const [resourceStats, setResourceStats] = useState<Awaited<ReturnType<typeof api.getResourceStats>> | null>(null);
-  const [connectionCount, setConnectionCount] = useState(0);
-  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const { folders, projects } = useOrg();
+  const { refreshToken } = useFilters();
+  const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
+  const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
+  const [costByService, setCostByService] = useState<Record<string, number>>({});
+  const [forecast, setForecast] = useState<number | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
 
   const load = useCallback(async () => {
-    if (!currentOrg) return;
-    const connectionId = account === 'all' ? undefined : account;
-    const [cost, resStats, connections, log] = await Promise.all([
-      api.getCostSummary(dateRangeToDays(dateRange), undefined, connectionId),
-      api.getResourceStats({ connectionId }),
-      api.getConnections(),
-      api.getAuditLog(currentOrg.id),
+    const [dash, resourcesDash, costAnalytics, costForecast, activityRes] = await Promise.all([
+      api.getOverviewDashboard(),
+      api.getResourcesDashboard(),
+      api.getCostAnalytics(),
+      api.getCostForecast(),
+      api.getRecentActivity(1, 8),
     ]);
-    setCostSummary(cost);
-    setResourceStats(resStats);
-    // "AWS Accounts" is a count of everything connected, independent of the
-    // account filter — filtering it down to "1" when one account is
-    // selected would misrepresent how many accounts actually exist.
-    setConnectionCount(connections.connections.length);
-    setAuditLog(log.entries.slice(0, 8));
-  }, [currentOrg, dateRange, account]);
+    setDashboard(dash);
+    setResourceTrend(resourcesDash.trend30d);
+    setCostByService(costAnalytics.byService);
+    setForecast(costForecast.projectedTotal);
+    setActivity(activityRes.items);
+  }, []);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
+  const topServices = Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 6);
+
   return (
     <div>
-      <FilterBar title="Overview" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Overview" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+
+      {dashboard?.executiveSummary && (
+        <div className="rounded-xl border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-950/30 px-4 py-3 mb-5 text-sm text-slate-700 dark:text-slate-200">
+          <span className="text-[10px] uppercase tracking-wide text-brand-600 dark:text-brand-400 font-medium block mb-1">Executive Summary</span>
+          {dashboard.executiveSummary}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="AWS Accounts" value={String(connectionCount)} />
-        <StatCard label="Total Resources" value={(resourceStats?.total ?? 0).toLocaleString()} />
-        <StatCard label="Cost (MTD)" value={money(costSummary?.mtdCost ?? 0)} />
-        <StatCard label="Forecasted Cost" value={money(costSummary?.forecastCost ?? 0)} />
+        <StatCard label="AWS Accounts" value={String(dashboard?.connections.total ?? 0)} caption={dashboard?.connections.error ? `${dashboard.connections.error} need attention` : undefined} />
+        <StatCard label="Total Resources" value={(dashboard?.resources.total ?? 0).toLocaleString()} />
+        <StatCard label="Cost (MTD)" value={money(dashboard?.cost.monthToDate ?? 0)} />
+        <StatCard label="Forecasted Cost" value={forecast !== null ? money(forecast) : '—'} caption="linear projection" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost Over Time</h3>
-          <LineChart series={[{ label: 'Daily Cost', points: (costSummary?.daily ?? []).map(d => ({ x: d.date, y: d.cost })) }]} valueFormatter={money} />
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Trend (30 days)</h3>
+          {resourceTrend.length > 0
+            ? <LineChart series={[{ label: 'Created', points: resourceTrend.map(d => ({ x: d.date, y: d.created })) }, { label: 'Deleted', points: resourceTrend.map(d => ({ x: d.date, y: d.deleted })) }]} />
+            : <p className="text-sm text-slate-400">No resource lifecycle events yet.</p>}
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution</h3>
-          <Donut data={Object.entries(resourceStats?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(resourceStats?.total ?? 0), caption: 'resources' }} />
+          <Donut data={Object.entries(dashboard?.resources.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(dashboard?.resources.total ?? 0), caption: 'resources' }} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Cost</h3>
-          <BarChart data={(costSummary?.byService ?? []).slice(0, 6).map(s => ({ label: s.service, value: s.cost }))} valueFormatter={money} />
+          {topServices.length > 0
+            ? <BarChart data={topServices.map(([service, cost]) => ({ label: service, value: cost }))} valueFormatter={money} />
+            : <p className="text-sm text-slate-400">No cost data yet.</p>}
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Folders & Projects</h3>
@@ -75,10 +86,10 @@ export function Overview() {
             {folders.map(f => (
               <li key={f.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="text-slate-700 dark:text-slate-200">📁 {f.name}</span>
-                <span className="text-xs text-slate-400">{projects.filter(p => p.folderId === f.id).length} projects</span>
+                <span className="text-xs text-slate-400">{projects.filter(p => p.folder_id === f.id).length} projects</span>
               </li>
             ))}
-            {projects.filter(p => !p.folderId).map(p => (
+            {projects.filter(p => !p.folder_id).map(p => (
               <li key={p.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{p.name}</span>
               </li>
@@ -93,13 +104,13 @@ export function Overview() {
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Activity</h3>
         <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-          {auditLog.map(entry => (
+          {activity.map(entry => (
             <li key={entry.id} className="py-2 text-sm flex justify-between">
-              <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actorEmail ?? 'system'}</span></span>
-              <span className="text-xs text-slate-400 shrink-0">{new Date(entry.createdAt).toLocaleString()}</span>
+              <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+              <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
             </li>
           ))}
-          {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
+          {activity.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
         </ul>
         <Link to="/organization" className="text-xs text-brand-600 dark:text-brand-400 hover:underline mt-2 inline-block">View full audit log →</Link>
       </div>
