@@ -114,7 +114,7 @@ export const NAV_MODULES: NavModule[] = [
     { label: 'Cost Allocation', to: COST, real: true },
     { label: 'Chargeback', to: COST, real: true },
     { label: 'Showback', to: COST, real: true },
-    { label: 'Cost Reports', to: REPORTS, real: true },
+    { label: 'Cost Reports', to: COST, real: true },
  
     ],
   },
@@ -215,7 +215,7 @@ export const NAV_MODULES: NavModule[] = [
     { label: 'Roles', to: USERS, real: true },
     { label: 'Permissions', to: USERS, real: true },
     { label: 'API Keys', to: USERS, real: true },
-    { label: 'Audit Logs', to: ORG, real: true },
+    { label: 'Audit Logs', to: USERS, real: true },
   ],
 },
   {
