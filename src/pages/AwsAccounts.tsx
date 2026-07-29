@@ -14,7 +14,7 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { downloadExcel } from '../lib/excelExport';
-import { api, ApiError, type CloudConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
+import { api, ApiError, type CloudConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -57,6 +57,23 @@ export function AwsAccounts() {
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Dashboard');
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+
+  useEffect(() => { void api.getFavorites().then(r => setFavorites(r.favorites)); }, [refreshToken]);
+
+  async function toggleFavorite(connectionId: string, name: string) {
+    const path = `/aws-accounts/${connectionId}`;
+    const existing = favorites.find(f => f.path === path);
+    if (existing) {
+      await api.removeFavorite(existing.id);
+      setFavorites(prev => prev.filter(f => f.id !== existing.id));
+      toast(`Removed "${name}" from Favorites`, 'success');
+    } else {
+      const { favorite } = await api.addFavorite({ type: 'aws-account', label: name, path });
+      setFavorites(prev => [...prev, favorite]);
+      toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
+    }
+  }
 
   // Inventory search/filter/bulk/pagination state
   const [search, setSearchRaw] = useState('');
@@ -269,7 +286,9 @@ export function AwsAccounts() {
         <RowActionsMenu
           connection={c}
           validating={validatingIds.has(c.id)}
+          isFavorited={favorites.some(f => f.path === `/aws-accounts/${c.id}`)}
           onValidate={() => void runValidation(c.id)}
+          onToggleFavorite={() => void toggleFavorite(c.id, c.connection_name ?? c.aws_account_id)}
           onUpdateCredentials={c.connection_method === 'access_key' ? () => setUpdateCredsFor(c.id) : undefined}
           onDisconnect={() => void handleDisconnect(c.id)}
           onDelete={() => void handleDeletePermanently(c.id)}
@@ -707,10 +726,12 @@ export function AwsAccounts() {
 }
 
 /** Row-level "⋯" menu — replaces a row of competing text links with the single action point AWS Console / Datadog tables use, and adds two real actions (Open Console, Copy ID) that a link row had no room for. */
-function RowActionsMenu({ connection, validating, onValidate, onUpdateCredentials, onDisconnect, onDelete }: {
+function RowActionsMenu({ connection, validating, isFavorited, onValidate, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
   connection: CloudConnection;
   validating: boolean;
+  isFavorited: boolean;
   onValidate: () => void;
+  onToggleFavorite: () => void;
   onUpdateCredentials?: () => void;
   onDisconnect: () => void;
   onDelete: () => void;
@@ -751,6 +772,9 @@ function RowActionsMenu({ connection, validating, onValidate, onUpdateCredential
           </button>
           <button role="menuitem" onClick={openConsole} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Opens the AWS Console using your browser's current AWS sign-in session">
             Open AWS Console ↗
+          </button>
+          <button role="menuitem" onClick={() => { setOpen(false); onToggleFavorite(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Pin this account to the Overview page for quick access">
+            {isFavorited ? '★ Remove from Favorites' : '☆ Add to Favorites'}
           </button>
           <button role="menuitem" onClick={copyId} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy Account ID</button>
           {onUpdateCredentials && (

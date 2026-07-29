@@ -11,7 +11,7 @@ import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import {
   api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
-  type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry,
+  type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry, type Favorite,
 } from '../lib/api';
 
 function money(n: number): string {
@@ -50,6 +50,26 @@ export function AwsAccountDetail() {
   const [resourceCategory, setResourceCategory] = useState('');
   const [resourceRegion, setResourceRegion] = useState('');
   const [resourceStatus, setResourceStatus] = useState('');
+  const [favorite, setFavorite] = useState<Favorite | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    void api.getFavorites().then(r => setFavorite(r.favorites.find(f => f.path === `/aws-accounts/${id}`) ?? null));
+  }, [id]);
+
+  async function toggleFavorite() {
+    if (!id || !connection) return;
+    const name = connection.connection_name ?? connection.aws_account_id;
+    if (favorite) {
+      await api.removeFavorite(favorite.id);
+      setFavorite(null);
+      toast(`Removed "${name}" from Favorites`, 'success');
+    } else {
+      const { favorite: created } = await api.addFavorite({ type: 'aws-account', label: name, path: `/aws-accounts/${id}` });
+      setFavorite(created);
+      toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
+    }
+  }
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -152,6 +172,9 @@ export function AwsAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.aws_account_id}</span>
         <div className="flex-1" />
+        <button onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-lg leading-none text-amber-400 hover:text-amber-500 px-1">
+          {favorite ? '★' : '☆'}
+        </button>
         <button onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Testing…' : 'Test Connection'}
         </button>
