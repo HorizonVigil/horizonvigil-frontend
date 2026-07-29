@@ -110,6 +110,20 @@ export function AwsAccounts() {
     await loadInventory();
   }
 
+  async function handleDeletePermanently(id: string) {
+    const c = connections.find(x => x.id === id);
+    if (!(await confirm(`Permanently delete "${c?.connection_name ?? c?.aws_account_id}"? This is irreversible — its discovered resources, cost history, and validation runs are deleted too, not just this connection. Use Disconnect instead if you might reconnect it later.`))) return;
+    await api.deleteAccountPermanently(id);
+    await loadInventory();
+  }
+
+  async function handleBulkDeletePermanently() {
+    if (!(await confirm(`Permanently delete ${selectedIds.size} selected account(s)? This is irreversible — their discovered resources, cost history, and validation runs are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
+    await Promise.all([...selectedIds].map(id => api.deleteAccountPermanently(id)));
+    setSelectedIds(new Set());
+    await loadInventory();
+  }
+
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -189,6 +203,7 @@ export function AwsAccounts() {
               {running ? 'Validating…' : 'Validate'}
             </button>
             <button onClick={e => { e.stopPropagation(); void handleDisconnect(c.id); }} className="text-red-500 hover:underline">Disconnect</button>
+            <button onClick={e => { e.stopPropagation(); void handleDeletePermanently(c.id); }} className="text-red-500 hover:underline" title="Irreversible — also deletes this account's resources, cost history, and validation runs">Delete</button>
           </div>
         );
       },
@@ -371,7 +386,10 @@ export function AwsAccounts() {
             <span className="text-xs text-slate-400 pb-2 ml-auto">{inventoryTotal.toLocaleString()} account{inventoryTotal === 1 ? '' : 's'} total</span>
             <button onClick={exportExcel} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 mb-0">Export Excel</button>
             {bulkMode && selectedIds.size > 0 && (
-              <button onClick={() => void handleBulkDisconnect()} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Disconnect {selectedIds.size} selected</button>
+              <>
+                <button onClick={() => void handleBulkDisconnect()} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Disconnect {selectedIds.size} selected</button>
+                <button onClick={() => void handleBulkDeletePermanently()} className="text-xs rounded-md border border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5" title="Irreversible — also deletes resources, cost history, and validation runs for each selected account">Delete {selectedIds.size} selected permanently</button>
+              </>
             )}
             <button
               onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}

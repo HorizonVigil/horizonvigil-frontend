@@ -138,6 +138,7 @@ class ApiClient {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`, data);
   }
   disconnectAccount(id: string) { return this.delete<{ disconnected: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
+  deleteAccountPermanently(id: string) { return this.delete<{ deleted: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permanently`); }
   updateAccountCredentials(id: string, data: { accessKeyId: string; secretAccessKey: string }) {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/credentials`, data);
   }
