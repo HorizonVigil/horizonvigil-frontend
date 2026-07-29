@@ -77,30 +77,26 @@ export const NAV_MODULES: NavModule[] = [
     label: 'AWS Accounts',
     icon: '☁',
     to: ACCOUNTS,
+    // Consolidated from an earlier, larger list that had Account Explorer,
+    // Connection Validation, Cross-Account Roles, Credentials, Sync Status,
+    // Health, Permission Validation, and several purely-aliased items
+    // (Discovery Status, Cost Summary, Recommendations, Audit Logs) each as
+    // their own sidebar entry — most pointed at a tab that just re-showed
+    // Dashboard or Inventory under a different label, which is exactly the
+    // "duplicate page, different name" problem this list is meant to avoid.
+    // Every entry below now maps to a tab that answers a genuinely distinct
+    // question (see the TABS comment in AwsAccounts.tsx for what merged
+    // where).
     children: [
-      // Dashboard is the new default tab (see AwsAccounts.tsx useTabParam), so
+      // Dashboard is the default tab (see AwsAccounts.tsx useTabParam), so
       // its link is bare (no ?tab=) to match what useTabParam itself omits —
       // see isChildActive's exact-match comparison below.
       { label: 'Dashboard', to: ACCOUNTS, real: true },
       { label: 'Account Inventory', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
-      { label: 'Account Explorer', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
-      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
+      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Onboarding'), real: true },
       { label: 'Organizations', to: tabLink(ACCOUNTS, 'Organizations'), real: true },
-      { label: 'Cross-Account Roles', to: tabLink(ACCOUNTS, 'Cross-Account Roles'), real: true },
-      { label: 'Credentials', to: tabLink(ACCOUNTS, 'Credentials'), real: true },
-      { label: 'Permission Validation', to: tabLink(ACCOUNTS, 'Permission Validation'), real: true },
-      { label: 'Connection Validation', to: tabLink(ACCOUNTS, 'Permission Validation'), real: true },
-      { label: 'Sync Jobs', to: tabLink(ACCOUNTS, 'Sync Status'), real: true },
-      { label: 'Sync History', to: tabLink(ACCOUNTS, 'Sync Status'), real: true },
       { label: 'Regions', to: tabLink(ACCOUNTS, 'Regions'), real: true },
-      // No discovery scanner engine exists in this build — the Dashboard's
-      // Discovery card already shows this honestly (last run, "not scheduled").
-      { label: 'Discovery Status', to: ACCOUNTS, real: true },
-      { label: 'Health', to: tabLink(ACCOUNTS, 'Health'), real: true },
-      { label: 'Resource Coverage', to: tabLink(ACCOUNTS, 'Regions'), real: true },
-      { label: 'Cost Summary', to: ACCOUNTS, real: true },
-      { label: 'Recommendations', to: ACCOUNTS, real: true },
-      { label: 'Audit Logs', to: ACCOUNTS, real: true },
+      { label: 'Sync Center', to: tabLink(ACCOUNTS, 'Sync Center'), real: true },
       { label: 'Reports', to: tabLink(ACCOUNTS, 'Reports'), real: true },
       // Per-domain settings (distinct from the global Settings module, which
       // already covers AWS credentials/integrations org-wide) isn't built.

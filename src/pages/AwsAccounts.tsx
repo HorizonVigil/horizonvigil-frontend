@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -14,13 +14,23 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { downloadExcel } from '../lib/excelExport';
-import { api, ApiError, type CloudConnection, type AccountSummary, type CrossAccountRole, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
+import { api, ApiError, type CloudConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
 
-const TABS = ['Dashboard', 'Inventory', 'Organizations', 'Cross-Account Roles', 'Credentials', 'Sync Status', 'Health', 'Regions', 'Permission Validation', 'Reports'] as const;
+// Consolidated from an earlier version that had Account Explorer, Connection
+// Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
+// Permission Validation as separate top-level tabs — several of those showed
+// near-identical information (Sync Status and Permission Validation both
+// summarized per-account check state; Health just re-sliced Dashboard's own
+// numbers) and existed only because it was easy to add a tab, not because
+// each answered a distinct question. Sync Center now owns "is
+// discovery/validation working" as one workspace; Health folds into
+// Dashboard; Cross-Account Roles folds into an Inventory filter; Credentials
+// moves to the per-row "..." menu and the Account Detail page.
+const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports'] as const;
 type Tab = typeof TABS[number];
 
-const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
+const METHOD_CHIPS = [{ value: 'access_key', label: 'Access Key' }, { value: 'cross_account_role', label: 'Cross-Account Role' }] as const;
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 const PAGE_SIZES = [25, 50, 100];
 const REPORT_KINDS = [
@@ -33,12 +43,6 @@ const REPORT_KINDS = [
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
-
-function rotationDueInDays(keyRotatedAt: string | null): number | null {
-  if (!keyRotatedAt) return null;
-  const elapsedMs = Date.now() - new Date(keyRotatedAt).getTime();
-  return Math.max(0, 90 - Math.floor(elapsedMs / (NINETY_DAYS_MS / 90)));
 }
 
 
@@ -58,6 +62,7 @@ export function AwsAccounts() {
   const [search, setSearchRaw] = useState('');
   const [statusFilter, setStatusFilterRaw] = useState('');
   const [environmentFilter, setEnvironmentFilterRaw] = useState('');
+  const [methodFilter, setMethodFilterRaw] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSizeRaw] = useState(50);
   const [bulkMode, setBulkMode] = useState(false);
@@ -71,16 +76,17 @@ export function AwsAccounts() {
   const setSearch = (v: string) => { setSearchRaw(v); setPage(1); };
   const setStatusFilter = (v: string) => { setStatusFilterRaw(v); setPage(1); };
   const setEnvironmentFilter = (v: string) => { setEnvironmentFilterRaw(v); setPage(1); };
+  const setMethodFilter = (v: string) => { setMethodFilterRaw(v); setPage(1); };
   const setPageSize = (v: number) => { setPageSizeRaw(v); setPage(1); };
 
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
   const [awsOrgs, setAwsOrgs] = useState<{ awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[]>([]);
-  const [crossAccountRoles, setCrossAccountRoles] = useState<CrossAccountRole[]>([]);
   const [syncStatus, setSyncStatus] = useState<AccountSummary[]>([]);
-  const [health, setHealth] = useState<{ healthy: number; unhealthy: number; total: number; accounts: AccountSummary[] } | null>(null);
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
+  const [syncCenterLoaded, setSyncCenterLoaded] = useState(false);
+  const [expandedSyncRow, setExpandedSyncRow] = useState<string | null>(null);
   const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
   const [updateCredsFor, setUpdateCredsFor] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
@@ -93,6 +99,7 @@ export function AwsAccounts() {
         search: search || undefined,
         status: statusFilter || undefined,
         environment: environmentFilter || undefined,
+        connectionMethod: methodFilter || undefined,
       });
       setConnections(items);
       setInventoryTotal(pagination.total);
@@ -100,7 +107,7 @@ export function AwsAccounts() {
       setInventoryLoading(false);
       setInventoryLoadedOnce(true);
     }
-  }, [page, pageSize, search, statusFilter, environmentFilter]);
+  }, [page, pageSize, search, statusFilter, environmentFilter, methodFilter]);
 
   useEffect(() => { void loadInventory(); }, [loadInventory, refreshToken]);
   // Test-connection state keeps running in the background (see syncContext.tsx)
@@ -113,11 +120,14 @@ export function AwsAccounts() {
   useEffect(() => {
     if (tab === 'Dashboard') void api.getAwsAccountsDashboard().then(setDashboard);
     else if (tab === 'Organizations') void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts));
-    else if (tab === 'Cross-Account Roles') void api.getCrossAccountRoles().then(r => setCrossAccountRoles(r.roles));
-    else if (tab === 'Sync Status') void api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts));
-    else if (tab === 'Health') void api.getAccountsHealth().then(setHealth);
     else if (tab === 'Regions') void api.getAwsAccountsRegions().then(r => setRegions(r.regions));
-    else if (tab === 'Permission Validation') void api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts));
+    else if (tab === 'Sync Center') {
+      setSyncCenterLoaded(false);
+      void Promise.all([
+        api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts)),
+        api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts)),
+      ]).finally(() => setSyncCenterLoaded(true));
+    }
   }, [tab, refreshToken]);
 
   async function handleDisconnect(id: string) {
@@ -226,8 +236,10 @@ export function AwsAccounts() {
         return next;
       });
       await loadInventory();
-      if (tab === 'Permission Validation') void api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts));
-      else if (tab === 'Dashboard') void api.getAwsAccountsDashboard().then(setDashboard);
+      if (tab === 'Sync Center') {
+        void api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts));
+        void api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts));
+      } else if (tab === 'Dashboard') void api.getAwsAccountsDashboard().then(setDashboard);
     }
   }
 
@@ -258,6 +270,7 @@ export function AwsAccounts() {
           connection={c}
           validating={validatingIds.has(c.id)}
           onValidate={() => void runValidation(c.id)}
+          onUpdateCredentials={c.connection_method === 'access_key' ? () => setUpdateCredsFor(c.id) : undefined}
           onDisconnect={() => void handleDisconnect(c.id)}
           onDelete={() => void handleDeletePermanently(c.id)}
         />
@@ -269,35 +282,29 @@ export function AwsAccounts() {
   const anyErrors = connections.map(c => syncStates[c.id]).filter(s => s?.status === 'error' && s.error);
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / pageSize));
 
-  const crossAccountColumns: Column<CrossAccountRole>[] = [
-    { key: 'name', header: 'Name', render: r => r.connection_name, sortValue: r => r.connection_name },
-    { key: 'accountId', header: 'Account ID', render: r => <span className="font-mono text-xs">{r.aws_account_id}</span> },
-    { key: 'roleArn', header: 'Role ARN', render: r => <span className="font-mono text-[11px] break-all">{r.role_arn}</span> },
-    { key: 'externalId', header: 'External ID', render: r => <span className="font-mono text-[11px]">{r.external_id}</span> },
-    { key: 'status', header: 'Status', render: r => <Badge>{r.status}</Badge>, sortValue: r => r.status },
-    { key: 'created', header: 'Connected', render: r => new Date(r.created_at).toLocaleDateString(), sortValue: r => r.created_at },
-  ];
-
-  const syncColumns: Column<AccountSummary>[] = [
-    { key: 'name', header: 'Name', render: a => a.connection_name, sortValue: a => a.connection_name },
-    { key: 'status', header: 'Status', render: a => <Badge>{a.status}</Badge>, sortValue: a => a.status },
-    { key: 'lastSync', header: 'Last Sync', render: a => a.last_sync_at ? new Date(a.last_sync_at).toLocaleString() : 'Never', sortValue: a => a.last_sync_at ?? '' },
-    { key: 'lastCheck', header: 'Last Permission Check', render: a => a.last_permission_check_at ? new Date(a.last_permission_check_at).toLocaleString() : 'Never', sortValue: a => a.last_permission_check_at ?? '' },
-    { key: 'error', header: 'Error', render: a => a.error_message ? <span className="text-red-500 text-xs">{a.error_message}</span> : '—' },
-  ];
-
-  const healthColumns: Column<AccountSummary>[] = [
-    { key: 'name', header: 'Name', render: a => a.connection_name, sortValue: a => a.connection_name },
-    {
-      key: 'healthy', header: 'Health', render: a => {
-        const isHealthy = a.status === 'connected' && !a.error_message;
-        return <Badge tone={isHealthy ? 'good' : 'critical'}>{isHealthy ? 'Healthy' : 'Unhealthy'}</Badge>;
-      },
-    },
-    { key: 'status', header: 'Status', render: a => <Badge tone="neutral">{a.status}</Badge>, sortValue: a => a.status },
-    { key: 'lastDiscovery', header: 'Last Discovery', render: a => a.last_discovery_at ? new Date(a.last_discovery_at).toLocaleString() : 'Never' },
-    { key: 'error', header: 'Error', render: a => a.error_message ? <span className="text-red-500 text-xs">{a.error_message}</span> : '—' },
-  ];
+  // Sync Center merges what used to be three separate tabs (Sync Status,
+  // Permission Validation, Connection Validation) into one row per account —
+  // they were three views of the same underlying question ("is this
+  // account's connection actually working?"), sourced from the same two
+  // endpoints, just split across different pages.
+  const syncCenterRows = useMemo(() => {
+    const syncById = new Map(syncStatus.map(a => [a.id, a]));
+    return permissionsSummary.map(p => {
+      const sync = syncById.get(p.connectionId);
+      return {
+        connectionId: p.connectionId,
+        connectionName: p.connectionName,
+        connectionStatus: sync?.status ?? 'unknown',
+        lastSync: sync?.last_sync_at ?? null,
+        lastPermissionCheck: p.lastCheckedAt,
+        errorMessage: sync?.error_message ?? null,
+        overallStatus: p.overallStatus,
+        deniedCount: p.deniedCount,
+        errorCount: p.errorCount,
+        checks: p.checks,
+      };
+    });
+  }, [syncStatus, permissionsSummary]);
 
   return (
     <div>
@@ -462,8 +469,8 @@ export function AwsAccounts() {
                 {ENVIRONMENT_OPTIONS.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </label>
-            {(search || statusFilter || environmentFilter) && (
-              <button onClick={() => { setSearch(''); setStatusFilter(''); setEnvironmentFilter(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+            {(search || statusFilter || environmentFilter || methodFilter) && (
+              <button onClick={() => { setSearch(''); setStatusFilter(''); setEnvironmentFilter(''); setMethodFilter(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
             <span className="text-xs text-slate-400 pb-2 ml-auto">{inventoryTotal.toLocaleString()} account{inventoryTotal === 1 ? '' : 's'} total</span>
             <button onClick={() => void exportExcel()} disabled={exportingExcel} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 mb-0" title="Exports every matching account, not just this page">
@@ -483,11 +490,18 @@ export function AwsAccounts() {
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 mb-3">
+          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
             <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Status</span>
             <button onClick={() => setStatusFilter('')} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!statusFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
             {STATUS_CHIPS.map(s => (
               <button key={s} onClick={() => setStatusFilter(s)} className={`text-xs rounded-full px-2.5 py-1 border capitalize transition-colors ${statusFilter === s ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{s}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Connection Method</span>
+            <button onClick={() => setMethodFilter('')} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!methodFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
+            {METHOD_CHIPS.map(m => (
+              <button key={m.value} onClick={() => setMethodFilter(m.value)} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${methodFilter === m.value ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{m.label}</button>
             ))}
           </div>
 
@@ -500,7 +514,7 @@ export function AwsAccounts() {
               rowKey={c => c.id}
               pageSize={Math.max(pageSize, 1)}
               onRowClick={c => navigate(`/aws-accounts/${c.id}`)}
-              emptyMessage={inventoryTotal === 0 && !search && !statusFilter && !environmentFilter ? 'No AWS accounts connected yet. Click "+ Add AWS Account" to connect your first one.' : 'No accounts match these filters.'}
+              emptyMessage={inventoryTotal === 0 && !search && !statusFilter && !environmentFilter && !methodFilter ? 'No AWS accounts connected yet. Click "+ Add AWS Account" to connect your first one.' : 'No accounts match these filters.'}
             />
           )}
 
@@ -524,6 +538,23 @@ export function AwsAccounts() {
         </>
       )}
 
+      {tab === 'Onboarding' && (
+        <div className="max-w-xl mx-auto flex flex-col items-center text-center gap-4 py-14">
+          <div className="h-14 w-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-2xl">☁</div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Connect a New AWS Account</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
+            Connect via a cross-account IAM role — recommended, no long-lived keys to rotate or leak — or an IAM user's access keys. The wizard walks through least-privilege permissions, region selection, and an initial connection check.
+          </p>
+          <button onClick={() => setWizardOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2.5">Start Onboarding</button>
+          {inventoryTotal > 0 && (
+            <p className="text-xs text-slate-400 mt-6">
+              {inventoryTotal.toLocaleString()} account{inventoryTotal === 1 ? '' : 's'} already connected — see{' '}
+              <button onClick={() => setTab('Inventory')} className="text-brand-600 dark:text-brand-400 hover:underline">Account Inventory</button> to manage them.
+            </p>
+          )}
+        </div>
+      )}
+
       {tab === 'Organizations' && (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-slate-400">Connected accounts grouped by their 12-digit AWS account id — this is a grouping of this org's own connections, not a live read of AWS Organizations (that needs organizations:List* calls against a payer account, not built in this pass).</p>
@@ -544,78 +575,6 @@ export function AwsAccounts() {
               </ul>
             </div>
           ))}
-        </div>
-      )}
-
-      {tab === 'Cross-Account Roles' && (
-        <DataTable columns={crossAccountColumns} rows={crossAccountRoles} rowKey={r => r.id} emptyMessage="No accounts connected via cross-account role yet — the recommended connection method, see “+ Add AWS Account”." />
-      )}
-
-      {tab === 'Credentials' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                <th className="px-3 py-2">Account</th>
-                <th className="px-3 py-2">Method</th>
-                <th className="px-3 py-2">Masked Access Key</th>
-                <th className="px-3 py-2">Key Rotated</th>
-                <th className="px-3 py-2">Rotation Due</th>
-                <th className="px-3 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {connections.map(c => {
-                const daysLeft = rotationDueInDays(c.key_rotated_at);
-                const overdue = daysLeft !== null && daysLeft <= 0;
-                return (
-                  <tr key={c.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{c.connection_name ?? c.aws_account_id}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{c.connection_method === 'cross_account_role' ? 'Cross-account role' : 'Access key'}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{c.masked_access_key ?? '—'}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{c.key_rotated_at ? new Date(c.key_rotated_at).toLocaleDateString() : '—'}</td>
-                    <td className="px-3 py-2">
-                      {daysLeft === null ? <span className="text-slate-400">—</span> : (
-                        <Badge tone={overdue ? 'critical' : daysLeft <= 14 ? 'warning' : 'good'}>{overdue ? 'Overdue' : `${daysLeft}d left`}</Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      {c.connection_method === 'access_key' ? (
-                        <button onClick={() => setUpdateCredsFor(c.id)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Update Credentials</button>
-                      ) : <span className="text-slate-400 text-xs">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-              {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">No AWS accounts connected yet.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === 'Sync Status' && (
-        <DataTable columns={syncColumns} rows={syncStatus} rowKey={a => a.id} emptyMessage="No AWS accounts connected yet." />
-      )}
-
-      {tab === 'Health' && (
-        <div className="flex flex-col gap-4">
-          {health && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="text-xs text-slate-500 dark:text-slate-400">Total Accounts</div>
-                <div className="text-2xl font-semibold text-slate-900 dark:text-white">{health.total}</div>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="text-xs text-slate-500 dark:text-slate-400">Healthy</div>
-                <div className="text-2xl font-semibold text-emerald-600 dark:text-emerald-400">{health.healthy}</div>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="text-xs text-slate-500 dark:text-slate-400">Unhealthy</div>
-                <div className="text-2xl font-semibold text-red-600 dark:text-red-400">{health.unhealthy}</div>
-              </div>
-            </div>
-          )}
-          <DataTable columns={healthColumns} rows={health?.accounts ?? []} rowKey={a => a.id} emptyMessage="No AWS accounts connected yet." />
         </div>
       )}
 
@@ -645,31 +604,78 @@ export function AwsAccounts() {
         </div>
       )}
 
-      {tab === 'Permission Validation' && (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-slate-400">Latest real AWS permission-validation run per account (sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging API/Cost Explorer). Click "Validate" on the Inventory tab to run a fresh check.</p>
-          {permissionsSummary.map(acc => (
-            <div key={acc.connectionId} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <button onClick={() => navigate(`/aws-accounts/${acc.connectionId}`)} className="text-sm font-medium text-slate-800 dark:text-slate-100 hover:underline">{acc.connectionName}</button>
-                <div className="flex items-center gap-2">
-                  {acc.deniedCount > 0 && <Badge tone="warning">{acc.deniedCount} denied</Badge>}
-                  {acc.errorCount > 0 && <Badge tone="critical">{acc.errorCount} errors</Badge>}
-                  <Badge tone={acc.overallStatus === 'succeeded' ? 'good' : acc.overallStatus === 'never_run' ? 'neutral' : 'critical'}>{acc.overallStatus === 'never_run' ? 'Never validated' : acc.overallStatus}</Badge>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {acc.checks.map(check => (
-                  <span key={check.service} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 flex items-center gap-1.5" title={check.detail}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${check.status === 'granted' ? 'bg-emerald-500' : check.status === 'not_applicable' ? 'bg-slate-400' : check.status === 'denied' ? 'bg-amber-500' : 'bg-red-500'}`} />
-                    {check.label}{!check.verified && <span className="text-slate-400" title="This check's exact AWS API shape hasn't been confirmed against a live account yet">*</span>}
-                  </span>
-                ))}
-                {acc.checks.length === 0 && <span className="text-xs text-slate-400">No validation run yet.</span>}
-              </div>
+      {tab === 'Sync Center' && (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Is discovery and validation working?</h3>
+            <p className="text-xs text-slate-400">
+              One row per account: connection status, when it last synced, and the result of its most recent permission validation — sts:GetCallerIdentity plus real checks against IAM, Organizations, CloudWatch, CloudTrail, the Resource Groups Tagging API, and Cost Explorer, run with that account's own stored credentials. Click a row to see every individual check. Click "Validate" to run a fresh one.
+            </p>
+          </div>
+
+          {!syncCenterLoaded ? <TableSkeleton rows={5} cols={6} /> : (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                    <th className="px-3 py-2">Account</th>
+                    <th className="px-3 py-2">Connection</th>
+                    <th className="px-3 py-2">Last Sync</th>
+                    <th className="px-3 py-2">Last Validation</th>
+                    <th className="px-3 py-2">Result</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncCenterRows.map(row => {
+                    const expanded = expandedSyncRow === row.connectionId;
+                    const validating = validatingIds.has(row.connectionId);
+                    return (
+                      <Fragment key={row.connectionId}>
+                        <tr className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => setExpandedSyncRow(expanded ? null : row.connectionId)}>
+                          <td className="px-3 py-2">
+                            <button onClick={e => { e.stopPropagation(); navigate(`/aws-accounts/${row.connectionId}`); }} className="text-slate-700 dark:text-slate-200 hover:underline font-medium">{row.connectionName}</button>
+                          </td>
+                          <td className="px-3 py-2"><Badge tone="neutral">{row.connectionStatus}</Badge></td>
+                          <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{row.lastSync ? new Date(row.lastSync).toLocaleString() : 'Never'}</td>
+                          <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{row.lastPermissionCheck ? new Date(row.lastPermissionCheck).toLocaleString() : 'Never'}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              {row.deniedCount > 0 && <Badge tone="warning">{row.deniedCount} denied</Badge>}
+                              {row.errorCount > 0 && <Badge tone="critical">{row.errorCount} errors</Badge>}
+                              <Badge tone={row.overallStatus === 'succeeded' ? 'good' : row.overallStatus === 'never_run' ? 'neutral' : 'critical'}>{row.overallStatus === 'never_run' ? 'Never validated' : row.overallStatus}</Badge>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button onClick={e => { e.stopPropagation(); void runValidation(row.connectionId, row.connectionName); }} disabled={validating} className="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                              {validating ? 'Validating…' : 'Validate'}
+                            </button>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 bg-slate-50/60 dark:bg-slate-800/30">
+                            <td colSpan={6} className="px-3 py-3">
+                              {row.errorMessage && <p className="text-xs text-red-500 mb-2">{row.errorMessage}</p>}
+                              <div className="flex flex-wrap gap-2">
+                                {row.checks.map(check => (
+                                  <span key={check.service} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 flex items-center gap-1.5 bg-white dark:bg-slate-900" title={check.detail}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${check.status === 'granted' ? 'bg-emerald-500' : check.status === 'not_applicable' ? 'bg-slate-400' : check.status === 'denied' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                    {check.label}{!check.verified && <span className="text-slate-400" title="This check's exact AWS API shape hasn't been confirmed against a live account yet">*</span>}
+                                  </span>
+                                ))}
+                                {row.checks.length === 0 && <span className="text-xs text-slate-400">No validation run yet.</span>}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                  {syncCenterRows.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">No AWS accounts connected yet.</td></tr>}
+                </tbody>
+              </table>
             </div>
-          ))}
-          {permissionsSummary.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No AWS accounts connected yet.</p>}
+          )}
         </div>
       )}
 
@@ -701,10 +707,11 @@ export function AwsAccounts() {
 }
 
 /** Row-level "⋯" menu — replaces a row of competing text links with the single action point AWS Console / Datadog tables use, and adds two real actions (Open Console, Copy ID) that a link row had no room for. */
-function RowActionsMenu({ connection, validating, onValidate, onDisconnect, onDelete }: {
+function RowActionsMenu({ connection, validating, onValidate, onUpdateCredentials, onDisconnect, onDelete }: {
   connection: CloudConnection;
   validating: boolean;
   onValidate: () => void;
+  onUpdateCredentials?: () => void;
   onDisconnect: () => void;
   onDelete: () => void;
 }) {
@@ -746,6 +753,9 @@ function RowActionsMenu({ connection, validating, onValidate, onDisconnect, onDe
             Open AWS Console ↗
           </button>
           <button role="menuitem" onClick={copyId} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy Account ID</button>
+          {onUpdateCredentials && (
+            <button role="menuitem" onClick={() => { setOpen(false); onUpdateCredentials(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Update Credentials</button>
+          )}
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
           <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
           <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources, cost history, and validation runs">Delete Permanently</button>
