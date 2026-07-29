@@ -123,7 +123,7 @@ class ApiClient {
 
   // ── aws-accounts-api ─────────────────────────────────────────────────────
 
-  getAccounts(params: { status?: string; environment?: string; connectionMethod?: string; page?: number; limit?: number } = {}) {
+  getAccounts(params: { status?: string; environment?: string; connectionMethod?: string; region?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudConnection>>('awsAccounts', `/api/aws-accounts/accounts${qs(params)}`);
   }
   getAccount(id: string) { return this.get<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
@@ -140,12 +140,38 @@ class ApiClient {
   disconnectAccount(id: string) { return this.delete<{ disconnected: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
   testAccount(id: string) { return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/test`); }
 
-  getAccountsDashboard() {
-    return this.get<{ total: number; byStatus: Record<string, number>; byEnvironment: Record<string, number>; rotationDue: number; accounts: AccountSummary[] }>('awsAccounts', '/api/aws-accounts/dashboard');
+  getAwsAccountsDashboard() {
+    return this.get<AwsAccountsDashboard>('awsAccounts', '/api/aws-accounts/dashboard');
   }
   getAccountsSyncStatus() { return this.get<{ accounts: AccountSummary[] }>('awsAccounts', '/api/aws-accounts/sync-status'); }
   getAccountsHealth() { return this.get<{ healthy: number; unhealthy: number; total: number; accounts: AccountSummary[] }>('awsAccounts', '/api/aws-accounts/health'); }
   getAwsOrganizations() { return this.get<{ awsAccounts: { awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[] }>('awsAccounts', '/api/aws-accounts/organizations'); }
+
+  // Real AWS permission/connection validation (sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer probes)
+  validateAccountPermissions(id: string) {
+    return this.post<{ status: 'succeeded' | 'failed'; identity: IdentitySummary | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permissions/validate`);
+  }
+  getAccountPermissions(id: string) {
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permissions`);
+  }
+  getAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/sync-history`); }
+  getAwsAccountsPermissionsSummary() { return this.get<{ accounts: AccountPermissionSummary[] }>('awsAccounts', '/api/aws-accounts/permissions'); }
+
+  getAwsAccountsRegions() { return this.get<{ regions: { region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[] }>('awsAccounts', '/api/aws-accounts/regions'); }
+  getAccountRegions(id: string) { return this.get<{ regions: { region: string; isDefault: boolean; resourceCount: number; lastScan: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/regions`); }
+
+  getAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cost`); }
+  getAwsAccountsCostSummary() { return this.get<{ topCostAccounts: { connectionId: string; connectionName: string; monthToDate: number }[]; totalMonthToDate: number }>('awsAccounts', '/api/aws-accounts/cost-summary'); }
+
+  getAccountRecommendations(id: string) { return this.get<{ recommendations: CostRecommendation[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations`); }
+  getAwsAccountsRecommendationsSummary() { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number }>('awsAccounts', '/api/aws-accounts/recommendations'); }
+
+  getAccountActivity(id: string, params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${id}/activity${qs(params)}`); }
+  getAwsAccountsActivity(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/activity${qs(params)}`); }
+
+  async downloadAwsAccountsReport(kind: 'account-summary' | 'health' | 'permissions' | 'sync' | 'cost') {
+    return this.downloadRaw('awsAccounts', `/api/aws-accounts/reports/${kind}`, `aws-accounts-${kind}.csv`);
+  }
   getCrossAccountRoles() { return this.get<{ roles: CrossAccountRole[] }>('awsAccounts', '/api/aws-accounts/cross-account-roles'); }
   getAccountCredentials(id: string) {
     return this.get<{ connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; roleArn: string | null; externalId: string | null }>('awsAccounts', `/api/aws-accounts/credentials/${id}`);
@@ -480,8 +506,47 @@ export interface CloudConnection {
   last_discovery_at: string | null; last_full_scan_at: string | null; last_sync_at: string | null;
   key_rotated_at: string | null; error_message: string | null; scan_regions: string[]; created_at: string; updated_at: string;
 }
-export interface AccountSummary { id: string; connection_name: string; status: string; environment?: string; last_sync_at: string | null; last_discovery_at: string | null; error_message: string | null; resource_summary?: unknown; key_rotated_at?: string | null }
+export interface AccountSummary { id: string; connection_name: string; status: string; environment?: string; last_sync_at: string | null; last_discovery_at: string | null; last_permission_check_at?: string | null; error_message: string | null; resource_summary?: unknown; key_rotated_at?: string | null }
 export interface CrossAccountRole { id: string; connection_name: string; aws_account_id: string; role_arn: string; external_id: string; status: string; created_at: string }
+
+export interface AwsAccountsDashboard {
+  totalAccounts: number;
+  healthyAccounts: number;
+  failedAccounts: number;
+  disconnectedAccounts: number;
+  accountsNeedingAttention: number;
+  resourcesDiscovered: number;
+  regionsCovered: number;
+  lastDiscovery: string | null;
+  /** No discovery scheduler exists in this build — always null, shown as an honest "not scheduled" rather than a fabricated date. */
+  nextScheduledDiscovery: string | null;
+  /** No discovery engine exists in this build — always null. */
+  discoverySuccessRate: number | null;
+  permissionErrors: number;
+  syncFailures: number;
+  monthlyCost: number;
+  topCostAccounts: { connectionId: string; connectionName: string; monthToDate: number }[];
+  topGrowingAccounts: { connectionId: string; connectionName: string; totalResources: number }[];
+  openRecommendations: number;
+  potentialMonthlySavings: number;
+  rotationDue: number;
+  recentActivity: { id: string; action: string; targetId: string | null; occurredAt: string; actorEmail: string | null }[];
+  recentAlerts: { id: string; alertName: string; severity: string; connectionId: string | null; triggeredAt: string }[];
+}
+
+export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
+export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }
+export interface IdentitySummary { arn: string | null; accountId: string | null; userId: string | null }
+export interface ValidationRun { id: string; status: 'running' | 'succeeded' | 'failed'; identity_arn?: string | null; identity_account_id?: string | null; started_at: string; finished_at: string | null; error_message: string | null; triggered_by?: string | null }
+export interface AccountPermissionSummary {
+  connectionId: string;
+  connectionName: string;
+  lastCheckedAt: string | null;
+  overallStatus: 'running' | 'succeeded' | 'failed' | 'never_run';
+  deniedCount: number;
+  errorCount: number;
+  checks: PermissionCheckResult[];
+}
 
 export type ResourceCategory = 'Compute' | 'Storage' | 'Database' | 'Networking' | 'Security' | 'Containers' | 'Analytics' | 'Management' | 'Others';
 export interface ResourceCatalogEntry { key: string; service: string; resource_type: string; display_name: string; category: ResourceCategory; console_url_template: string | null; is_default_capable: boolean; scanner_status: 'live' | 'planned' }

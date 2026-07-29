@@ -78,13 +78,33 @@ export const NAV_MODULES: NavModule[] = [
     icon: '☁',
     to: ACCOUNTS,
     children: [
-      { label: 'Account Inventory', to: ACCOUNTS, real: true },
-      { label: 'Account Onboarding', to: ACCOUNTS, real: true },
+      // Dashboard is the new default tab (see AwsAccounts.tsx useTabParam), so
+      // its link is bare (no ?tab=) to match what useTabParam itself omits —
+      // see isChildActive's exact-match comparison below.
+      { label: 'Dashboard', to: ACCOUNTS, real: true },
+      { label: 'Account Inventory', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
+      { label: 'Account Explorer', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
+      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
       { label: 'Organizations', to: tabLink(ACCOUNTS, 'Organizations'), real: true },
       { label: 'Cross-Account Roles', to: tabLink(ACCOUNTS, 'Cross-Account Roles'), real: true },
       { label: 'Credentials', to: tabLink(ACCOUNTS, 'Credentials'), real: true },
-      { label: 'Sync Status', to: tabLink(ACCOUNTS, 'Sync Status'), real: true },
-      { label: 'Account Health', to: tabLink(ACCOUNTS, 'Health'), real: true },
+      { label: 'Permission Validation', to: tabLink(ACCOUNTS, 'Permission Validation'), real: true },
+      { label: 'Connection Validation', to: tabLink(ACCOUNTS, 'Permission Validation'), real: true },
+      { label: 'Sync Jobs', to: tabLink(ACCOUNTS, 'Sync Status'), real: true },
+      { label: 'Sync History', to: tabLink(ACCOUNTS, 'Sync Status'), real: true },
+      { label: 'Regions', to: tabLink(ACCOUNTS, 'Regions'), real: true },
+      // No discovery scanner engine exists in this build — the Dashboard's
+      // Discovery card already shows this honestly (last run, "not scheduled").
+      { label: 'Discovery Status', to: ACCOUNTS, real: true },
+      { label: 'Health', to: tabLink(ACCOUNTS, 'Health'), real: true },
+      { label: 'Resource Coverage', to: tabLink(ACCOUNTS, 'Regions'), real: true },
+      { label: 'Cost Summary', to: ACCOUNTS, real: true },
+      { label: 'Recommendations', to: ACCOUNTS, real: true },
+      { label: 'Audit Logs', to: ACCOUNTS, real: true },
+      { label: 'Reports', to: tabLink(ACCOUNTS, 'Reports'), real: true },
+      // Per-domain settings (distinct from the global Settings module, which
+      // already covers AWS credentials/integrations org-wide) isn't built.
+      { label: 'Settings', real: false },
     ],
   },
   {
