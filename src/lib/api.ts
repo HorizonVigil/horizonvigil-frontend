@@ -141,6 +141,9 @@ class ApiClient {
   updateAccountCredentials(id: string, data: { accessKeyId: string; secretAccessKey: string }) {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/credentials`, data);
   }
+  updateAccountRole(id: string, data: { roleArn: string; externalId: string }) {
+    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/role`, data);
+  }
   testAccount(id: string) { return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/test`); }
 
   getAwsAccountsDashboard() {

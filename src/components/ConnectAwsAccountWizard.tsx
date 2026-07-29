@@ -62,35 +62,43 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
     } catch (err) {
       const message = (err as Error).message;
       const isDuplicateAccount = message.includes('cloud_connections_org_id_aws_account_id_key');
+      if (!isDuplicateAccount) {
+        setError(message);
+        setLoading(false);
+        return;
+      }
 
       // A row for this AWS account already exists (disconnect is a soft
       // status-flip, not a row delete, so it collides with the org+account
-      // unique constraint on re-add). Rather than making the user go find
-      // the Credentials tab themselves, re-encrypt the existing connection
-      // in place — same outcome ("this account is connected with these
-      // keys"), no separate flow to discover.
-      if (isDuplicateAccount && method === 'access_key') {
-        try {
-          const { items } = await api.getAccounts({ search: form.awsAccountId.trim(), limit: 5 });
-          const existing = items.find((c) => c.aws_account_id === form.awsAccountId.trim());
-          if (existing) {
-            await api.updateAccountCredentials(existing.id, { accessKeyId: form.accessKeyId.trim(), secretAccessKey: form.secretAccessKey.trim() });
-            onConnected();
-            onClose();
-            return;
-          }
-        } catch (fallbackErr) {
-          setError(`This AWS account is already connected, and updating its stored credentials also failed: ${(fallbackErr as Error).message}`);
-          setLoading(false);
+      // unique constraint on re-add regardless of status). Look it up and
+      // update it in place instead of making the user find a separate flow —
+      // but the update shape (credentials vs. role) depends on the EXISTING
+      // connection's method, not whichever toggle happened to be selected
+      // here, since this wizard defaults to cross-account-role.
+      try {
+        const { items } = await api.getAccounts({ search: form.awsAccountId.trim(), limit: 5 });
+        const existing = items.find((c) => c.aws_account_id === form.awsAccountId.trim());
+        if (!existing) {
+          setError(`AWS account ${form.awsAccountId.trim()} is already connected to this org, but its existing connection couldn't be found to update automatically.`);
           return;
         }
+        if (existing.connection_method !== method) {
+          setMethod(existing.connection_method);
+          setError(
+            `This AWS account is already connected using ${existing.connection_method === 'access_key' ? 'IAM access keys' : 'a cross-account role'} — switched the form to match. Fill in ${existing.connection_method === 'access_key' ? 'the access keys' : 'the role ARN and external ID'} above and submit again to update it.`,
+          );
+          return;
+        }
+        if (method === 'access_key') {
+          await api.updateAccountCredentials(existing.id, { accessKeyId: form.accessKeyId.trim(), secretAccessKey: form.secretAccessKey.trim() });
+        } else {
+          await api.updateAccountRole(existing.id, { roleArn: form.roleArn.trim(), externalId: form.externalId.trim() });
+        }
+        onConnected();
+        onClose();
+      } catch (fallbackErr) {
+        setError(`This AWS account is already connected, and updating it also failed: ${(fallbackErr as Error).message}`);
       }
-
-      setError(
-        isDuplicateAccount
-          ? `AWS account ${form.awsAccountId.trim()} is already connected to this org. ${method === 'cross_account_role' ? 'Updating a role ARN in place isn’t supported yet — disconnect the existing connection first, then reconnect.' : 'Could not find its existing connection to update automatically — try the Credentials tab instead.'}`
-          : message,
-      );
     } finally {
       setLoading(false);
     }
