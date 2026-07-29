@@ -60,7 +60,37 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
       onConnected();
       onClose();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      const isDuplicateAccount = message.includes('cloud_connections_org_id_aws_account_id_key');
+
+      // A row for this AWS account already exists (disconnect is a soft
+      // status-flip, not a row delete, so it collides with the org+account
+      // unique constraint on re-add). Rather than making the user go find
+      // the Credentials tab themselves, re-encrypt the existing connection
+      // in place — same outcome ("this account is connected with these
+      // keys"), no separate flow to discover.
+      if (isDuplicateAccount && method === 'access_key') {
+        try {
+          const { items } = await api.getAccounts({ search: form.awsAccountId.trim(), limit: 5 });
+          const existing = items.find((c) => c.aws_account_id === form.awsAccountId.trim());
+          if (existing) {
+            await api.updateAccountCredentials(existing.id, { accessKeyId: form.accessKeyId.trim(), secretAccessKey: form.secretAccessKey.trim() });
+            onConnected();
+            onClose();
+            return;
+          }
+        } catch (fallbackErr) {
+          setError(`This AWS account is already connected, and updating its stored credentials also failed: ${(fallbackErr as Error).message}`);
+          setLoading(false);
+          return;
+        }
+      }
+
+      setError(
+        isDuplicateAccount
+          ? `AWS account ${form.awsAccountId.trim()} is already connected to this org. ${method === 'cross_account_role' ? 'Updating a role ARN in place isn’t supported yet — disconnect the existing connection first, then reconnect.' : 'Could not find its existing connection to update automatically — try the Credentials tab instead.'}`
+          : message,
+      );
     } finally {
       setLoading(false);
     }
