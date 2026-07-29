@@ -6,6 +6,8 @@ export interface Column<T> {
   render: (row: T) => React.ReactNode;
   sortValue?: (row: T) => string | number;
   defaultHidden?: boolean;
+  /** Keeps this column pinned to the left edge while the rest of a wide table scrolls horizontally — use on the one column (usually Name) a reader needs as a constant reference point. */
+  sticky?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -93,7 +95,7 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800">
               {visibleColumns.map(c => (
-                <th key={c.key} className="text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none">
+                <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
                   <button className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100" onClick={() => c.sortValue && toggleSort(c.key)} disabled={!c.sortValue}>
                     {c.header}
                     {sortKey === c.key && <span>{sortDir === 'asc' ? '▲' : '▼'}</span>}
@@ -104,8 +106,10 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
           </thead>
           <tbody>
             {pageRows.map(row => (
-              <tr key={rowKey(row)} className={`border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`} onClick={() => onRowClick?.(row)}>
-                {visibleColumns.map(c => <td key={c.key} className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">{c.render(row)}</td>)}
+              <tr key={rowKey(row)} className={`group border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`} onClick={() => onRowClick?.(row)}>
+                {visibleColumns.map(c => (
+                  <td key={c.key} className={`px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200 ${c.sticky ? 'sticky left-0 z-[1] bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50' : ''}`}>{c.render(row)}</td>
+                ))}
               </tr>
             ))}
             {pageRows.length === 0 && (

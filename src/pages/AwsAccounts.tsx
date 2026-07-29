@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -7,10 +7,12 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
 import { useConfirm } from '../components/ConfirmDialog';
+import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
+import { useToast } from '../lib/toast';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type AccountSummary, type CrossAccountRole, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
 
@@ -18,8 +20,9 @@ const TABS = ['Dashboard', 'Inventory', 'Organizations', 'Cross-Account Roles', 
 type Tab = typeof TABS[number];
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
-const STATUS_OPTIONS = ['connected', 'pending', 'error', 'disconnected', 'expired'];
+const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
+const PAGE_SIZES = [25, 50, 100];
 const REPORT_KINDS = [
   { kind: 'account-summary' as const, label: 'Account Summary' },
   { kind: 'health' as const, label: 'Health Report' },
@@ -38,24 +41,37 @@ function rotationDueInDays(keyRotatedAt: string | null): number | null {
   return Math.max(0, 90 - Math.floor(elapsedMs / (NINETY_DAYS_MS / 90)));
 }
 
+
 export function AwsAccounts() {
   const { projects } = useOrg();
   const { refreshToken } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { toast } = useToast();
   const { syncStates } = useSync();
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Dashboard');
   const [connections, setConnections] = useState<CloudConnection[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  // Inventory search/filter/bulk state
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [environmentFilter, setEnvironmentFilter] = useState('');
+  // Inventory search/filter/bulk/pagination state
+  const [search, setSearchRaw] = useState('');
+  const [statusFilter, setStatusFilterRaw] = useState('');
+  const [environmentFilter, setEnvironmentFilterRaw] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSizeRaw] = useState(50);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inventoryTotal, setInventoryTotal] = useState(0);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
+  const [inventoryLoadedOnce, setInventoryLoadedOnce] = useState(false);
+
+  // Every filter/pageSize change jumps back to page 1 — otherwise a narrower
+  // result set can leave you stranded on a page that no longer exists.
+  const setSearch = (v: string) => { setSearchRaw(v); setPage(1); };
+  const setStatusFilter = (v: string) => { setStatusFilterRaw(v); setPage(1); };
+  const setEnvironmentFilter = (v: string) => { setEnvironmentFilterRaw(v); setPage(1); };
+  const setPageSize = (v: number) => { setPageSizeRaw(v); setPage(1); };
 
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
@@ -67,17 +83,24 @@ export function AwsAccounts() {
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
   const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
   const [updateCredsFor, setUpdateCredsFor] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const loadInventory = useCallback(async () => {
-    const { items, pagination } = await api.getAccounts({
-      limit: 500,
-      search: search || undefined,
-      status: statusFilter || undefined,
-      environment: environmentFilter || undefined,
-    });
-    setConnections(items);
-    setInventoryTotal(pagination.total);
-  }, [search, statusFilter, environmentFilter]);
+    setInventoryLoading(true);
+    try {
+      const { items, pagination } = await api.getAccounts({
+        page, limit: pageSize,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        environment: environmentFilter || undefined,
+      });
+      setConnections(items);
+      setInventoryTotal(pagination.total);
+    } finally {
+      setInventoryLoading(false);
+      setInventoryLoadedOnce(true);
+    }
+  }, [page, pageSize, search, statusFilter, environmentFilter]);
 
   useEffect(() => { void loadInventory(); }, [loadInventory, refreshToken]);
   // Test-connection state keeps running in the background (see syncContext.tsx)
@@ -98,14 +121,18 @@ export function AwsAccounts() {
   }, [tab, refreshToken]);
 
   async function handleDisconnect(id: string) {
+    const c = connections.find(x => x.id === id);
     if (!(await confirm('Disconnect this AWS account? It will be marked disconnected — discovered resources and cost history are kept.'))) return;
     await api.disconnectAccount(id);
+    toast(`Disconnected "${c?.connection_name ?? c?.aws_account_id}"`, 'success');
     await loadInventory();
   }
 
   async function handleBulkDisconnect() {
-    if (!(await confirm(`Disconnect ${selectedIds.size} selected account(s)? They'll be marked disconnected — discovered resources and cost history are kept.`))) return;
+    const n = selectedIds.size;
+    if (!(await confirm(`Disconnect ${n} selected account(s)? They'll be marked disconnected — discovered resources and cost history are kept.`))) return;
     await Promise.all([...selectedIds].map(id => api.disconnectAccount(id)));
+    toast(`Disconnected ${n} account${n === 1 ? '' : 's'}`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
   }
@@ -114,12 +141,15 @@ export function AwsAccounts() {
     const c = connections.find(x => x.id === id);
     if (!(await confirm(`Permanently delete "${c?.connection_name ?? c?.aws_account_id}"? This is irreversible — its discovered resources, cost history, and validation runs are deleted too, not just this connection. Use Disconnect instead if you might reconnect it later.`))) return;
     await api.deleteAccountPermanently(id);
+    toast(`Deleted "${c?.connection_name ?? c?.aws_account_id}" permanently`, 'success');
     await loadInventory();
   }
 
   async function handleBulkDeletePermanently() {
-    if (!(await confirm(`Permanently delete ${selectedIds.size} selected account(s)? This is irreversible — their discovered resources, cost history, and validation runs are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
+    const n = selectedIds.size;
+    if (!(await confirm(`Permanently delete ${n} selected account(s)? This is irreversible — their discovered resources, cost history, and validation runs are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
     await Promise.all([...selectedIds].map(id => api.deleteAccountPermanently(id)));
+    toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
   }
@@ -132,17 +162,33 @@ export function AwsAccounts() {
     });
   }
 
-  function exportExcel() {
-    downloadExcel(
-      'aws-accounts-inventory',
-      'AWS Accounts',
-      ['Name', 'Account ID', 'Environment', 'Status', 'Connection Method', 'Region', 'Resources', 'Last Sync'],
-      connections.map(c => [
-        c.connection_name ?? c.aws_account_id, c.aws_account_id, c.environment, c.status,
-        c.connection_method === 'cross_account_role' ? 'Cross-account role' : 'Access key', c.default_region,
-        c.resource_summary?.totalResources ?? 0, c.last_sync_at ?? 'Never',
-      ]),
-    );
+  async function exportExcel() {
+    setExportingExcel(true);
+    try {
+      // Exports every matching account, not just the current page — the
+      // on-screen table is server-paginated, but an export that silently
+      // only covered 50 rows out of 400 matching accounts would be worse
+      // than no export button at all.
+      const { items } = await api.getAccounts({
+        limit: 5000,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        environment: environmentFilter || undefined,
+      });
+      downloadExcel(
+        'aws-accounts-inventory',
+        'AWS Accounts',
+        ['Name', 'Account ID', 'Environment', 'Status', 'Connection Method', 'Region', 'Resources', 'Last Sync'],
+        items.map(c => [
+          c.connection_name ?? c.aws_account_id, c.aws_account_id, c.environment, c.status,
+          c.connection_method === 'cross_account_role' ? 'Cross-account role' : 'Access key', c.default_region,
+          c.resource_summary?.totalResources ?? 0, c.last_sync_at ?? 'Never',
+        ]),
+      );
+      toast(`Exported ${items.length.toLocaleString()} account${items.length === 1 ? '' : 's'} to Excel`, 'success');
+    } finally {
+      setExportingExcel(false);
+    }
   }
 
   async function downloadReport(kind: typeof REPORT_KINDS[number]['kind']) {
@@ -158,10 +204,21 @@ export function AwsAccounts() {
     }
   }
 
-  async function runValidation(id: string) {
+  async function runValidation(id: string, knownName?: string) {
+    // knownName covers callers (like the Dashboard's Needing Attention list)
+    // whose account may not be on whatever page of paginated Inventory is
+    // currently loaded — falling back to connections.find would silently
+    // show a blank name in that case.
+    const name = knownName ?? connections.find(x => x.id === id)?.connection_name ?? connections.find(x => x.id === id)?.aws_account_id ?? 'Account';
     setValidatingIds(prev => new Set(prev).add(id));
     try {
-      await api.validateAccountPermissions(id);
+      const result = await api.validateAccountPermissions(id);
+      toast(
+        result.status === 'succeeded' ? `"${name}" validated — identity confirmed` : `"${name}" validation failed`,
+        result.status === 'succeeded' ? 'success' : 'error',
+      );
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Validation failed', 'error');
     } finally {
       setValidatingIds(prev => {
         const next = new Set(prev);
@@ -170,6 +227,7 @@ export function AwsAccounts() {
       });
       await loadInventory();
       if (tab === 'Permission Validation') void api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts));
+      else if (tab === 'Dashboard') void api.getAwsAccountsDashboard().then(setDashboard);
     }
   }
 
@@ -179,7 +237,7 @@ export function AwsAccounts() {
         <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelected(c.id)} onClick={e => e.stopPropagation()} />
       ),
     } as Column<CloudConnection>] : []),
-    { key: 'name', header: 'Name', render: c => c.connection_name ?? c.aws_account_id, sortValue: c => c.connection_name ?? c.aws_account_id },
+    { key: 'name', header: 'Name', sticky: true, render: c => c.connection_name ?? c.aws_account_id, sortValue: c => c.connection_name ?? c.aws_account_id },
     { key: 'accountId', header: 'Account ID', render: c => <span className="font-mono text-xs">{c.aws_account_id}</span>, sortValue: c => c.aws_account_id },
     { key: 'environment', header: 'Environment', render: c => <Badge tone="neutral">{c.environment}</Badge>, sortValue: c => c.environment },
     {
@@ -195,23 +253,21 @@ export function AwsAccounts() {
     { key: 'resources', header: 'Resources', render: c => c.resource_summary?.totalResources?.toLocaleString() ?? '—', sortValue: c => c.resource_summary?.totalResources ?? 0 },
     { key: 'lastSync', header: 'Last Sync', render: c => c.last_sync_at ? new Date(c.last_sync_at).toLocaleString() : 'Never', sortValue: c => c.last_sync_at ?? '' },
     {
-      key: 'actions', header: 'Actions', render: c => {
-        const running = validatingIds.has(c.id);
-        return (
-          <div className="flex gap-2 text-xs items-center">
-            <button onClick={e => { e.stopPropagation(); void runValidation(c.id); }} disabled={running} className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50" title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks">
-              {running ? 'Validating…' : 'Validate'}
-            </button>
-            <button onClick={e => { e.stopPropagation(); void handleDisconnect(c.id); }} className="text-red-500 hover:underline">Disconnect</button>
-            <button onClick={e => { e.stopPropagation(); void handleDeletePermanently(c.id); }} className="text-red-500 hover:underline" title="Irreversible — also deletes this account's resources, cost history, and validation runs">Delete</button>
-          </div>
-        );
-      },
+      key: 'actions', header: '', render: c => (
+        <RowActionsMenu
+          connection={c}
+          validating={validatingIds.has(c.id)}
+          onValidate={() => void runValidation(c.id)}
+          onDisconnect={() => void handleDisconnect(c.id)}
+          onDelete={() => void handleDeletePermanently(c.id)}
+        />
+      ),
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [bulkMode, selectedIds, validatingIds]);
+  ], [bulkMode, selectedIds, validatingIds, connections]);
 
   const anyErrors = connections.map(c => syncStates[c.id]).filter(s => s?.status === 'error' && s.error);
+  const totalPages = Math.max(1, Math.ceil(inventoryTotal / pageSize));
 
   const crossAccountColumns: Column<CrossAccountRole>[] = [
     { key: 'name', header: 'Name', render: r => r.connection_name, sortValue: r => r.connection_name },
@@ -250,107 +306,140 @@ export function AwsAccounts() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
           {TABS.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+            <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap transition-colors ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
               {t}
             </button>
           ))}
         </div>
-        <button onClick={() => setWizardOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2 shrink-0">+ Add AWS Account</button>
+        <button onClick={() => setWizardOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2 shrink-0 transition-colors">+ Add AWS Account</button>
       </div>
 
-      {tab === 'Dashboard' && dashboard && (
-        <div className="flex flex-col gap-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Total Accounts" value={String(dashboard.totalAccounts)} />
-            <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} />
-            <StatCard label="Failed" value={String(dashboard.failedAccounts)} />
-            <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} />
-            <StatCard label="Needing Attention" value={String(dashboard.accountsNeedingAttention)} />
-            <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
-            <StatCard label="Regions Covered" value={String(dashboard.regionsCovered)} />
-            <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} />
+      {tab === 'Dashboard' && (
+        !dashboard ? (
+          <div className="flex flex-col gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
           </div>
+        ) : (
+          <div className="flex flex-col gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Accounts" value={String(dashboard.totalAccounts)} />
+              <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} />
+              <StatCard label="Failed" value={String(dashboard.failedAccounts)} />
+              <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} />
+              <StatCard label="Needing Attention" value={String(dashboard.accountsNeedingAttention)} />
+              <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
+              <StatCard label="Regions Covered" value={String(dashboard.regionsCovered)} />
+              <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} />
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Discovery</h3>
-              <dl className="text-sm flex flex-col gap-2">
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Last Discovery</dt><dd className="text-slate-800 dark:text-slate-100">{dashboard.lastDiscovery ? new Date(dashboard.lastDiscovery).toLocaleString() : 'Never'}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Next Scheduled</dt><dd className="text-slate-400" title="No discovery scheduler exists in this build">Not scheduled</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Success Rate</dt><dd className="text-slate-400" title="No discovery engine exists in this build">N/A</dd></div>
-              </dl>
-            </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Validation</h3>
-              <dl className="text-sm flex flex-col gap-2">
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Permission Errors</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.permissionErrors}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Sync/Validation Failures</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.syncFailures}</dd></div>
-              </dl>
-            </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost & Recommendations</h3>
-              <dl className="text-sm flex flex-col gap-2">
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Monthly Cost (MTD)</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.monthlyCost)}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Open Recommendations</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.openRecommendations}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Potential Savings/mo</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.potentialMonthlySavings)}</dd></div>
-              </dl>
-            </div>
-          </div>
+            {dashboard.accountsNeedingAttentionList.length > 0 && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
+                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-1.5">⚠ Accounts Needing Attention</h3>
+                <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
+                  {dashboard.accountsNeedingAttentionList.map(a => {
+                    const isValidationPending = a.reason === 'Not yet validated';
+                    return (
+                      <li key={a.connectionId} className="flex items-center justify-between gap-3 py-2 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Badge tone={isValidationPending ? 'warning' : 'critical'}>{isValidationPending ? 'Pending' : 'Critical'}</Badge>
+                          <button onClick={() => navigate(`/aws-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline font-medium truncate">{a.connectionName}</button>
+                          <span className="text-slate-500 dark:text-slate-400 truncate">— {a.reason}</span>
+                        </div>
+                        <button onClick={() => void runValidation(a.connectionId, a.connectionName)} disabled={validatingIds.has(a.connectionId)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline shrink-0 disabled:opacity-50">
+                          {validatingIds.has(a.connectionId) ? 'Validating…' : 'Validate'}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {dashboard.accountsNeedingAttention > dashboard.accountsNeedingAttentionList.length && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">+{dashboard.accountsNeedingAttention - dashboard.accountsNeedingAttentionList.length} more — narrow with Inventory filters to see the rest.</p>
+                )}
+              </div>
+            )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Cost Accounts</h3>
-              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                {dashboard.topCostAccounts.map(a => (
-                  <li key={a.connectionId} className="flex justify-between py-2 text-sm">
-                    <button onClick={() => navigate(`/aws-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
-                    <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(a.monthToDate)}</span>
-                  </li>
-                ))}
-                {dashboard.topCostAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No cost data synced yet.</li>}
-              </ul>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Discovery</h3>
+                <dl className="text-sm flex flex-col gap-2">
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Last Discovery</dt><dd className="text-slate-800 dark:text-slate-100">{dashboard.lastDiscovery ? new Date(dashboard.lastDiscovery).toLocaleString() : 'Never'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Next Scheduled</dt><dd className="text-slate-400" title="No discovery scheduler exists in this build">Not scheduled</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Success Rate</dt><dd className="text-slate-400" title="No discovery engine exists in this build">N/A</dd></div>
+                </dl>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Validation</h3>
+                <dl className="text-sm flex flex-col gap-2">
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Permission Errors</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.permissionErrors}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Sync/Validation Failures</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.syncFailures}</dd></div>
+                </dl>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost & Recommendations</h3>
+                <dl className="text-sm flex flex-col gap-2">
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Monthly Cost (MTD)</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.monthlyCost)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Open Recommendations</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.openRecommendations}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Potential Savings/mo</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.potentialMonthlySavings)}</dd></div>
+                </dl>
+              </div>
             </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Growing Accounts</h3>
-              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                {dashboard.topGrowingAccounts.map(a => (
-                  <li key={a.connectionId} className="flex justify-between py-2 text-sm">
-                    <button onClick={() => navigate(`/aws-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
-                    <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{a.totalResources.toLocaleString()} resources</span>
-                  </li>
-                ))}
-                {dashboard.topGrowingAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No resource data yet.</li>}
-              </ul>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Activity</h3>
-              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                {dashboard.recentActivity.map(entry => (
-                  <li key={entry.id} className="py-2 text-sm flex justify-between">
-                    <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actorEmail ?? 'system'}</span></span>
-                    <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-                  </li>
-                ))}
-                {dashboard.recentActivity.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
-              </ul>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Cost Accounts</h3>
+                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                  {dashboard.topCostAccounts.map(a => (
+                    <li key={a.connectionId} className="flex justify-between py-2 text-sm">
+                      <button onClick={() => navigate(`/aws-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
+                      <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(a.monthToDate)}</span>
+                    </li>
+                  ))}
+                  {dashboard.topCostAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No cost data synced yet.</li>}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Growing Accounts</h3>
+                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                  {dashboard.topGrowingAccounts.map(a => (
+                    <li key={a.connectionId} className="flex justify-between py-2 text-sm">
+                      <button onClick={() => navigate(`/aws-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
+                      <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{a.totalResources.toLocaleString()} resources</span>
+                    </li>
+                  ))}
+                  {dashboard.topGrowingAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No resource data yet.</li>}
+                </ul>
+              </div>
             </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Alerts</h3>
-              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                {dashboard.recentAlerts.map(a => (
-                  <li key={a.id} className="py-2 text-sm flex justify-between">
-                    <span className="text-slate-700 dark:text-slate-200 flex items-center gap-2"><Badge>{a.severity}</Badge>{a.alertName}</span>
-                    <span className="text-xs text-slate-400 shrink-0">{new Date(a.triggeredAt).toLocaleString()}</span>
-                  </li>
-                ))}
-                {dashboard.recentAlerts.length === 0 && <li className="py-2 text-sm text-slate-400">No open alerts.</li>}
-              </ul>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Activity</h3>
+                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                  {dashboard.recentActivity.map(entry => (
+                    <li key={entry.id} className="py-2 text-sm flex justify-between">
+                      <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actorEmail ?? 'system'}</span></span>
+                      <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                    </li>
+                  ))}
+                  {dashboard.recentActivity.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
+                </ul>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Alerts</h3>
+                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                  {dashboard.recentAlerts.map(a => (
+                    <li key={a.id} className="py-2 text-sm flex justify-between">
+                      <span className="text-slate-700 dark:text-slate-200 flex items-center gap-2"><Badge>{a.severity}</Badge>{a.alertName}</span>
+                      <span className="text-xs text-slate-400 shrink-0">{new Date(a.triggeredAt).toLocaleString()}</span>
+                    </li>
+                  ))}
+                  {dashboard.recentAlerts.length === 0 && <li className="py-2 text-sm text-slate-400">No open alerts.</li>}
+                </ul>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
 
       {tab === 'Inventory' && (
@@ -367,13 +456,6 @@ export function AwsAccounts() {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or account ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${statusFilter ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Statuses</option>
-                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Environment</span>
               <select value={environmentFilter} onChange={e => setEnvironmentFilter(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${environmentFilter ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
                 <option value="">All Environments</option>
@@ -384,7 +466,9 @@ export function AwsAccounts() {
               <button onClick={() => { setSearch(''); setStatusFilter(''); setEnvironmentFilter(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
             <span className="text-xs text-slate-400 pb-2 ml-auto">{inventoryTotal.toLocaleString()} account{inventoryTotal === 1 ? '' : 's'} total</span>
-            <button onClick={exportExcel} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 mb-0">Export Excel</button>
+            <button onClick={() => void exportExcel()} disabled={exportingExcel} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 mb-0" title="Exports every matching account, not just this page">
+              {exportingExcel ? 'Exporting…' : 'Export Excel'}
+            </button>
             {bulkMode && selectedIds.size > 0 && (
               <>
                 <button onClick={() => void handleBulkDisconnect()} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Disconnect {selectedIds.size} selected</button>
@@ -393,22 +477,49 @@ export function AwsAccounts() {
             )}
             <button
               onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}
-              className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+              className={`text-xs rounded-md border px-3 py-1.5 transition-colors ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
             >
               {bulkMode ? 'Exit Bulk Actions' : 'Bulk Actions'}
             </button>
           </div>
 
-          <DataTable
-            columns={columns}
-            rows={connections}
-            rowKey={c => c.id}
-            pageSize={50}
-            onRowClick={c => navigate(`/aws-accounts/${c.id}`)}
-            emptyMessage="No AWS accounts connected yet. Click “+ Add AWS Account” to connect your first one."
-          />
-          {connections.length >= 500 && (
-            <p className="text-xs text-slate-400 mt-2">Showing the first 500 matching accounts — narrow with search/filters to see more specific results. Full virtual scrolling for unbounded account counts is a follow-up, not yet built.</p>
+          <div className="flex items-center gap-1.5 mb-3">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Status</span>
+            <button onClick={() => setStatusFilter('')} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!statusFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
+            {STATUS_CHIPS.map(s => (
+              <button key={s} onClick={() => setStatusFilter(s)} className={`text-xs rounded-full px-2.5 py-1 border capitalize transition-colors ${statusFilter === s ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{s}</button>
+            ))}
+          </div>
+
+          {inventoryLoading && !inventoryLoadedOnce ? (
+            <TableSkeleton rows={8} cols={7} />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={connections}
+              rowKey={c => c.id}
+              pageSize={Math.max(pageSize, 1)}
+              onRowClick={c => navigate(`/aws-accounts/${c.id}`)}
+              emptyMessage={inventoryTotal === 0 && !search && !statusFilter && !environmentFilter ? 'No AWS accounts connected yet. Click "+ Add AWS Account" to connect your first one.' : 'No accounts match these filters.'}
+            />
+          )}
+
+          {inventoryTotal > 0 && (
+            <div className="flex items-center justify-between mt-3 text-xs text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>Rows per page</span>
+                <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-xs">
+                  {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <span>Page {page} of {totalPages} · {inventoryTotal.toLocaleString()} total</span>
+                <div className="flex gap-1">
+                  <button disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+                  <button disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+                </div>
+              </div>
+            </div>
           )}
         </>
       )}
@@ -589,6 +700,61 @@ export function AwsAccounts() {
   );
 }
 
+/** Row-level "⋯" menu — replaces a row of competing text links with the single action point AWS Console / Datadog tables use, and adds two real actions (Open Console, Copy ID) that a link row had no room for. */
+function RowActionsMenu({ connection, validating, onValidate, onDisconnect, onDelete }: {
+  connection: CloudConnection;
+  validating: boolean;
+  onValidate: () => void;
+  onDisconnect: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  function copyId() {
+    void navigator.clipboard.writeText(connection.aws_account_id);
+    toast('Account ID copied', 'success');
+    setOpen(false);
+  }
+
+  function openConsole() {
+    window.open(`https://${connection.default_region}.console.aws.amazon.com/console/home?region=${connection.default_region}`, '_blank', 'noopener,noreferrer');
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block text-left" onClick={e => e.stopPropagation()}>
+      <button onClick={() => setOpen(v => !v)} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
+        ⋯
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
+          <button role="menuitem" onClick={() => { setOpen(false); onValidate(); }} disabled={validating} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks">
+            {validating ? 'Validating…' : 'Validate Permissions'}
+          </button>
+          <button role="menuitem" onClick={openConsole} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Opens the AWS Console using your browser's current AWS sign-in session">
+            Open AWS Console ↗
+          </button>
+          <button role="menuitem" onClick={copyId} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy Account ID</button>
+          <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+          <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
+          <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources, cost history, and validation runs">Delete Permanently</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Re-encrypts stored credentials for an access-key connection in place —
  * disconnect+re-add hits the org_id+aws_account_id unique constraint since
@@ -601,6 +767,7 @@ function UpdateCredentialsModal({ connection, onClose, onUpdated }: { connection
   const [secretAccessKey, setSecretAccessKey] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   async function submit() {
     if (!connection) return;
@@ -608,6 +775,7 @@ function UpdateCredentialsModal({ connection, onClose, onUpdated }: { connection
     setError(null);
     try {
       await api.updateAccountCredentials(connection.id, { accessKeyId, secretAccessKey });
+      toast(`Credentials updated for "${connection.connection_name ?? connection.aws_account_id}"`, 'success');
       onUpdated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update credentials.');

@@ -6,8 +6,10 @@ import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
+import { useToast } from '../lib/toast';
+import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import {
-  api,
+  api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
   type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry,
 } from '../lib/api';
@@ -28,6 +30,7 @@ export function AwsAccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { syncStates, startSync } = useSync();
+  const { toast } = useToast();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<CloudConnection | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
@@ -86,15 +89,25 @@ export function AwsAccountDetail() {
     if (!id) return;
     setValidating(true);
     try {
-      await api.validateAccountPermissions(id);
+      const result = await api.validateAccountPermissions(id);
+      toast(result.status === 'succeeded' ? 'Validated — identity confirmed' : 'Validation failed', result.status === 'succeeded' ? 'success' : 'error');
       await loadPermissions();
       await load();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Validation failed', 'error');
     } finally {
       setValidating(false);
     }
   }
 
-  if (!connection) return <div className="text-sm text-slate-400">Loading…</div>;
+  if (!connection) {
+    return (
+      <div className="flex flex-col gap-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
+      </div>
+    );
+  }
 
   const sync = id ? syncStates[id] : undefined;
   const syncing = sync?.status === 'running';

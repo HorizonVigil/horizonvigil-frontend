@@ -529,6 +529,7 @@ export interface AwsAccountsDashboard {
   nextScheduledDiscovery: string | null;
   /** No discovery engine exists in this build — always null. */
   discoverySuccessRate: number | null;
+  accountsNeedingAttentionList: { connectionId: string; connectionName: string; reason: string }[];
   permissionErrors: number;
   syncFailures: number;
   monthlyCost: number;

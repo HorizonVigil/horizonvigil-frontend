@@ -10,6 +10,10 @@ export default {
           500: '#3382ff', 600: '#1d63f5', 700: '#164ce0', 800: '#193fb5', 900: '#1a398f',
         },
       },
+      keyframes: {
+        fadeIn: { from: { opacity: 0, transform: 'translateY(4px)' }, to: { opacity: 1, transform: 'translateY(0)' } },
+        shimmer: { '100%': { transform: 'translateX(100%)' } },
+      },
     },
   },
   plugins: [],
