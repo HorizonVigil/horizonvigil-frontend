@@ -138,6 +138,9 @@ class ApiClient {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`, data);
   }
   disconnectAccount(id: string) { return this.delete<{ disconnected: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
+  updateAccountCredentials(id: string, data: { accessKeyId: string; secretAccessKey: string }) {
+    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/credentials`, data);
+  }
   testAccount(id: string) { return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/test`); }
 
   getAwsAccountsDashboard() {

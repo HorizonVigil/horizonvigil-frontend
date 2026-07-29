@@ -12,7 +12,7 @@ import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { downloadExcel } from '../lib/excelExport';
-import { api, type CloudConnection, type AccountSummary, type CrossAccountRole, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
+import { api, ApiError, type CloudConnection, type AccountSummary, type CrossAccountRole, type AwsAccountsDashboard, type AccountPermissionSummary } from '../lib/api';
 
 const TABS = ['Dashboard', 'Inventory', 'Organizations', 'Cross-Account Roles', 'Credentials', 'Sync Status', 'Health', 'Regions', 'Permission Validation', 'Reports'] as const;
 type Tab = typeof TABS[number];
@@ -66,6 +66,7 @@ export function AwsAccounts() {
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
   const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
+  const [updateCredsFor, setUpdateCredsFor] = useState<string | null>(null);
 
   const loadInventory = useCallback(async () => {
     const { items, pagination } = await api.getAccounts({
@@ -431,6 +432,7 @@ export function AwsAccounts() {
                 <th className="px-3 py-2">Masked Access Key</th>
                 <th className="px-3 py-2">Key Rotated</th>
                 <th className="px-3 py-2">Rotation Due</th>
+                <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -448,10 +450,15 @@ export function AwsAccounts() {
                         <Badge tone={overdue ? 'critical' : daysLeft <= 14 ? 'warning' : 'good'}>{overdue ? 'Overdue' : `${daysLeft}d left`}</Badge>
                       )}
                     </td>
+                    <td className="px-3 py-2">
+                      {c.connection_method === 'access_key' ? (
+                        <button onClick={() => setUpdateCredsFor(c.id)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Update Credentials</button>
+                      ) : <span className="text-slate-400 text-xs">—</span>}
+                    </td>
                   </tr>
                 );
               })}
-              {connections.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">No AWS accounts connected yet.</td></tr>}
+              {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">No AWS accounts connected yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -552,7 +559,71 @@ export function AwsAccounts() {
       )}
 
       <ConnectAwsAccountWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onConnected={loadInventory} projects={projects} />
+      {updateCredsFor && (
+        <UpdateCredentialsModal
+          connection={connections.find(c => c.id === updateCredsFor) ?? null}
+          onClose={() => setUpdateCredsFor(null)}
+          onUpdated={() => { setUpdateCredsFor(null); void loadInventory(); }}
+        />
+      )}
       {confirmDialog}
+    </div>
+  );
+}
+
+/**
+ * Re-encrypts stored credentials for an access-key connection in place —
+ * disconnect+re-add hits the org_id+aws_account_id unique constraint since
+ * disconnect is a soft status-flip, not a row delete (see accounts.ts). This
+ * is also the only way to rotate credentials at all; the Credentials tab
+ * showed a "Rotation Due" badge with nothing to act on before this existed.
+ */
+function UpdateCredentialsModal({ connection, onClose, onUpdated }: { connection: CloudConnection | null; onClose: () => void; onUpdated: () => void }) {
+  const [accessKeyId, setAccessKeyId] = useState('');
+  const [secretAccessKey, setSecretAccessKey] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!connection) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.updateAccountCredentials(connection.id, { accessKeyId, secretAccessKey });
+      onUpdated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update credentials.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Update Credentials</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
+        </div>
+        <p className="text-xs text-slate-400">
+          Replaces the stored access key for <strong>{connection?.connection_name ?? connection?.aws_account_id}</strong> — used to rotate credentials, or to re-encrypt after the platform's encryption key changes. Status resets to "pending" until you re-run Validate.
+        </p>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">Access Key ID</span>
+          <input value={accessKeyId} onChange={e => setAccessKeyId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="AKIA…" />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">Secret Access Key</span>
+          <input type="password" value={secretAccessKey} onChange={e => setSecretAccessKey(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
+        </label>
+        {error && <p className="text-xs text-red-500">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+          <button onClick={() => void submit()} disabled={submitting || !accessKeyId || !secretAccessKey} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-1.5">
+            {submitting ? 'Saving…' : 'Save & Reconnect'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
