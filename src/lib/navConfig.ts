@@ -295,14 +295,18 @@ export const NAV_MODULES: NavModule[] = [
     icon: '●',
     to: SETTINGS,
     children: [
-      { label: 'AWS Integrations', to: SETTINGS, real: true },
-      { label: 'Billing', to: SETTINGS, real: true },
-      { label: 'Notifications', to: SETTINGS, real: true },
-      { label: 'Credentials', to: SETTINGS, real: true },
-      { label: 'RBAC', to: SETTINGS, real: true },
-      { label: 'System Settings', to: SETTINGS, real: true },
-      { label: 'Branding', to: SETTINGS, real: true },
-      { label: 'License', to: SETTINGS, real: true },
+      // Profile isn't one of the original 8 — Settings.tsx's default tab
+      // (bare, no ?tab=) groups the per-you settings (profile, theme,
+      // sign-out) that don't belong under any of the 8 per-org sections.
+      { label: 'Profile', to: SETTINGS, real: true },
+      { label: 'AWS Integrations', to: tabLink(SETTINGS, 'AWS Integrations'), real: true },
+      { label: 'Billing', to: tabLink(SETTINGS, 'Billing'), real: true },
+      { label: 'Notifications', to: tabLink(SETTINGS, 'Notifications'), real: true },
+      { label: 'Credentials', to: tabLink(SETTINGS, 'Credentials'), real: true },
+      { label: 'RBAC', to: tabLink(SETTINGS, 'RBAC'), real: true },
+      { label: 'System Settings', to: tabLink(SETTINGS, 'System Settings'), real: true },
+      { label: 'Branding', to: tabLink(SETTINGS, 'Branding'), real: true },
+      { label: 'License', to: tabLink(SETTINGS, 'License'), real: true },
     ],
   },
 ];
