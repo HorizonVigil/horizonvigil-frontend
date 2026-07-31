@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal } from './Modal';
 import { api, type ProjectRow, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
+import { useSync } from '../lib/syncContext';
 
 // Every AWS region enabled by default (no opt-in required) — this list
 // previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
@@ -33,9 +34,16 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   const [scanRegions, setScanRegions] = useState<string[]>(REGIONS);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { startDiscovery } = useSync();
 
   function toggleRegion(r: string) {
     setScanRegions(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
+  }
+
+  /** Kicks off the same "Discover Resources" + "Sync Cost from AWS" calls the account detail page's buttons make, so a newly (re)connected account doesn't sit empty until someone finds those buttons manually. Fire-and-forget — startDiscovery already tracks its own progress in syncContext, and the account detail page picks that up via useSyncCompletion whenever the user lands there. */
+  function autoSync(connectionId: string) {
+    startDiscovery(connectionId);
+    void api.syncAccountCost(connectionId).catch(() => {});
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -44,7 +52,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
     if (scanRegions.length === 0) { setError('Select at least one region to scan.'); return; }
     setLoading(true);
     try {
-      await api.createAccount({
+      const created = await api.createAccount({
         connectionMethod: method,
         awsAccountId: form.awsAccountId.trim(),
         accessKeyId: method === 'access_key' ? form.accessKeyId.trim() : undefined,
@@ -57,6 +65,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         connectionName: form.connectionName || undefined,
         environment: form.environment,
       });
+      autoSync(created.id);
       onConnected();
       onClose();
     } catch (err) {
@@ -94,6 +103,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         } else {
           await api.updateAccountRole(existing.id, { roleArn: form.roleArn.trim(), externalId: form.externalId.trim() });
         }
+        autoSync(existing.id);
         onConnected();
         onClose();
       } catch (fallbackErr) {
