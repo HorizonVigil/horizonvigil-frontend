@@ -321,12 +321,22 @@ export function findActiveModule(pathname: string): NavModule {
  * one) — NavLink's own `isActive` only looks at pathname, which would light
  * up every sibling sharing one URL at once now that most of them carry
  * distinct `?tab=` values.
+ *
+ * `siblings` is the module's full children list. A handful of modules
+ * deliberately point several children at the exact same `to` (see the file
+ * header — they're real facets of one page, not separate views yet). None
+ * of those siblings is more "current" than another, so highlighting all of
+ * them at once looked like every entry in the menu was identical/active —
+ * this only highlights a child whose destination is unique among its
+ * siblings, leaving shared-destination groups unhighlighted instead.
  */
-export function isChildActive(child: NavChild, pathname: string, search: string): boolean {
+export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string): boolean {
   if (!child.to) return false;
   const [childPath, childQuery] = child.to.split('?');
   if (pathname !== childPath) return false;
   const currentTab = new URLSearchParams(search).get('tab');
   const childTab = childQuery ? new URLSearchParams(childQuery).get('tab') : null;
-  return (currentTab ?? null) === (childTab ?? null);
+  if ((currentTab ?? null) !== (childTab ?? null)) return false;
+  const sharedBy = siblings.filter(s => s.to === child.to).length;
+  return sharedBy === 1;
 }
