@@ -22,8 +22,18 @@ type Tab = typeof TABS[number];
 /** Best-effort human label for a catalog `service` key (e.g. "ec2" -> "EC2") —
  * short keys are almost always AWS's own acronym, longer ones get title-cased.
  * Not hand-curated per service; good enough for a breadcrumb/heading, not a
- * claim of authoritative AWS branding. */
-export function serviceLabel(service: string): string {
+ * claim of authoritative AWS branding.
+ *
+ * `category` is an optional display-only override, not a data-model change:
+ * AWS's own DescribeVpcs/DescribeSubnets/etc. are literally EC2 API calls,
+ * so the catalog correctly has service='ec2' for VPC networking resources
+ * too (and the backend's ?service= filter has to keep using that real
+ * value) — but showing a card labeled "EC2" while browsing the Networking
+ * category reads as a mistake even though the data is accurate, since
+ * "EC2" already means something different (the Compute category's actual
+ * instances/AMIs/volumes) one click away. */
+export function serviceLabel(service: string, category?: string): string {
+  if (service === 'ec2' && category === 'Networking') return 'VPC';
   if (service.length <= 5) return service.toUpperCase();
   return service.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
@@ -479,12 +489,12 @@ export function Resources() {
   ];
 
   const workspaceCrumb = isWorkspaceView
-    ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: presetCategory, to: `/resources/${presetCategory}` }, { label: serviceLabel(presetService) }]} />
+    ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: presetCategory, to: `/resources/${presetCategory}` }, { label: serviceLabel(presetService, presetCategory) }]} />
     : <Breadcrumb />;
 
   return (
     <div>
-      <FilterBar title={isWorkspaceView ? serviceLabel(presetService) : 'Resources'} breadcrumb={workspaceCrumb} />
+      <FilterBar title={isWorkspaceView ? serviceLabel(presetService, presetCategory) : 'Resources'} breadcrumb={workspaceCrumb} />
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TABS.map(t => (
@@ -499,7 +509,7 @@ export function Resources() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
             <CategoryStatCard
               label="Total Resources" value={total} percent={100} category="Total"
-              caption={isWorkspaceView ? `${serviceLabel(presetService)} in this org` : `${liveTypes} of ${catalog.length || 241} types live`}
+              caption={isWorkspaceView ? `${serviceLabel(presetService, presetCategory)} in this org` : `${liveTypes} of ${catalog.length || 241} types live`}
             />
             {!isWorkspaceView && coreCounts.map(c => (
               <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
@@ -558,13 +568,13 @@ export function Resources() {
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent {isWorkspaceView ? serviceLabel(presetService) : ''} Resource Changes</h3>
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent {isWorkspaceView ? serviceLabel(presetService, presetCategory) : ''} Resource Changes</h3>
             <DataTable columns={eventColumns} rows={workspaceRecentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
             <p className="text-xs text-slate-400 mt-2">Last 20 changes — for the full filterable history, see the Resource Timeline tab.</p>
           </div>
 
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService, presetCategory)} Resources` : 'All Resources'}</h3>
             <div className="flex items-center gap-2">
               {bulkMode && selectedIds.size > 0 && (
                 <button onClick={() => { setBulkResult(null); setBulkModalOpen(true); }} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">

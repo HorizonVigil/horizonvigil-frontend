@@ -53,7 +53,7 @@ export function ResourcesCategory() {
           const card = (
             <div className={`rounded-xl border p-4 flex items-center justify-between gap-2 transition ${s.live ? 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm' : 'border-slate-100 dark:border-slate-800/60 bg-slate-50 dark:bg-slate-900/40'}`}>
               <div className="min-w-0">
-                <div className={`font-medium truncate ${s.live ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>{serviceLabel(s.service)}</div>
+                <div className={`font-medium truncate ${s.live ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`}>{serviceLabel(s.service, category)}</div>
                 <div className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
                   {s.live ? `${s.count.toLocaleString()} resource${s.count === 1 ? '' : 's'}` : `${s.typeCount} type${s.typeCount === 1 ? '' : 's'} catalogued`}
                 </div>
