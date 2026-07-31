@@ -65,6 +65,8 @@ export function AwsAccountDetail() {
   // Tab-specific data
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
+  const [curSyncing, setCurSyncing] = useState(false);
+  const [curProgress, setCurProgress] = useState('');
   const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
   const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
   const [validating, setValidating] = useState(false);
@@ -147,6 +149,38 @@ export function AwsAccountDetail() {
       toast(err instanceof ApiError ? err.message : 'Cost sync failed', 'error');
     } finally {
       setSyncingCost(false);
+    }
+  }
+
+  async function syncCur() {
+    if (!id) return;
+    setCurSyncing(true);
+    try {
+      setCurProgress('Finding your Cost & Usage Report…');
+      await api.discoverCur(id);
+      setCurProgress('Fetching this month\'s manifest…');
+      const { reportKeys } = await api.getCurManifest(id);
+      if (reportKeys.length === 0) {
+        toast('CUR report found, but no data files are published yet for this billing period.', 'error');
+        return;
+      }
+      for (let i = 0; i < reportKeys.length; i++) {
+        let skipRows = 0;
+        let done = false;
+        while (!done) {
+          setCurProgress(`Ingesting file ${i + 1} of ${reportKeys.length} — ${skipRows.toLocaleString()} rows so far…`);
+          const result = await api.ingestCurStep(id, reportKeys[i], skipRows);
+          skipRows = result.rowsProcessed;
+          done = result.done;
+        }
+      }
+      await api.finalizeCur(id);
+      toast('Cost & Usage Report synced — Cost Allocation, Chargeback, and Showback now have real per-resource data.', 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Cost & Usage Report sync failed', 'error');
+    } finally {
+      setCurSyncing(false);
+      setCurProgress('');
     }
   }
 
@@ -405,7 +439,11 @@ export function AwsAccountDetail() {
 
       {tab === 'Cost' && (
         <div className="flex flex-col gap-3">
-          <div className="flex justify-end">
+          <div className="flex justify-end items-center gap-2">
+            {curProgress && <span className="text-xs text-slate-400">{curProgress}</span>}
+            <button onClick={() => void syncCur()} disabled={curSyncing} title="Discovers your AWS Cost & Usage Report (with resource IDs) and ingests it — real per-resource cost, powers Cost Allocation/Chargeback/Showback on the Cost Management page. Requires a CUR report set up in AWS Billing Console with 'Include resource IDs' checked." className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+              {curSyncing ? 'Syncing…' : 'Sync Cost & Usage Report'}
+            </button>
             <button onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from AWS Cost Explorer (ce:GetCostAndUsage) using this account's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
               {syncingCost ? 'Syncing…' : 'Sync Cost from AWS'}
             </button>

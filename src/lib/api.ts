@@ -205,6 +205,14 @@ class ApiClient {
   executeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/execute`); }
   rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/rollback`); }
 
+  // Cost & Usage Report (CUR) ingestion — real per-resource cost, populating resource_costs for the existing Cost Allocation/Chargeback/Showback pages in cost-management-api.
+  discoverCur(id: string) { return this.post<{ reportName: string; bucket: string; prefix: string; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/discover`); }
+  getCurManifest(id: string) { return this.get<{ billingPeriod: string; reportKeys: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/manifest`); }
+  ingestCurStep(id: string, reportKey: string, skipRows: number) {
+    return this.post<{ rowsProcessed: number; rowsIngestedThisBatch: number; done: boolean }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/ingest-step`, { reportKey, skipRows });
+  }
+  finalizeCur(id: string) { return this.post<{ syncedAt: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/finalize`); }
+
   // ── resources-api ────────────────────────────────────────────────────────
 
   getResourcesDashboard() {
