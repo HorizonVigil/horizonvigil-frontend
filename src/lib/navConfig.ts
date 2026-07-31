@@ -249,12 +249,14 @@ export const NAV_MODULES: NavModule[] = [
     icon: '◔',
     to: USERS,
     children: [
+      // Users is the default tab (see UsersGroups.tsx's useTabParam), so its
+      // link is bare (no ?tab=) — see isChildActive's exact-match comparison.
       { label: 'Users', to: USERS, real: true },
-      { label: 'Groups', to: USERS, real: true },
-      { label: 'Roles', to: USERS, real: true },
-      { label: 'Permissions', to: USERS, real: true },
-      { label: 'API Keys', to: USERS, real: true },
-      { label: 'Audit Logs', to: USERS, real: true },
+      { label: 'Groups', to: tabLink(USERS, 'Groups'), real: true },
+      { label: 'Roles', to: tabLink(USERS, 'Roles'), real: true },
+      { label: 'Permissions', to: tabLink(USERS, 'Permissions'), real: true },
+      { label: 'API Keys', to: tabLink(USERS, 'API Keys'), real: true },
+      { label: 'Audit Logs', to: tabLink(USERS, 'Audit Logs'), real: true },
     ],
   },
   {

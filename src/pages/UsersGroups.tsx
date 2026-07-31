@@ -4,14 +4,18 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry } from '../lib/api';
 
 type MyPermissions = { role: Role; description: string; effectivePermissions: { role: Role; description: string } };
 
 const ROLES: Role[] = ['owner', 'admin', 'editor', 'viewer', 'billing_admin'];
+const TABS = ['Users', 'Groups', 'Roles', 'Permissions', 'API Keys', 'Audit Logs'] as const;
+type Tab = typeof TABS[number];
 
 export function UsersGroups() {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Users');
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
@@ -169,62 +173,72 @@ export function UsersGroups() {
     <div>
       <FilterBar title="Users & Groups" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Members</h3>
-        <table className="w-full text-sm mb-4">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-              <th className="py-2">Email</th><th className="py-2">Name</th><th className="py-2">MFA</th><th className="py-2">Role</th><th className="py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map(m => (
-              <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? '—'}</td>
-                <td className="py-2 text-slate-500 dark:text-slate-400">{m.fullName ?? '—'}</td>
-                <td className="py-2">{m.mfaEnabled ? <Badge tone="good">enabled</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
-                <td className="py-2">
-                  <select value={m.role} onChange={e => void handleRoleChange(m.roleGrantId, e.target.value as Role)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1">
-                    {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </td>
-                <td className="py-2"><button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button></td>
-              </tr>
-            ))}
-            {members.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No members yet.</td></tr>}
-          </tbody>
-        </table>
-
-        {pendingInvites.length > 0 && (
-          <div className="mb-4">
-            <h4 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Pending Invites</h4>
-            <ul className="flex flex-col gap-1">
-              {pendingInvites.map(pi => (
-                <li key={pi.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                  <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({pi.role})</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <form onSubmit={handleInvite} className="flex gap-2 items-end flex-wrap">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Invite by email</span>
-            <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Role</span>
-            <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
-              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </label>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Invite</button>
-        </form>
-        {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            {t}
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+      {tab === 'Users' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Members</h3>
+          <table className="w-full text-sm mb-4">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="py-2">Email</th><th className="py-2">Name</th><th className="py-2">MFA</th><th className="py-2">Role</th><th className="py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {members.map(m => (
+                <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? '—'}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{m.fullName ?? '—'}</td>
+                  <td className="py-2">{m.mfaEnabled ? <Badge tone="good">enabled</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
+                  <td className="py-2">
+                    <select value={m.role} onChange={e => void handleRoleChange(m.roleGrantId, e.target.value as Role)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1">
+                      {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-2"><button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button></td>
+                </tr>
+              ))}
+              {members.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No members yet.</td></tr>}
+            </tbody>
+          </table>
+
+          {pendingInvites.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Pending Invites</h4>
+              <ul className="flex flex-col gap-1">
+                {pendingInvites.map(pi => (
+                  <li key={pi.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({pi.role})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <form onSubmit={handleInvite} className="flex gap-2 items-end flex-wrap">
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">Invite by email</span>
+              <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">Role</span>
+              <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
+                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Invite</button>
+          </form>
+          {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+        </div>
+      )}
+
+      {tab === 'Groups' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Groups</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-4">
@@ -266,7 +280,9 @@ export function UsersGroups() {
           </form>
           {groupError && <p className="text-sm text-red-500 mt-2">{groupError}</p>}
         </div>
+      )}
 
+      {tab === 'Roles' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Roles Reference</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
@@ -279,7 +295,9 @@ export function UsersGroups() {
             {roles.length === 0 && <li className="py-2 text-sm text-slate-400">No role definitions available.</li>}
           </ul>
         </div>
+      )}
 
+      {tab === 'Permissions' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Your Permissions</h3>
           {myPermissions ? (
@@ -298,50 +316,54 @@ export function UsersGroups() {
             <p className="text-sm text-slate-400">Loading permissions…</p>
           )}
         </div>
-      </div>
+      )}
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">API Keys</h3>
-        <table className="w-full text-sm mb-4">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-              <th className="py-2">Name</th><th className="py-2">Prefix</th><th className="py-2">Created</th><th className="py-2">Status</th><th className="py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {apiKeys.map(k => (
-              <tr key={k.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                <td className="py-2 text-slate-700 dark:text-slate-200">{k.name}</td>
-                <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{k.key_prefix}…</td>
-                <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(k.created_at).toLocaleDateString()}</td>
-                <td className="py-2">{k.revoked_at ? <Badge tone="neutral">revoked</Badge> : <Badge tone="good">active</Badge>}</td>
-                <td className="py-2">
-                  {!k.revoked_at && <button onClick={() => void handleRevokeKey(k.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
-                </td>
+      {tab === 'API Keys' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">API Keys</h3>
+          <table className="w-full text-sm mb-4">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="py-2">Name</th><th className="py-2">Prefix</th><th className="py-2">Created</th><th className="py-2">Status</th><th className="py-2"></th>
               </tr>
-            ))}
-            {apiKeys.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No API keys yet.</td></tr>}
-          </tbody>
-        </table>
-        <form onSubmit={handleCreateKey} className="flex gap-2">
-          <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="Key name (e.g. CI pipeline)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Key</button>
-        </form>
-        {keyError && <p className="text-sm text-red-500 mt-2">{keyError}</p>}
-      </div>
+            </thead>
+            <tbody>
+              {apiKeys.map(k => (
+                <tr key={k.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="py-2 text-slate-700 dark:text-slate-200">{k.name}</td>
+                  <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{k.key_prefix}…</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(k.created_at).toLocaleDateString()}</td>
+                  <td className="py-2">{k.revoked_at ? <Badge tone="neutral">revoked</Badge> : <Badge tone="good">active</Badge>}</td>
+                  <td className="py-2">
+                    {!k.revoked_at && <button onClick={() => void handleRevokeKey(k.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
+                  </td>
+                </tr>
+              ))}
+              {apiKeys.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No API keys yet.</td></tr>}
+            </tbody>
+          </table>
+          <form onSubmit={handleCreateKey} className="flex gap-2">
+            <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="Key name (e.g. CI pipeline)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Key</button>
+          </form>
+          {keyError && <p className="text-sm text-red-500 mt-2">{keyError}</p>}
+        </div>
+      )}
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mt-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Logs</h3>
-        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-          {auditLog.map(entry => (
-            <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
-              <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-              <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-            </li>
-          ))}
-          {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
-        </ul>
-      </div>
+      {tab === 'Audit Logs' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Logs</h3>
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+            {auditLog.map(entry => (
+              <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
+                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+              </li>
+            ))}
+            {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
+          </ul>
+        </div>
+      )}
 
       <Modal open={!!newlyCreatedKey} onClose={() => setNewlyCreatedKey(null)} title="API Key Created">
         <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
