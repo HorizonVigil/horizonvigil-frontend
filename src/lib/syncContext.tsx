@@ -13,22 +13,21 @@ export interface SyncState {
 interface SyncContextType {
   syncStates: Record<string, SyncState>;
   startSync: (connectionId: string) => void;
+  startDiscovery: (connectionId: string) => void;
 }
 
 const SyncContext = createContext<SyncContextType | null>(null);
 
 /**
- * Mounted once at the app root so a check started from AwsAccounts.tsx keeps
- * running even if that component unmounts mid-request.
+ * Mounted once at the app root so a check/scan started from AwsAccounts.tsx
+ * keeps running even if that component unmounts mid-request.
  *
- * This used to drive a multi-step AWS discovery scan (plan -> step*N ->
- * finalize) against a customer's live AWS account. That scanning engine
- * isn't part of this rebuild (see docs/about-project.md) — aws-accounts-api
- * only has a single honest `/test` endpoint that confirms stored credentials
- * are present and well-formed, no live `sts:GetCallerIdentity` call. This
- * still exposes the same `{status,done,total,stepId}` shape so call sites
- * that used to render step progress don't need special-casing, but done/total
- * are always 0/1 -> 1/1 in one jump since there's only one step now.
+ * `startSync` is the lightweight credentials check (`/test` — no live AWS
+ * call). `startDiscovery` drives the real multi-step scan (plan -> step*N ->
+ * finalize) restored from the pre-teardown build, one request per
+ * scanner×region step so each invocation fits Cloudflare's free-tier
+ * CPU/subrequest budget. Both write into the same `syncStates[id]` slot —
+ * they're mutually exclusive per connection, which `runningIds` enforces.
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
@@ -58,7 +57,43 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  return <SyncContext.Provider value={{ syncStates, startSync }}>{children}</SyncContext.Provider>;
+  const startDiscovery = useCallback((connectionId: string) => {
+    if (runningIds.current.has(connectionId)) return;
+    runningIds.current.add(connectionId);
+    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'Planning scan…' } }));
+
+    (async () => {
+      const runStartedAt = new Date().toISOString();
+      const stepErrors: { message: string; severity: 'error' | 'info' }[] = [];
+      try {
+        const { steps } = await api.getDiscoverySteps(connectionId);
+        const total = steps.length || 1;
+        for (let done = 0; done < steps.length; done++) {
+          const stepId = steps[done];
+          setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done, total, stepId } }));
+          const result = await api.runDiscoveryStep(connectionId, stepId);
+          if (result.error) stepErrors.push({ message: `${stepId}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
+        }
+        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
+        const summary = await api.finalizeDiscovery(connectionId, runStartedAt, stepErrors);
+        const realErrors = stepErrors.filter(e => e.severity !== 'info');
+        setSyncStates(prev => ({
+          ...prev,
+          [connectionId]: {
+            status: realErrors.length > 0 ? 'error' : 'done', done: steps.length, total, stepId: '',
+            error: realErrors.length > 0 ? `${realErrors.length} scan step${realErrors.length === 1 ? '' : 's'} failed: ${realErrors[0].message}` : undefined,
+            warning: realErrors.length === 0 ? `Found ${summary.totalResources} resources${summary.deleted ? `, removed ${summary.deleted} no longer in AWS` : ''}.` : undefined,
+          },
+        }));
+      } catch (err) {
+        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Discovery failed.' } }));
+      } finally {
+        runningIds.current.delete(connectionId);
+      }
+    })();
+  }, []);
+
+  return <SyncContext.Provider value={{ syncStates, startSync, startDiscovery }}>{children}</SyncContext.Provider>;
 }
 
 export function useSync() {

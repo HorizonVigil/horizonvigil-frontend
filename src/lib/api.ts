@@ -147,6 +147,15 @@ class ApiClient {
   }
   testAccount(id: string) { return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/test`); }
 
+  // Real resource discovery — one request per scanner×region step, kept small enough to fit Cloudflare's free-tier CPU/subrequest budget per invocation.
+  getDiscoverySteps(id: string) { return this.get<{ steps: string[]; regions: string[]; scannerCount: number }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/steps`); }
+  runDiscoveryStep(id: string, stepId: string) {
+    return this.post<{ stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/run-step`, { stepId });
+  }
+  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[]) {
+    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors });
+  }
+
   getAwsAccountsDashboard() {
     return this.get<AwsAccountsDashboard>('awsAccounts', '/api/aws-accounts/dashboard');
   }

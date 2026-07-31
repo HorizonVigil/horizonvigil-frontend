@@ -29,7 +29,7 @@ type AccountCredentials = {
 export function AwsAccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { syncStates, startSync } = useSync();
+  const { syncStates, startSync, startDiscovery } = useSync();
   const { toast } = useToast();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<CloudConnection | null>(null);
@@ -191,12 +191,18 @@ export function AwsAccountDetail() {
           {favorite ? '★' : '☆'}
         </button>
         <button onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-          {syncing ? 'Testing…' : 'Test Connection'}
+          {syncing ? 'Working…' : 'Test Connection'}
+        </button>
+        <button onClick={() => id && startDiscovery(id)} disabled={syncing} title="Scans this account's regions for EC2 instances, EBS volumes, security groups, and VPC networking — real AWS API calls" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+          {syncing ? 'Working…' : 'Discover Resources'}
         </button>
         <button onClick={() => void runValidation()} disabled={validating} title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
           {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
+      {sync?.status === 'running' && sync.total > 1 && (
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 -mt-2">Scanning… step {sync.done + 1} of {sync.total} ({sync.stepId})</p>
+      )}
       {sync?.status === 'done' && sync.warning && <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 -mt-2">{sync.warning}</p>}
       {sync?.status === 'error' && sync.error && (
         <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
