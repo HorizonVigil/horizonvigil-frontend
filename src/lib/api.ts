@@ -168,6 +168,7 @@ class ApiClient {
   getAccountRegions(id: string) { return this.get<{ regions: { region: string; isDefault: boolean; resourceCount: number; lastScan: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/regions`); }
 
   getAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cost`); }
+  syncAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cost/sync`); }
   getAwsAccountsCostSummary() { return this.get<{ topCostAccounts: { connectionId: string; connectionName: string; monthToDate: number }[]; totalMonthToDate: number }>('awsAccounts', '/api/aws-accounts/cost-summary'); }
 
   getAccountRecommendations(id: string) { return this.get<{ recommendations: CostRecommendation[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations`); }

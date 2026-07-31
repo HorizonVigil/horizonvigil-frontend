@@ -39,6 +39,7 @@ export function AwsAccountDetail() {
 
   // Tab-specific data
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
+  const [syncingCost, setSyncingCost] = useState(false);
   const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
   const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
   const [validating, setValidating] = useState(false);
@@ -108,6 +109,20 @@ export function AwsAccountDetail() {
     else if (tab === 'Recommendations') void api.getAccountRecommendations(id).then(r => setRecommendations(r.recommendations));
     else if (tab === 'Activity') void api.getAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
   }, [tab, id, loadPermissions]);
+
+  async function syncCost() {
+    if (!id) return;
+    setSyncingCost(true);
+    try {
+      const result = await api.syncAccountCost(id);
+      toast(result.synced > 0 ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from AWS` : 'Synced — no cost data found for this account this month', 'success');
+      setAccountCost(await api.getAccountCost(id));
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Cost sync failed', 'error');
+    } finally {
+      setSyncingCost(false);
+    }
+  }
 
   async function runValidation() {
     if (!id) return;
@@ -329,22 +344,29 @@ export function AwsAccountDetail() {
       )}
 
       {tab === 'Cost' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Month to Date</h3>
-            <div className="text-2xl font-semibold text-slate-900 dark:text-white tabular-nums">{accountCost ? money(accountCost.monthToDate) : '—'}</div>
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-end">
+            <button onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from AWS Cost Explorer (ce:GetCostAndUsage) using this account's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
+              {syncingCost ? 'Syncing…' : 'Sync Cost from AWS'}
+            </button>
           </div>
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">By Service</h3>
-            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-              {Object.entries(accountCost?.byService ?? {}).sort(([, a], [, b]) => b - a).map(([service, cost]) => (
-                <li key={service} className="flex justify-between py-1.5 text-sm">
-                  <span className="text-slate-600 dark:text-slate-300">{service}</span>
-                  <span className="text-slate-800 dark:text-slate-100 tabular-nums">{money(cost)}</span>
-                </li>
-              ))}
-              {(!accountCost || Object.keys(accountCost.byService).length === 0) && <li className="py-1.5 text-sm text-slate-400">No cost data synced yet.</li>}
-            </ul>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Month to Date</h3>
+              <div className="text-2xl font-semibold text-slate-900 dark:text-white tabular-nums">{accountCost ? money(accountCost.monthToDate) : '—'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">By Service</h3>
+              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                {Object.entries(accountCost?.byService ?? {}).sort(([, a], [, b]) => b - a).map(([service, cost]) => (
+                  <li key={service} className="flex justify-between py-1.5 text-sm">
+                    <span className="text-slate-600 dark:text-slate-300">{service}</span>
+                    <span className="text-slate-800 dark:text-slate-100 tabular-nums">{money(cost)}</span>
+                  </li>
+                ))}
+                {(!accountCost || Object.keys(accountCost.byService).length === 0) && <li className="py-1.5 text-sm text-slate-400">No cost data synced yet — click "Sync Cost from AWS" above.</li>}
+              </ul>
+            </div>
           </div>
         </div>
       )}
