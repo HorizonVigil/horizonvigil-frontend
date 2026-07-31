@@ -295,6 +295,10 @@ class ApiClient {
   getSavingsPlans(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-plans${qs(params)}`); }
   getOptimizationHistory(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/optimization-history${qs(params)}`); }
   updateSavingsOpportunity(id: string, status: 'applied' | 'dismissed') { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}`, { status }); }
+  // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
+  generateRecommendations(connectionId?: string) {
+    return this.post<{ connectionsScanned: number; flagged: number; cleared: number }>('costOptimization', '/api/cost-optimization/generate', connectionId ? { connectionId } : {});
+  }
   getCostAnomalies(params: { connectionId?: string; status?: string; service?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CostAnomaly>>('costOptimization', `/api/cost-optimization/anomalies${qs(params)}`);
   }

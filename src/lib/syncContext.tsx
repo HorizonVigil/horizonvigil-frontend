@@ -76,6 +76,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         }
         setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
         const summary = await api.finalizeDiscovery(connectionId, runStartedAt, stepErrors);
+        // Best-effort — a scan that found real resources should still report success even if this fails.
+        await api.generateRecommendations(connectionId).catch(() => {});
         const realErrors = stepErrors.filter(e => e.severity !== 'info');
         setSyncStates(prev => ({
           ...prev,
