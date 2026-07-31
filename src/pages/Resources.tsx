@@ -11,10 +11,13 @@ import { Drawer } from '../components/Drawer';
 import { Modal } from '../components/Modal';
 import { useTheme } from '../lib/theme';
 import { categoryColor, categoricalColor, CHROME, STATUS, pick } from '../components/charts/palette';
+import { useTabParam } from '../lib/useTabParam';
 import { useFilters } from '../lib/filterContext';
 import { api, type CloudResource, type ResourceCatalogEntry, type ResourceLifecycleEvent } from '../lib/api';
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
+const TABS = ['All Resources', 'Global Search', 'Resource Relationships', 'Tags Explorer', 'Resource Timeline'] as const;
+type Tab = typeof TABS[number];
 
 /** Best-effort human label for a catalog `service` key (e.g. "ec2" -> "EC2") —
  * short keys are almost always AWS's own acronym, longer ones get title-cased.
@@ -134,6 +137,7 @@ export function Resources() {
   const isDark = theme === 'dark';
   const [searchParams] = useSearchParams();
   const routeParams = useParams<{ category?: string; service?: string }>();
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'All Resources');
   // Reached two ways: /resources/all (every filter free, the "view everything"
   // fallback) or /resources/:category/:service (a service workspace, drilled
   // down from ResourcesOverview/ResourcesCategory — category+service are then
@@ -157,8 +161,7 @@ export function Resources() {
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Tags Explorer
-  const [tagsOpen, setTagsOpen] = useState(false);
+  // Tags Explorer — now its own tab, fetched when opened.
   const [tagKeys, setTagKeys] = useState<{ key: string; resourceCount: number; sampleValues: string[] }[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
 
@@ -175,6 +178,30 @@ export function Resources() {
   const [bulkOperation, setBulkOperation] = useState<'add_tag' | 'remove_tag'>('add_tag');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<string | null>(null);
+
+  // Global Search — a real cross-category search (api.searchResources), not
+  // the Inventory table's own connectionId/category-scoped filter.
+  const [globalQuery, setGlobalQuery] = useState('');
+  const [globalResults, setGlobalResults] = useState<CloudResource[]>([]);
+  const [globalCapped, setGlobalCapped] = useState(false);
+  const [globalLoading, setGlobalLoading] = useState(false);
+
+  // Resource Relationships — find a resource, then show its real stored
+  // relationships (api.getResourceRelationships), replacing the raw JSON
+  // dump that used to be the only way to see this in the Drawer.
+  const [relQuery, setRelQuery] = useState('');
+  const [relResults, setRelResults] = useState<CloudResource[]>([]);
+  const [relSelected, setRelSelected] = useState<CloudResource | null>(null);
+  const [relData, setRelData] = useState<{ resource: { id: string; resourceId: string; resourceName: string | null }; relationships: unknown } | null>(null);
+  const [relLoading, setRelLoading] = useState(false);
+
+  // Resource Timeline — the real filtered endpoint (eventType/from/to),
+  // not the 20-item client-sliced "Recent Resource Changes" widget.
+  const [timelineEvents, setTimelineEvents] = useState<ResourceLifecycleEvent[]>([]);
+  const [timelineEventType, setTimelineEventType] = useState('');
+  const [timelineFrom, setTimelineFrom] = useState('');
+  const [timelineTo, setTimelineTo] = useState('');
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   // ?account=<id> (e.g. "View all resources for this account" on the account
   // detail page) sets the *global* account filter once on arrival, so it's
@@ -241,13 +268,64 @@ export function Resources() {
   }, [account]);
   useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
 
-  // Tags Explorer — fetched on demand the first time the section is opened,
-  // then refreshed whenever it's open and something else triggers a refresh.
+  // Tags Explorer tab — fetched when opened, refreshed on external refresh.
   useEffect(() => {
-    if (!tagsOpen) return;
+    if (tab !== 'Tags Explorer') return;
     setTagsLoading(true);
     void api.getResourceTags().then(r => setTagKeys(r.keys)).finally(() => setTagsLoading(false));
-  }, [tagsOpen, refreshToken]);
+  }, [tab, refreshToken]);
+
+  // Resource Timeline tab — real filters, loaded on open and whenever they change.
+  const loadTimeline = useCallback(async () => {
+    if (tab !== 'Resource Timeline') return;
+    setTimelineLoading(true);
+    try {
+      const res = await api.getResourceTimeline({
+        eventType: timelineEventType || undefined,
+        from: timelineFrom || undefined,
+        to: timelineTo || undefined,
+        limit: 100,
+      });
+      setTimelineEvents(res.items);
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [tab, timelineEventType, timelineFrom, timelineTo]);
+  useEffect(() => { void loadTimeline(); }, [loadTimeline, refreshToken]);
+
+  // Global Search tab — debounced real cross-category search.
+  useEffect(() => {
+    if (tab !== 'Global Search' || !globalQuery.trim()) { setGlobalResults([]); return; }
+    setGlobalLoading(true);
+    const handle = setTimeout(() => {
+      void api.searchResources(globalQuery.trim())
+        .then(res => { setGlobalResults(res.items); setGlobalCapped(!!res.capped); })
+        .finally(() => setGlobalLoading(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [tab, globalQuery]);
+
+  // Resource Relationships tab — same debounced search to find a resource,
+  // then the real relationships endpoint once one is picked.
+  useEffect(() => {
+    if (tab !== 'Resource Relationships' || !relQuery.trim()) { setRelResults([]); return; }
+    const handle = setTimeout(() => {
+      void api.searchResources(relQuery.trim()).then(res => setRelResults(res.items));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [tab, relQuery]);
+
+  async function pickRelationshipResource(r: CloudResource) {
+    setRelSelected(r);
+    setRelData(null);
+    setRelLoading(true);
+    try {
+      const data = await api.getResourceRelationships(r.id);
+      setRelData(data);
+    } finally {
+      setRelLoading(false);
+    }
+  }
 
   // Clear any previously-loaded graph when the drawer's target resource changes,
   // so switching resources doesn't briefly show the last one's dependency graph.
@@ -364,6 +442,14 @@ export function Resources() {
     { key: 'time', header: 'Time', render: e => timeAgo(e.occurred_at), sortValue: e => e.occurred_at },
   ];
 
+  const searchColumns: Column<CloudResource>[] = [
+    { key: 'displayName', header: 'Type', render: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key },
+    { key: 'resourceName', header: 'Name / ID', render: r => r.resource_name ?? r.resource_id },
+    { key: 'category', header: 'Category', render: r => r.category },
+    { key: 'region', header: 'Region', render: r => r.region ?? 'global' },
+    { key: 'status', header: 'Status', render: r => <Badge>{r.status}</Badge> },
+  ];
+
   const workspaceCrumb = isWorkspaceView
     ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: presetCategory, to: `/resources/${presetCategory}` }, { label: serviceLabel(presetService) }]} />
     : <Breadcrumb />;
@@ -372,68 +458,179 @@ export function Resources() {
     <div>
       <FilterBar title={isWorkspaceView ? serviceLabel(presetService) : 'Resources'} breadcrumb={workspaceCrumb} />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-        <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live`} />
-        {coreCounts.map(c => (
-          <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            {t}
+          </button>
         ))}
-        <CategoryStatCard label="Others" value={othersCount} percent={total ? (othersCount / total) * 100 : 0} category="Others" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+      {tab === 'All Resources' && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+            <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live`} />
+            {coreCounts.map(c => (
+              <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
+            ))}
+            <CategoryStatCard label="Others" value={othersCount} percent={total ? (othersCount / total) * 100 : 0} category="Others" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
+              <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
+              <LineChart height={180} series={[
+                { label: 'Created', points: trend.map(p => ({ x: p.date, y: p.created })) },
+                { label: 'Deleted', points: trend.map(p => ({ x: p.date, y: p.deleted })) },
+              ]} />
+              <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{total.toLocaleString()}</div><div className="text-[11px] text-slate-400">Total</div></div>
+                <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.good, isDark) }}>+{trendAdded}</div><div className="text-[11px] text-slate-400">Added</div></div>
+                <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.critical, isDark) }}>-{trendDeleted}</div><div className="text-[11px] text-slate-400">Deleted</div></div>
+                <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{trendAdded - trendDeleted >= 0 ? '+' : ''}{trendAdded - trendDeleted}</div><div className="text-[11px] text-slate-400">Net Change</div></div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
+              <Donut data={Object.entries(dashboard?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Resource Count</h3>
+              <RankedList rows={topServices} emptyMessage="No resources discovered yet." />
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution by Type</h3>
+              <RankedList rows={topResourceTypes} emptyMessage="No resources discovered yet." />
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Health</h3>
+              {(Object.keys(healthCounts) as (keyof typeof healthCounts)[]).map(k => (
+                <HealthRow key={k} label={k} count={healthCounts[k]} percent={(healthCounts[k] / healthTotal) * 100} />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Resource Changes</h3>
+            <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
+            <p className="text-xs text-slate-400 mt-2">Last 20 changes — for the full filterable history, see the Resource Timeline tab.</p>
+          </div>
+
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
+            <div className="flex items-center gap-2">
+              {bulkMode && selectedIds.size > 0 && (
+                <button onClick={() => { setBulkResult(null); setBulkModalOpen(true); }} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">
+                  Bulk Tag {selectedIds.size} selected
+                </button>
+              )}
+              <button
+                onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}
+                className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+              >
+                {bulkMode ? 'Exit Bulk Operations' : 'Bulk Operations'}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
+            </label>
+            {!isWorkspaceView && (
+              <>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
+                  <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                    <option value="">All Categories</option>
+                    {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
+                  <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                    <option value="">All Services</option>
+                    {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
+                  </select>
+                </label>
+              </>
+            )}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
+              <select value={status} onChange={e => setStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${status ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Statuses</option>
+                {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            {(status || search || (!isWorkspaceView && (category || service))) && (
+              <button onClick={() => { setStatus(''); setSearch(''); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+            )}
+            {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
+          </div>
+
+          <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from AWS Accounts." />
+        </>
+      )}
+
+      {tab === 'Global Search' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
-          <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Global Search</h3>
+          <p className="text-xs text-slate-400 mb-3">Searches every discovered resource across all connected accounts and categories at once — not scoped by the filters on All Resources.</p>
+          <input value={globalQuery} onChange={e => setGlobalQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full max-w-md mb-3" />
+          {globalLoading && <p className="text-sm text-slate-400">Searching…</p>}
+          {!globalLoading && globalQuery.trim() && (
+            <>
+              {globalCapped && <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">Showing the first matches — narrow your search for a complete list.</p>}
+              <DataTable columns={searchColumns} rows={globalResults} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources match this search." />
+            </>
+          )}
+          {!globalQuery.trim() && <p className="text-sm text-slate-400">Type to search.</p>}
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
-          <LineChart height={180} series={[
-            { label: 'Created', points: trend.map(p => ({ x: p.date, y: p.created })) },
-            { label: 'Deleted', points: trend.map(p => ({ x: p.date, y: p.deleted })) },
-          ]} />
-          <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
-            <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{total.toLocaleString()}</div><div className="text-[11px] text-slate-400">Total</div></div>
-            <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.good, isDark) }}>+{trendAdded}</div><div className="text-[11px] text-slate-400">Added</div></div>
-            <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.critical, isDark) }}>-{trendDeleted}</div><div className="text-[11px] text-slate-400">Deleted</div></div>
-            <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{trendAdded - trendDeleted >= 0 ? '+' : ''}{trendAdded - trendDeleted}</div><div className="text-[11px] text-slate-400">Net Change</div></div>
+      )}
+
+      {tab === 'Resource Relationships' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Find a Resource</h3>
+            <input value={relQuery} onChange={e => setRelQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full mb-3" />
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+              {relResults.map(r => (
+                <li key={r.id}>
+                  <button onClick={() => void pickRelationshipResource(r)} className={`w-full text-left py-2 text-sm px-2 rounded-md ${relSelected?.id === r.id ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
+                    {r.resource_name ?? r.resource_id} <span className="text-xs text-slate-400">{catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key}</span>
+                  </button>
+                </li>
+              ))}
+              {relQuery.trim() && relResults.length === 0 && <li className="py-2 text-sm text-slate-400">No matches.</li>}
+              {!relQuery.trim() && <li className="py-2 text-sm text-slate-400">Type to search for a resource.</li>}
+            </ul>
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Relationships</h3>
+            {relLoading && <p className="text-sm text-slate-400">Loading…</p>}
+            {!relLoading && relData && (
+              <div className="text-sm">
+                <p className="text-slate-600 dark:text-slate-300 mb-2">{relData.resource.resourceName ?? relData.resource.resourceId}</p>
+                <pre className="text-xs bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify(relData.relationships, null, 2)}</pre>
+              </div>
+            )}
+            {!relLoading && !relData && <p className="text-sm text-slate-400">Pick a resource on the left to see its stored relationships.</p>}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
-          <Donut data={Object.entries(dashboard?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
-        </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+      {tab === 'Tags Explorer' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Resource Count</h3>
-          <RankedList rows={topServices} emptyMessage="No resources discovered yet." />
-        </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution by Type</h3>
-          <RankedList rows={topResourceTypes} emptyMessage="No resources discovered yet." />
-        </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Health</h3>
-          {(Object.keys(healthCounts) as (keyof typeof healthCounts)[]).map(k => (
-            <HealthRow key={k} label={k} count={healthCounts[k]} percent={(healthCounts[k] / healthTotal) * 100} />
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Resource Changes</h3>
-        <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <button onClick={() => setTagsOpen(o => !o)} className="w-full flex items-center justify-between text-left">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Tags Explorer</h3>
-          <span className="text-xs text-slate-400">{tagsOpen ? '▾ Hide' : '▸ Show'}</span>
-        </button>
-        {tagsOpen && (
-          tagsLoading ? <p className="text-sm text-slate-400 mt-3">Loading…</p> : (
-            <div className="mt-3 flex flex-col gap-2">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Tags Explorer</h3>
+          {tagsLoading ? <p className="text-sm text-slate-400">Loading…</p> : (
+            <div className="flex flex-col gap-2">
               {tagKeys.map(t => (
                 <div key={t.key} className="flex items-center justify-between border-b last:border-0 border-slate-100 dark:border-slate-800/60 py-1.5 text-sm">
                   <span className="text-slate-700 dark:text-slate-200 font-medium">{t.key}</span>
@@ -443,63 +640,38 @@ export function Resources() {
               ))}
               {tagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
             </div>
-          )
-        )}
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService)} Resources` : 'All Resources'}</h3>
-        <div className="flex items-center gap-2">
-          {bulkMode && selectedIds.size > 0 && (
-            <button onClick={() => { setBulkResult(null); setBulkModalOpen(true); }} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">
-              Bulk Tag {selectedIds.size} selected
-            </button>
           )}
-          <button
-            onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}
-            className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-          >
-            {bulkMode ? 'Exit Bulk Operations' : 'Bulk Operations'}
-          </button>
         </div>
-      </div>
-      <div className="flex flex-wrap items-end gap-3 mb-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
-        </label>
-        {!isWorkspaceView && (
-          <>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
-              <select value={category} onChange={e => setCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${category ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Categories</option>
-                {['Compute', 'Storage', 'Database', 'Networking', 'Security', 'Containers', 'Analytics', 'Management', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
-              <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Services</option>
-                {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
-              </select>
-            </label>
-          </>
-        )}
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
-          <select value={status} onChange={e => setStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${status ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            <option value="">All Statuses</option>
-            {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </label>
-        {(status || search || (!isWorkspaceView && (category || service))) && (
-          <button onClick={() => { setStatus(''); setSearch(''); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
-        )}
-        {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
-      </div>
+      )}
 
-      <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from AWS Accounts." />
+      {tab === 'Resource Timeline' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Timeline</h3>
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Event Type</span>
+              <select value={timelineEventType} onChange={e => setTimelineEventType(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200">
+                <option value="">All</option>
+                <option value="created">Created</option>
+                <option value="deleted">Deleted</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">From</span>
+              <input type="date" value={timelineFrom} onChange={e => setTimelineFrom(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">To</span>
+              <input type="date" value={timelineTo} onChange={e => setTimelineTo(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200" />
+            </label>
+            {(timelineEventType || timelineFrom || timelineTo) && (
+              <button onClick={() => { setTimelineEventType(''); setTimelineFrom(''); setTimelineTo(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+            )}
+            {timelineLoading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
+          </div>
+          <DataTable columns={eventColumns} rows={timelineEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes match these filters." />
+        </div>
+      )}
 
       <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.resource_name ?? selected?.resource_id ?? ''}>
         {selected && (
@@ -534,6 +706,7 @@ export function Resources() {
               <div>
                 <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-1.5">Relationships</h4>
                 <pre className="text-xs bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify(selected.relationships, null, 2)}</pre>
+                <p className="text-[11px] text-slate-400 mt-1">See the Resource Relationships tab for the same data via its own dedicated view.</p>
               </div>
             )}
             <div>

@@ -110,11 +110,16 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: 'Resource Inventory', to: RESOURCES, real: true },
       { label: 'Resource Explorer', to: RESOURCES, real: true },
-      { label: 'Global Search', to: `${RESOURCES}/all`, real: true },
+      { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
+      // Dependency Graph is opened per-resource from the Drawer (see
+      // Resources.tsx), not a standalone browsable view — lands on the
+      // default All Resources tab, same bare URL as Bulk Operations below.
       { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
-      { label: 'Resource Relationships', to: `${RESOURCES}/all`, real: true },
-      { label: 'Tags Explorer', to: `${RESOURCES}/all`, real: true },
-      { label: 'Resource Timeline', to: `${RESOURCES}/all`, real: true },
+      { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
+      { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
+      { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
+      // Bulk Operations is a mode toggle over the All Resources table, not a
+      // separate tab — same bare URL as Dependency Graph above.
       { label: 'Bulk Operations', to: `${RESOURCES}/all`, real: true },
     ],
   },
