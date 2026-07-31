@@ -146,6 +146,11 @@ export function Resources() {
   const presetService = routeParams.service ?? '';
   const isWorkspaceView = !!presetCategory;
   const [resources, setResources] = useState<CloudResource[]>([]);
+  // Exact server-side count for the current filters (category/service/etc.) —
+  // `resources.length` alone is capped at the 200-row page limit, so this is
+  // what a workspace view's "Total Resources" card uses instead of the
+  // global `dashboard.total` (see isWorkspaceView below).
+  const [filteredTotal, setFilteredTotal] = useState(0);
   // Org-wide aggregate — the new resources-api only exposes unfiltered totals
   // (no per-filter aggregate endpoint), so these stat cards/charts reflect
   // the whole org, not the local category/service/search filters below.
@@ -241,6 +246,7 @@ export function Resources() {
       const inventory = await api.getResourceInventory({ ...filters, limit: 200 });
       if (thisRequest !== requestId.current) return; // a newer request already landed
       setResources(inventory.items);
+      setFilteredTotal(inventory.pagination.total);
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
     }
@@ -385,9 +391,16 @@ export function Resources() {
     return c ? (c.connection_name ?? c.aws_account_id) : connectionId;
   }, [connections]);
 
-  const total = dashboard?.total ?? 0;
+  // dashboard/explorerServices/recentEvents (below) are org-wide aggregates
+  // fetched once, unaffected by the URL's category/service filter — fine for
+  // /resources/all, but showing them on a workspace page (e.g. /resources/
+  // Compute/ec2) made every service's page look identical regardless of
+  // which one you were on. Everything under isWorkspaceView instead derives
+  // from `resources`/`filteredTotal`, the same filtered data the table below
+  // already uses.
+  const total = isWorkspaceView ? filteredTotal : (dashboard?.total ?? 0);
   const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: dashboard?.byCategory[c] ?? 0 }));
-  const othersCount = Math.max(0, total - coreCounts.reduce((s, c) => s + c.count, 0));
+  const othersCount = Math.max(0, (dashboard?.total ?? 0) - coreCounts.reduce((s, c) => s + c.count, 0));
 
   const healthCounts = useMemo(() => {
     const counts = { Healthy: 0, Warning: 0, Critical: 0, Unknown: 0 };
@@ -413,6 +426,21 @@ export function Resources() {
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
   }, [resources, catalogByKey]);
+
+  // Workspace-view (single category/service) equivalents of the org-wide
+  // "Resources by Region" donut and "Recent Resource Changes" list — derived
+  // client-side from data already on hand (filtered `resources`, and
+  // `recentEvents` narrowed by matching each event's resource type back to
+  // this service via the catalog) rather than global, unfiltered fetches.
+  const workspaceByRegion = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of resources) if (r.region) counts[r.region] = (counts[r.region] ?? 0) + 1;
+    return counts;
+  }, [resources]);
+  const workspaceRecentEvents = useMemo(() => {
+    if (!isWorkspaceView) return recentEvents;
+    return recentEvents.filter(e => catalogByKey.get(e.resource_type_key)?.service === presetService).slice(0, 20);
+  }, [recentEvents, isWorkspaceView, catalogByKey, presetService]);
 
   const trend = dashboard?.trend30d ?? [];
   const trendAdded = trend.reduce((s, p) => s + p.created, 0);
@@ -469,42 +497,54 @@ export function Resources() {
       {tab === 'All Resources' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-            <CategoryStatCard label="Total Resources" value={total} percent={100} category="Total" caption={`${liveTypes} of ${catalog.length || 241} types live`} />
-            {coreCounts.map(c => (
+            <CategoryStatCard
+              label="Total Resources" value={total} percent={100} category="Total"
+              caption={isWorkspaceView ? `${serviceLabel(presetService)} in this org` : `${liveTypes} of ${catalog.length || 241} types live`}
+            />
+            {!isWorkspaceView && coreCounts.map(c => (
               <CategoryStatCard key={c.category} label={c.category} value={c.count} percent={total ? (c.count / total) * 100 : 0} category={c.category} />
             ))}
-            <CategoryStatCard label="Others" value={othersCount} percent={total ? (othersCount / total) * 100 : 0} category="Others" />
+            {!isWorkspaceView && <CategoryStatCard label="Others" value={othersCount} percent={total ? (othersCount / total) * 100 : 0} category="Others" />}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
-              <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
-            </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
-              <LineChart height={180} series={[
-                { label: 'Created', points: trend.map(p => ({ x: p.date, y: p.created })) },
-                { label: 'Deleted', points: trend.map(p => ({ x: p.date, y: p.deleted })) },
-              ]} />
-              <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
-                <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{total.toLocaleString()}</div><div className="text-[11px] text-slate-400">Total</div></div>
-                <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.good, isDark) }}>+{trendAdded}</div><div className="text-[11px] text-slate-400">Added</div></div>
-                <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.critical, isDark) }}>-{trendDeleted}</div><div className="text-[11px] text-slate-400">Deleted</div></div>
-                <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{trendAdded - trendDeleted >= 0 ? '+' : ''}{trendAdded - trendDeleted}</div><div className="text-[11px] text-slate-400">Net Change</div></div>
+            {!isWorkspaceView && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
+                <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
               </div>
-            </div>
+            )}
+            {!isWorkspaceView && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources Trend (30d)</h3>
+                <LineChart height={180} series={[
+                  { label: 'Created', points: trend.map(p => ({ x: p.date, y: p.created })) },
+                  { label: 'Deleted', points: trend.map(p => ({ x: p.date, y: p.deleted })) },
+                ]} />
+                <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+                  <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{total.toLocaleString()}</div><div className="text-[11px] text-slate-400">Total</div></div>
+                  <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.good, isDark) }}>+{trendAdded}</div><div className="text-[11px] text-slate-400">Added</div></div>
+                  <div><div className="text-base font-semibold tabular-nums" style={{ color: pick(STATUS.critical, isDark) }}>-{trendDeleted}</div><div className="text-[11px] text-slate-400">Deleted</div></div>
+                  <div><div className="text-base font-semibold tabular-nums text-slate-800 dark:text-slate-100">{trendAdded - trendDeleted >= 0 ? '+' : ''}{trendAdded - trendDeleted}</div><div className="text-[11px] text-slate-400">Net Change</div></div>
+                </div>
+              </div>
+            )}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
-              <Donut data={Object.entries(dashboard?.byRegion ?? {}).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+              <Donut
+                data={Object.entries(isWorkspaceView ? workspaceByRegion : (dashboard?.byRegion ?? {})).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))}
+                centerLabel={{ value: String(total), caption: 'resources' }}
+              />
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Resource Count</h3>
-              <RankedList rows={topServices} emptyMessage="No resources discovered yet." />
-            </div>
+            {!isWorkspaceView && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Resource Count</h3>
+                <RankedList rows={topServices} emptyMessage="No resources discovered yet." />
+              </div>
+            )}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution by Type</h3>
               <RankedList rows={topResourceTypes} emptyMessage="No resources discovered yet." />
@@ -518,8 +558,8 @@ export function Resources() {
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Resource Changes</h3>
-            <DataTable columns={eventColumns} rows={recentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent {isWorkspaceView ? serviceLabel(presetService) : ''} Resource Changes</h3>
+            <DataTable columns={eventColumns} rows={workspaceRecentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
             <p className="text-xs text-slate-400 mt-2">Last 20 changes — for the full filterable history, see the Resource Timeline tab.</p>
           </div>
 
