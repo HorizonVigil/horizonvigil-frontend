@@ -52,7 +52,14 @@ export function AwsAccounts() {
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
-  const { syncStates } = useSync();
+  const { syncStates, startDiscovery } = useSync();
+
+  /** Same "Discover Resources" + "Sync Cost from AWS" pair the account detail page's buttons trigger, exposed here as a one-click row action so you don't have to open the account just to re-sync it. */
+  function syncNow(connectionId: string) {
+    startDiscovery(connectionId);
+    void api.syncAccountCost(connectionId).catch(() => {});
+    toast('Sync started — resources and cost will update as it completes.', 'success');
+  }
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Dashboard');
   const [connections, setConnections] = useState<CloudConnection[]>([]);
@@ -286,8 +293,10 @@ export function AwsAccounts() {
         <RowActionsMenu
           connection={c}
           validating={validatingIds.has(c.id)}
+          syncing={syncStates[c.id]?.status === 'running'}
           isFavorited={favorites.some(f => f.path === `/aws-accounts/${c.id}`)}
           onValidate={() => void runValidation(c.id)}
+          onSync={() => syncNow(c.id)}
           onToggleFavorite={() => void toggleFavorite(c.id, c.connection_name ?? c.aws_account_id)}
           onUpdateCredentials={c.connection_method === 'access_key' ? () => setUpdateCredsFor(c.id) : undefined}
           onDisconnect={() => void handleDisconnect(c.id)}
@@ -296,7 +305,7 @@ export function AwsAccounts() {
       ),
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [bulkMode, selectedIds, validatingIds, connections]);
+  ], [bulkMode, selectedIds, validatingIds, connections, syncStates]);
 
   const anyErrors = connections.map(c => syncStates[c.id]).filter(s => s?.status === 'error' && s.error);
   const totalPages = Math.max(1, Math.ceil(inventoryTotal / pageSize));
@@ -726,11 +735,13 @@ export function AwsAccounts() {
 }
 
 /** Row-level "⋯" menu — replaces a row of competing text links with the single action point AWS Console / Datadog tables use, and adds two real actions (Open Console, Copy ID) that a link row had no room for. */
-function RowActionsMenu({ connection, validating, isFavorited, onValidate, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
+function RowActionsMenu({ connection, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
   connection: CloudConnection;
   validating: boolean;
+  syncing: boolean;
   isFavorited: boolean;
   onValidate: () => void;
+  onSync: () => void;
   onToggleFavorite: () => void;
   onUpdateCredentials?: () => void;
   onDisconnect: () => void;
@@ -767,6 +778,9 @@ function RowActionsMenu({ connection, validating, isFavorited, onValidate, onTog
       </button>
       {open && (
         <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
+          <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources + Sync Cost from AWS for this account right now">
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
           <button role="menuitem" onClick={() => { setOpen(false); onValidate(); }} disabled={validating} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks">
             {validating ? 'Validating…' : 'Validate Permissions'}
           </button>
