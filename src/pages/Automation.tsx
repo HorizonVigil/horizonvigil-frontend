@@ -8,6 +8,9 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution, type RemediationRequest } from '../lib/api';
 
+type JiraConfigState = { siteUrl: string; email: string; defaultProjectKey: string | null; defaultIssueType: string; autoFileEvents: string[] };
+const DISPATCH_EVENTS = ['cost.recommendation.high_priority', 'cost.anomaly.detected', 'remediation.completed', 'remediation.failed'] as const;
+
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
 const TAB_KEYS: Tab[] = ['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'];
 type Editable = Runbook | Workflow | ScheduledJob | Webhook;
@@ -25,6 +28,20 @@ export function Automation() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Editable | null>(null);
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [jiraConnected, setJiraConnected] = useState(false);
+  const [jiraConfig, setJiraConfig] = useState<JiraConfigState | null>(null);
+  const [jiraForm, setJiraForm] = useState({ siteUrl: '', email: '', apiToken: '', defaultProjectKey: '', defaultIssueType: 'Task', autoFileEvents: [] as string[] });
+  const [jiraSaving, setJiraSaving] = useState(false);
+  const [jiraError, setJiraError] = useState<string | null>(null);
+
+  const loadJira = useCallback(async () => {
+    const res = await api.getJiraIntegration();
+    setJiraConnected(res.connected);
+    setJiraConfig(res.config ?? null);
+    if (res.config) {
+      setJiraForm(f => ({ ...f, siteUrl: res.config!.siteUrl, email: res.config!.email, defaultProjectKey: res.config!.defaultProjectKey ?? '', defaultIssueType: res.config!.defaultIssueType, autoFileEvents: res.config!.autoFileEvents, apiToken: '' }));
+    }
+  }, []);
 
   const loadRemediation = useCallback(async () => {
     const res = await api.listRemediation({});
@@ -38,8 +55,8 @@ export function Automation() {
     ]);
     setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items);
     setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
-    await loadRemediation();
-  }, [loadRemediation]);
+    await Promise.all([loadRemediation(), loadJira()]);
+  }, [loadRemediation, loadJira]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -52,6 +69,42 @@ export function Automation() {
     await loadRemediation();
   }
   async function handleRollbackRemediation(id: string) { await api.rollbackRemediation(id); await loadRemediation(); }
+
+  function toggleAutoFileEvent(event: string) {
+    setJiraForm(f => ({ ...f, autoFileEvents: f.autoFileEvents.includes(event) ? f.autoFileEvents.filter(e => e !== event) : [...f.autoFileEvents, event] }));
+  }
+
+  async function handleSaveJira(e: React.FormEvent) {
+    e.preventDefault();
+    setJiraSaving(true);
+    setJiraError(null);
+    try {
+      await api.configureJira({
+        siteUrl: jiraForm.siteUrl.trim(), email: jiraForm.email.trim(), apiToken: jiraForm.apiToken,
+        defaultProjectKey: jiraForm.defaultProjectKey.trim() || undefined, defaultIssueType: jiraForm.defaultIssueType.trim() || undefined,
+        autoFileEvents: jiraForm.autoFileEvents,
+      });
+      await loadJira();
+    } catch (err) {
+      setJiraError((err as Error).message);
+    } finally {
+      setJiraSaving(false);
+    }
+  }
+
+  async function handleTestJira() {
+    setJiraSaving(true);
+    setJiraError(null);
+    try {
+      const res = await api.testJiraConnection();
+      alert(res.verified ? `Verified — connected as ${res.verifiedAs ?? 'unknown user'}` : 'Verification failed');
+      await loadJira();
+    } catch (err) {
+      setJiraError((err as Error).message);
+    } finally {
+      setJiraSaving(false);
+    }
+  }
 
   async function handleDeleteRunbook(id: string) { if (!(await confirm('Delete this runbook?'))) return; await api.deleteRunbook(id); await load(); }
   async function handleDeleteWorkflow(id: string) { if (!(await confirm('Delete this workflow?'))) return; await api.deleteWorkflow(id); await load(); }
@@ -125,6 +178,7 @@ export function Automation() {
     { key: 'name', header: 'Name', render: w => w.name, sortValue: w => w.name },
     { key: 'url', header: 'URL', render: w => <span className="font-mono text-xs truncate max-w-xs inline-block">{w.url}</span>, sortValue: w => w.url },
     { key: 'events', header: 'Events', render: w => w.events.join(', ') || '—', sortValue: w => w.events.join(',') },
+    { key: 'platform', header: 'Format', render: w => <Badge tone="neutral">{w.platform === 'slack' ? 'Slack' : 'Generic JSON'}</Badge>, sortValue: w => w.platform },
     {
       key: 'enabled', header: 'Enabled', render: w => (
         <button onClick={e => { e.stopPropagation(); void handleToggleWebhook(w); }} title="Click to toggle">
@@ -222,7 +276,52 @@ export function Automation() {
         </>
       )}
       {tab === 'webhooks' && <DataTable columns={webhookColumns} rows={webhooks} rowKey={w => w.id} emptyMessage="No webhooks yet." />}
-      {tab === 'integrations' && <DataTable columns={integrationColumns} rows={integrations} rowKey={i => i.id} emptyMessage="No integrations configured." />}
+      {tab === 'integrations' && (
+        <div className="flex flex-col gap-5">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200">Jira</h3>
+              <Badge tone={jiraConnected ? 'good' : 'neutral'}>{jiraConnected ? 'Connected' : 'Not connected'}</Badge>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">Email + API token from your own Atlassian account (Account Settings &gt; Security &gt; API tokens) — no OAuth app needed. Verified against Jira before being saved.</p>
+            <form onSubmit={e => void handleSaveJira(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-600 dark:text-slate-300">Site URL</span>
+                <input value={jiraForm.siteUrl} onChange={e => setJiraForm(f => ({ ...f, siteUrl: e.target.value }))} required placeholder="your-domain.atlassian.net" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-600 dark:text-slate-300">Email</span>
+                <input value={jiraForm.email} onChange={e => setJiraForm(f => ({ ...f, email: e.target.value }))} required type="email" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-600 dark:text-slate-300">API Token</span>
+                <input value={jiraForm.apiToken} onChange={e => setJiraForm(f => ({ ...f, apiToken: e.target.value }))} required={!jiraConnected} type="password" placeholder={jiraConnected ? 'Leave blank to keep current token' : ''} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-600 dark:text-slate-300">Default Project Key</span>
+                <input value={jiraForm.defaultProjectKey} onChange={e => setJiraForm(f => ({ ...f, defaultProjectKey: e.target.value }))} placeholder="OPS" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              </label>
+              <div className="sm:col-span-2 flex flex-col gap-1 text-sm">
+                <span className="text-slate-600 dark:text-slate-300">Auto-file a Jira issue for:</span>
+                <div className="flex flex-wrap gap-3">
+                  {DISPATCH_EVENTS.map(event => (
+                    <label key={event} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                      <input type="checkbox" checked={jiraForm.autoFileEvents.includes(event)} onChange={() => toggleAutoFileEvent(event)} />
+                      {event}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {jiraError && <p className="sm:col-span-2 text-sm text-red-500">{jiraError}</p>}
+              <div className="sm:col-span-2 flex gap-2">
+                <button type="submit" disabled={jiraSaving} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium px-3 py-2">{jiraSaving ? 'Saving…' : 'Save & Verify'}</button>
+                {jiraConnected && <button type="button" onClick={() => void handleTestJira()} disabled={jiraSaving} className="rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800">Test Connection</button>}
+              </div>
+            </form>
+          </div>
+          <DataTable columns={integrationColumns} rows={integrations.filter(i => i.provider_name !== 'jira')} rowKey={i => i.id} emptyMessage="No other integrations configured." />
+        </div>
+      )}
       {tab === 'history' && <DataTable columns={historyColumns} rows={history} rowKey={e => e.id} emptyMessage="No automation has run yet." />}
 
       <CreateModal
@@ -253,6 +352,8 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
   const [cron, setCron] = useState('0 * * * *');
   const [jobType, setJobType] = useState('custom');
   const [url, setUrl] = useState('');
+  const [platform, setPlatform] = useState<'generic' | 'slack'>('generic');
+  const [events, setEvents] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -265,8 +366,8 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
     if (editing && tab === 'runbooks') { const r = editing as Runbook; setName(r.name); setDescription(r.description ?? ''); }
     else if (editing && tab === 'workflows') { const w = editing as Workflow; setName(w.name); setDescription(w.description ?? ''); }
     else if (editing && tab === 'scheduled') { const j = editing as ScheduledJob; setName(j.name); setJobType(j.job_type); setCron(j.schedule_cron); }
-    else if (editing && tab === 'webhooks') { const w = editing as Webhook; setName(w.name); setUrl(w.url); }
-    else { setName(''); setDescription(''); setCron('0 * * * *'); setJobType('custom'); setUrl(''); }
+    else if (editing && tab === 'webhooks') { const w = editing as Webhook; setName(w.name); setUrl(w.url); setPlatform(w.platform); setEvents(w.events); }
+    else { setName(''); setDescription(''); setCron('0 * * * *'); setJobType('custom'); setUrl(''); setPlatform('generic'); setEvents([]); }
     setError(null);
   }, [open, editing, tab]);
 
@@ -281,13 +382,13 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
         if (tab === 'runbooks') await api.updateRunbook(editing.id, { name: name.trim(), description: description.trim() || undefined });
         else if (tab === 'workflows') await api.updateWorkflow(editing.id, { name: name.trim(), description: description.trim() || undefined });
         else if (tab === 'scheduled') await api.updateScheduledJob(editing.id, { name: name.trim(), jobType, scheduleCron: cron });
-        else if (tab === 'webhooks') await api.updateWebhook(editing.id, { name: name.trim(), url: url.trim() });
+        else if (tab === 'webhooks') await api.updateWebhook(editing.id, { name: name.trim(), url: url.trim(), platform, events });
       } else {
         if (tab === 'runbooks') await api.createRunbook({ name: name.trim(), description: description.trim() || undefined });
         else if (tab === 'workflows') await api.createWorkflow({ name: name.trim(), description: description.trim() || undefined });
         else if (tab === 'scheduled') await api.createScheduledJob({ name: name.trim(), jobType, scheduleCron: cron });
         else if (tab === 'webhooks') {
-          const { secret } = await api.createWebhook({ name: name.trim(), url: url.trim() });
+          const { secret } = await api.createWebhook({ name: name.trim(), url: url.trim(), platform, events });
           onWebhookSecret(secret);
         }
       }
@@ -334,10 +435,30 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
           </>
         )}
         {tab === 'webhooks' && (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">URL</span>
-            <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/cloudops360" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
-          </label>
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-600 dark:text-slate-300">URL</span>
+              <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/cloudops360 or a Slack Incoming Webhook URL" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-600 dark:text-slate-300">Payload format</span>
+              <select value={platform} onChange={e => setPlatform(e.target.value as 'generic' | 'slack')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white">
+                <option value="generic">Generic JSON</option>
+                <option value="slack">Slack (Incoming Webhook)</option>
+              </select>
+            </label>
+            <div className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-600 dark:text-slate-300">Fires on:</span>
+              <div className="flex flex-wrap gap-3">
+                {[...DISPATCH_EVENTS, '*'].map(event => (
+                  <label key={event} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+                    <input type="checkbox" checked={events.includes(event)} onChange={() => setEvents(ev => ev.includes(event) ? ev.filter(x => x !== event) : [...ev, event])} />
+                    {event === '*' ? 'Everything' : event}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
         )}
         {error && <p className="text-sm text-red-500">{error}</p>}
         <button type="submit" disabled={loading || !name.trim()} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">

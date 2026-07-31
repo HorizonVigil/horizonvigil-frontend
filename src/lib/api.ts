@@ -495,13 +495,23 @@ class ApiClient {
   }
 
   getWebhooks(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<Webhook>>('automation', `/api/automation/webhooks${qs(params)}`); }
-  createWebhook(data: { name: string; url: string; events?: string[] }) { return this.post<{ webhook: Webhook; secret: string }>('automation', '/api/automation/webhooks', data); }
-  updateWebhook(id: string, data: Partial<{ name: string; url: string; events: string[]; enabled: boolean }>) { return this.put<Webhook>('automation', `/api/automation/webhooks/${id}`, data); }
+  createWebhook(data: { name: string; url: string; events?: string[]; platform?: 'generic' | 'slack' }) { return this.post<{ webhook: Webhook; secret: string }>('automation', '/api/automation/webhooks', data); }
+  updateWebhook(id: string, data: Partial<{ name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean }>) { return this.put<Webhook>('automation', `/api/automation/webhooks/${id}`, data); }
   deleteWebhook(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/webhooks/${id}`); }
   triggerTestWebhook(id: string) { return this.post<{ delivered: boolean; httpStatus?: number; error?: string; payload: unknown }>('automation', `/api/automation/webhooks/${id}/trigger-test`); }
 
   getAutomationIntegrations(params: { category?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<Integration>>('automation', `/api/automation/integrations${qs(params)}`); }
   updateAutomationIntegration(id: string, data: { status?: string; config?: unknown; accountRegion?: string }) { return this.put<Integration & { verified: false; note?: string }>('automation', `/api/automation/integrations/${id}`, data); }
+
+  // Jira — email + API token (both created by the user in their own Atlassian account, no OAuth app needed); every write real-verifies against Jira before being marked connected.
+  getJiraIntegration() { return this.get<{ connected: boolean; config?: { siteUrl: string; email: string; defaultProjectKey: string | null; defaultIssueType: string; autoFileEvents: string[] } }>('automation', '/api/automation/integrations/jira'); }
+  configureJira(data: { siteUrl: string; email: string; apiToken: string; defaultProjectKey?: string; defaultIssueType?: string; autoFileEvents?: string[] }) {
+    return this.put<{ verified: true; verifiedAs?: string }>('automation', '/api/automation/integrations/jira', data);
+  }
+  testJiraConnection() { return this.post<{ verified: boolean; verifiedAs?: string }>('automation', '/api/automation/integrations/jira/test'); }
+  createJiraIssue(data: { summary: string; description?: string; projectKey?: string; issueType?: string }) {
+    return this.post<{ key: string; url: string }>('automation', '/api/automation/integrations/jira/create-issue', data);
+  }
 
   // ── settings-api ─────────────────────────────────────────────────────────
 
@@ -665,5 +675,5 @@ export interface Runbook { id: string; org_id: string; name: string; description
 export interface Workflow { id: string; org_id: string; name: string; description: string | null; trigger: unknown; steps: unknown[]; enabled: boolean; created_by: string | null; created_at: string; updated_at: string }
 export interface ScheduledJob { id: string; org_id: string; name: string; job_type: string; schedule_cron: string; target: unknown; enabled: boolean; last_run_at: string | null; next_run_at: string | null; created_at: string }
 export interface AutomationExecution { id: string; org_id: string; automation_type: string; automation_id: string | null; status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'; started_at: string | null; finished_at: string | null; triggered_by: string | null; output: unknown; error_message: string | null; created_at: string }
-export interface Webhook { id: string; org_id: string; name: string; url: string; events: string[]; enabled: boolean; last_triggered_at: string | null; created_at: string }
+export interface Webhook { id: string; org_id: string; name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean; last_triggered_at: string | null; created_at: string }
 export interface Integration { id: string; org_id: string; category: string; provider_name: string; status: 'connected' | 'disconnected' | 'error'; connected_on: string | null; last_sync_at: string | null; account_region: string | null; config: unknown; created_at: string }
