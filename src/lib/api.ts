@@ -194,6 +194,17 @@ class ApiClient {
     return this.get<{ connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; roleArn: string | null; externalId: string | null }>('awsAccounts', `/api/aws-accounts/credentials/${id}`);
   }
 
+  // Safe Automated Remediation — real AWS mutation calls (StopInstances/StartInstances/ReleaseAddress/DeleteVolume) using the connection's own credentials, gated by request -> approve -> dry-run -> execute.
+  listRemediation(params: { status?: string; connectionId?: string } = {}) { return this.get<{ items: RemediationRequest[] }>('awsAccounts', `/api/aws-accounts/remediation${qs(params)}`); }
+  requestRemediation(data: { connectionId: string; resourceId: string; actionType: RemediationActionType; recommendationId?: string }) {
+    return this.post<RemediationRequest>('awsAccounts', '/api/aws-accounts/remediation/request', data);
+  }
+  approveRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/approve`); }
+  rejectRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/reject`); }
+  dryRunRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/dry-run`); }
+  executeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/execute`); }
+  rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/rollback`); }
+
   // ── resources-api ────────────────────────────────────────────────────────
 
   getResourcesDashboard() {
@@ -597,6 +608,16 @@ export interface Budget {
 export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; external_key: string | null }
 export interface RecommendationListParams { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
+
+export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume';
+export interface RemediationRequest {
+  id: string; org_id: string; connection_id: string; resource_id: string | null; recommendation_id: string | null;
+  action_type: RemediationActionType; target_resource_id: string; region: string | null;
+  status: 'pending_approval' | 'rejected' | 'approved' | 'dry_run_passed' | 'dry_run_failed' | 'executing' | 'completed' | 'failed' | 'rolled_back';
+  requested_by: string | null; approved_by: string | null; dry_run_result: { eligible?: boolean; wouldSucceed?: boolean; reason?: string } | null;
+  execution_result: { ok?: boolean; errorCode?: string; errorMessage?: string; snapshotId?: string; reason?: string } | null;
+  rollback_of: string | null; created_at: string; approved_at: string | null; executed_at: string | null;
+}
 
 export interface VulnerabilityFinding {
   id: string; connection_id: string; resource_id: string | null; finding_source: 'internal' | 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'aws_config' | 'trusted_advisor';

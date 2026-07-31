@@ -6,7 +6,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution } from '../lib/api';
+import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution, type RemediationRequest } from '../lib/api';
 
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
 const TAB_KEYS: Tab[] = ['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'];
@@ -18,7 +18,7 @@ export function Automation() {
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
-  const [remediation, setRemediation] = useState<AutomationExecution[]>([]);
+  const [remediation, setRemediation] = useState<RemediationRequest[]>([]);
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [history, setHistory] = useState<AutomationExecution[]>([]);
@@ -26,17 +26,32 @@ export function Automation() {
   const [editing, setEditing] = useState<Editable | null>(null);
   const [newSecret, setNewSecret] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [r, w, s, rem, h, i, e] = await Promise.all([
-      api.getRunbooks({ limit: 100 }), api.getWorkflows({ limit: 100 }), api.getScheduledJobs({ limit: 100 }),
-      api.getRemediationHistory({ limit: 100 }),
-      api.getWebhooks({ limit: 100 }), api.getAutomationIntegrations({ limit: 100 }), api.getExecutionHistory({ limit: 100 }),
-    ]);
-    setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items); setRemediation(rem.items);
-    setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
+  const loadRemediation = useCallback(async () => {
+    const res = await api.listRemediation({});
+    setRemediation(res.items);
   }, []);
 
+  const load = useCallback(async () => {
+    const [r, w, s, h, i, e] = await Promise.all([
+      api.getRunbooks({ limit: 100 }), api.getWorkflows({ limit: 100 }), api.getScheduledJobs({ limit: 100 }),
+      api.getWebhooks({ limit: 100 }), api.getAutomationIntegrations({ limit: 100 }), api.getExecutionHistory({ limit: 100 }),
+    ]);
+    setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items);
+    setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
+    await loadRemediation();
+  }, [loadRemediation]);
+
   useEffect(() => { void load(); }, [load]);
+
+  async function handleApproveRemediation(id: string) { await api.approveRemediation(id); await loadRemediation(); }
+  async function handleRejectRemediation(id: string) { if (!(await confirm('Reject this remediation request?'))) return; await api.rejectRemediation(id); await loadRemediation(); }
+  async function handleDryRunRemediation(id: string) { await api.dryRunRemediation(id); await loadRemediation(); }
+  async function handleExecuteRemediation(id: string) {
+    if (!(await confirm("Execute this action for real against AWS? This calls a real mutating API using the account's own stored credentials — only Stop Instance can be automatically rolled back."))) return;
+    await api.executeRemediation(id);
+    await loadRemediation();
+  }
+  async function handleRollbackRemediation(id: string) { await api.rollbackRemediation(id); await loadRemediation(); }
 
   async function handleDeleteRunbook(id: string) { if (!(await confirm('Delete this runbook?'))) return; await api.deleteRunbook(id); await load(); }
   async function handleDeleteWorkflow(id: string) { if (!(await confirm('Delete this workflow?'))) return; await api.deleteWorkflow(id); await load(); }
@@ -141,6 +156,34 @@ export function Automation() {
     ) },
   ];
 
+  const remediationColumns: Column<RemediationRequest>[] = [
+    { key: 'action', header: 'Action', render: r => <Badge tone="neutral">{r.action_type.replace(/_/g, ' ')}</Badge>, sortValue: r => r.action_type },
+    { key: 'target', header: 'Resource', render: r => <span className="font-mono text-xs">{r.target_resource_id}</span>, sortValue: r => r.target_resource_id },
+    { key: 'region', header: 'Region', render: r => r.region ?? '—', sortValue: r => r.region ?? '' },
+    {
+      key: 'status', header: 'Status',
+      render: r => <Badge tone={r.status === 'completed' ? 'good' : ['failed', 'dry_run_failed', 'rejected'].includes(r.status) ? 'critical' : 'neutral'}>{r.status.replace(/_/g, ' ')}</Badge>,
+      sortValue: r => r.status,
+    },
+    { key: 'detail', header: 'Detail', render: r => <span className="text-xs text-slate-500 max-w-xs truncate inline-block">{r.dry_run_result?.reason ?? r.execution_result?.errorMessage ?? r.execution_result?.reason ?? '—'}</span> },
+    { key: 'created', header: 'Requested', render: r => new Date(r.created_at).toLocaleString(), sortValue: r => r.created_at },
+    {
+      key: 'actions', header: 'Actions', render: r => (
+        <div className="flex gap-2 text-xs">
+          {r.status === 'pending_approval' && (
+            <>
+              <button onClick={e => { e.stopPropagation(); void handleApproveRemediation(r.id); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Approve</button>
+              <button onClick={e => { e.stopPropagation(); void handleRejectRemediation(r.id); }} className="text-red-500 hover:underline">Reject</button>
+            </>
+          )}
+          {r.status === 'approved' && <button onClick={e => { e.stopPropagation(); void handleDryRunRemediation(r.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Dry Run</button>}
+          {r.status === 'dry_run_passed' && <button onClick={e => { e.stopPropagation(); void handleExecuteRemediation(r.id); }} className="text-red-600 dark:text-red-400 hover:underline font-medium">Execute</button>}
+          {r.status === 'completed' && r.action_type === 'stop_instance' && <button onClick={e => { e.stopPropagation(); void handleRollbackRemediation(r.id); }} className="text-slate-500 hover:underline">Roll back</button>}
+        </div>
+      ),
+    },
+  ];
+
   const historyColumns: Column<AutomationExecution>[] = [
     { key: 'type', header: 'Type', render: e => <Badge tone="neutral">{e.automation_type}</Badge>, sortValue: e => e.automation_type },
     { key: 'status', header: 'Status', render: e => <Badge>{e.status}</Badge>, sortValue: e => e.status },
@@ -172,7 +215,12 @@ export function Automation() {
       {tab === 'runbooks' && <DataTable columns={runbookColumns} rows={runbooks} rowKey={r => r.id} emptyMessage="No runbooks yet." />}
       {tab === 'workflows' && <DataTable columns={workflowColumns} rows={workflows} rowKey={w => w.id} emptyMessage="No workflows yet." />}
       {tab === 'scheduled' && <DataTable columns={jobColumns} rows={scheduledJobs} rowKey={j => j.id} emptyMessage="No scheduled jobs yet." />}
-      {tab === 'remediation' && <DataTable columns={historyColumns} rows={remediation} rowKey={e => e.id} emptyMessage="No remediation has run yet — these come from Cost Optimization/Vulnerability Management actions routed through automation." />}
+      {tab === 'remediation' && (
+        <>
+          <p className="text-xs text-slate-400 mb-3">Requested from a resource's "Remediate" action (AWS Accounts &gt; Resources). Approve/Execute require an admin or owner role; requests use the account's own stored AWS credentials — no platform-level access is involved.</p>
+          <DataTable columns={remediationColumns} rows={remediation} rowKey={r => r.id} emptyMessage="No remediation requested yet." />
+        </>
+      )}
       {tab === 'webhooks' && <DataTable columns={webhookColumns} rows={webhooks} rowKey={w => w.id} emptyMessage="No webhooks yet." />}
       {tab === 'integrations' && <DataTable columns={integrationColumns} rows={integrations} rowKey={i => i.id} emptyMessage="No integrations configured." />}
       {tab === 'history' && <DataTable columns={historyColumns} rows={history} rowKey={e => e.id} emptyMessage="No automation has run yet." />}

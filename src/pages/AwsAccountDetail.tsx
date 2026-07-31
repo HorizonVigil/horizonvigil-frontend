@@ -8,11 +8,34 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
   type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry, type Favorite,
+  type RemediationActionType,
 } from '../lib/api';
+
+/** Which of the four supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
+function eligibleRemediationAction(r: CloudResource): RemediationActionType | null {
+  if (r.resource_type_key === 'ec2_instance') {
+    if (r.state === 'running') return 'stop_instance';
+    if (r.state === 'stopped') return 'start_instance';
+    return null;
+  }
+  if (r.resource_type_key === 'elastic_ip') {
+    return (r.relationships?.instanceId || r.relationships?.networkInterfaceId) ? null : 'release_eip';
+  }
+  if (r.resource_type_key === 'ebs_volume') {
+    const attached = (r.relationships?.attachedInstanceIds as unknown[] | undefined ?? []).filter(Boolean);
+    return attached.length > 0 ? null : 'delete_volume';
+  }
+  return null;
+}
+
+const ACTION_LABEL: Record<RemediationActionType, string> = {
+  stop_instance: 'Stop instance', start_instance: 'Start instance', release_eip: 'Release Elastic IP', delete_volume: 'Delete volume',
+};
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -31,6 +54,8 @@ export function AwsAccountDetail() {
   const navigate = useNavigate();
   const { syncStates, startSync, startDiscovery } = useSync();
   const { toast } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const [remediating, setRemediating] = useState<string | null>(null);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<CloudConnection | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
@@ -137,6 +162,23 @@ export function AwsAccountDetail() {
       toast(err instanceof ApiError ? err.message : 'Validation failed', 'error');
     } finally {
       setValidating(false);
+    }
+  }
+
+  async function requestRemediation(r: CloudResource, actionType: RemediationActionType) {
+    if (!id) return;
+    const ok = await confirm(
+      `Request "${ACTION_LABEL[actionType]}" for ${r.resource_name ?? r.resource_id}? This goes through an approval + dry-run before anything actually runs against AWS — nothing happens immediately.`,
+    );
+    if (!ok) return;
+    setRemediating(r.id);
+    try {
+      await api.requestRemediation({ connectionId: id, resourceId: r.id, actionType });
+      toast('Remediation requested — an admin needs to approve it in Automation → Remediation before it runs.', 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not request remediation', 'error');
+    } finally {
+      setRemediating(null);
     }
   }
 
@@ -324,20 +366,31 @@ export function AwsAccountDetail() {
                   <th className="px-3 py-2">Category</th>
                   <th className="px-3 py-2">Region</th>
                   <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredResources.slice(0, 200).map(r => (
-                  <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
-                    <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
-                    <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
-                    <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
-                    <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
-                  </tr>
-                ))}
+                {filteredResources.slice(0, 200).map(r => {
+                  const action = eligibleRemediationAction(r);
+                  return (
+                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.resource_name ?? r.resource_id}</td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.resource_type_key}</td>
+                      <td className="px-3 py-2 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}><Badge tone="neutral">{r.category}</Badge></td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.region ?? '—'}</td>
+                      <td className="px-3 py-2 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}><Badge>{r.status}</Badge></td>
+                      <td className="px-3 py-2 text-xs">
+                        {action && (
+                          <button onClick={e => { e.stopPropagation(); void requestRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against AWS — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                            {remediating === r.id ? 'Requesting…' : ACTION_LABEL[action]}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {filteredResources.length === 0 && (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">{resources.length === 0 ? 'No resources discovered for this account yet.' : 'No resources match these filters.'}</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">{resources.length === 0 ? 'No resources discovered for this account yet.' : 'No resources match these filters.'}</td></tr>
                 )}
               </tbody>
             </table>
@@ -495,6 +548,7 @@ export function AwsAccountDetail() {
           </ul>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }
