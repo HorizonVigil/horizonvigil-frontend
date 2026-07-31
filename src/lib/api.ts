@@ -303,6 +303,10 @@ class ApiClient {
     return this.get<Paginated<CostAnomaly>>('costOptimization', `/api/cost-optimization/anomalies${qs(params)}`);
   }
   updateCostAnomaly(id: string, status: 'acknowledged' | 'resolved') { return this.patch<CostAnomaly>('costOptimization', `/api/cost-optimization/anomalies/${id}`, { status }); }
+  // Re-runs day-over-day spike detection over cost_snapshots — called automatically after a cost sync completes (see AwsAccountDetail.tsx's syncCost).
+  detectCostAnomalies(connectionId?: string) {
+    return this.post<{ connectionsScanned: number; flagged: number }>('costOptimization', '/api/cost-optimization/anomalies/detect', connectionId ? { connectionId } : {});
+  }
 
   // ── vulnerability-management-api ────────────────────────────────────────
 

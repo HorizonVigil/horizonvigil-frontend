@@ -117,6 +117,7 @@ export function AwsAccountDetail() {
       const result = await api.syncAccountCost(id);
       toast(result.synced > 0 ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from AWS` : 'Synced — no cost data found for this account this month', 'success');
       setAccountCost(await api.getAccountCost(id));
+      void api.detectCostAnomalies(id).catch(() => {});
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Cost sync failed', 'error');
     } finally {
