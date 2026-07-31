@@ -216,6 +216,25 @@ export function AwsAccountDetail() {
     }
   }
 
+  // These must run unconditionally on every render, before the `!connection`
+  // early return below — calling useMemo only after that guard meant it ran
+  // zero times while loading and four times once `connection` populated,
+  // violating React's Rules of Hooks and crashing the whole render tree
+  // (a blank/black page on every account detail visit, prod included).
+  const resourceCategories = useMemo(() => Array.from(new Set(resources.map(r => r.category))).sort(), [resources]);
+  const resourceRegions = useMemo(() => Array.from(new Set(resources.map(r => r.region).filter((r): r is string => !!r))).sort(), [resources]);
+  const resourceStatuses = useMemo(() => Array.from(new Set(resources.map(r => r.status))).sort(), [resources]);
+  const filteredResources = useMemo(() => resources.filter(r => {
+    if (resourceCategory && r.category !== resourceCategory) return false;
+    if (resourceRegion && r.region !== resourceRegion) return false;
+    if (resourceStatus && r.status !== resourceStatus) return false;
+    if (resourceSearch) {
+      const q = resourceSearch.toLowerCase();
+      if (!(r.resource_name ?? r.resource_id).toLowerCase().includes(q) && !r.resource_type_key.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }), [resources, resourceCategory, resourceRegion, resourceStatus, resourceSearch]);
+
   if (!connection) {
     return (
       <div className="flex flex-col gap-5">
@@ -235,20 +254,6 @@ export function AwsAccountDetail() {
   };
   const categoryCounts: Record<string, number> = {};
   for (const r of resources) categoryCounts[r.category] = (categoryCounts[r.category] ?? 0) + 1;
-
-  const resourceCategories = useMemo(() => Array.from(new Set(resources.map(r => r.category))).sort(), [resources]);
-  const resourceRegions = useMemo(() => Array.from(new Set(resources.map(r => r.region).filter((r): r is string => !!r))).sort(), [resources]);
-  const resourceStatuses = useMemo(() => Array.from(new Set(resources.map(r => r.status))).sort(), [resources]);
-  const filteredResources = useMemo(() => resources.filter(r => {
-    if (resourceCategory && r.category !== resourceCategory) return false;
-    if (resourceRegion && r.region !== resourceRegion) return false;
-    if (resourceStatus && r.status !== resourceStatus) return false;
-    if (resourceSearch) {
-      const q = resourceSearch.toLowerCase();
-      if (!(r.resource_name ?? r.resource_id).toLowerCase().includes(q) && !r.resource_type_key.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  }), [resources, resourceCategory, resourceRegion, resourceStatus, resourceSearch]);
 
   const totalCost = costSnapshots.reduce((sum, c) => sum + Number(c.unblended_cost), 0);
   const costByService: Record<string, number> = {};
