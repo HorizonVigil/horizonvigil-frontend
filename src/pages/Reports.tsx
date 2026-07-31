@@ -8,7 +8,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { api, type ReportRow, type ScheduledReport } from '../lib/api';
 
-const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance'] as const;
+const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance', 'savings'] as const;
 type Category = typeof CATEGORIES[number];
 
 // Matches the sidebar's wording (Executive/Cost/Security/Compliance/Inventory Reports) —
@@ -19,6 +19,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   resource: 'Inventory',
   operational: 'Executive',
   compliance: 'Compliance',
+  savings: 'Savings Opportunities',
 };
 
 export function Reports() {
