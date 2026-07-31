@@ -264,14 +264,17 @@ export const NAV_MODULES: NavModule[] = [
     icon: '⚙',
     to: ORG,
     children: [
+      // Organizations is the default tab (see OrganizationManagement.tsx's
+      // useTabParam), so its link is bare (no ?tab=) — see isChildActive's
+      // exact-match comparison.
       { label: 'Organizations', to: ORG, real: true },
-      { label: 'Folders', to: ORG, real: true },
-      { label: 'Projects', to: ORG, real: true },
-      { label: 'Environments', to: ORG, real: true },
-      { label: 'Business Units', to: ORG, real: true },
-      { label: 'Cost Centers', to: ORG, real: true },
-      { label: 'Tags', to: ORG, real: true },
-      { label: 'Ownership', to: ORG, real: true },
+      { label: 'Folders', to: tabLink(ORG, 'Folders'), real: true },
+      { label: 'Projects', to: tabLink(ORG, 'Projects'), real: true },
+      { label: 'Environments', to: tabLink(ORG, 'Environments'), real: true },
+      { label: 'Business Units', to: tabLink(ORG, 'Business Units'), real: true },
+      { label: 'Cost Centers', to: tabLink(ORG, 'Cost Centers'), real: true },
+      { label: 'Tags', to: tabLink(ORG, 'Tags'), real: true },
+      { label: 'Ownership', to: tabLink(ORG, 'Ownership'), real: true },
     ],
   },
   {

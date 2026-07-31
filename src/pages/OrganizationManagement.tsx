@@ -4,6 +4,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
 import { useOrg } from '../lib/orgContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useTabParam } from '../lib/useTabParam';
 import {
   api,
   type ActivityEntry,
@@ -13,9 +14,13 @@ import {
   type HierarchyFolder,
 } from '../lib/api';
 
+const TABS = ['Organizations', 'Folders', 'Projects', 'Environments', 'Business Units', 'Cost Centers', 'Tags', 'Ownership'] as const;
+type Tab = typeof TABS[number];
+
 export function OrganizationManagement() {
   const { currentOrg, folders, projects, refresh } = useOrg();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Organizations');
 
   const [orgName, setOrgName] = useState('');
   const [orgSaved, setOrgSaved] = useState(false);
@@ -211,44 +216,86 @@ export function OrganizationManagement() {
     <div>
       <FilterBar title="Organization Management" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
-      {currentOrg && (
-        <form onSubmit={handleSaveOrg} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5 flex flex-wrap items-end gap-4 text-sm">
-          <h3 className="w-full text-sm font-medium text-slate-600 dark:text-slate-300 -mb-1">Organizations</h3>
-          <label className="flex flex-col gap-1">
-            <span className="text-slate-400 text-xs">Organization Name</span>
-            <input value={orgName} onChange={e => setOrgName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white" />
-          </label>
-          <div><span className="text-slate-400 text-xs block">Plan</span><div className="font-medium text-slate-800 dark:text-slate-100 capitalize">{currentOrg.plan}</div></div>
-          <div><span className="text-slate-400 text-xs block">Seats</span><div className="font-medium text-slate-800 dark:text-slate-100">{currentOrg.seats}</div></div>
-          <div><span className="text-slate-400 text-xs block">Your Role</span><div className="font-medium text-slate-800 dark:text-slate-100 capitalize">{currentOrg.myRole}</div></div>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Save</button>
-          {orgSaved && <span className="text-xs text-emerald-500">Saved.</span>}
-          {orgError && <span className="text-xs text-red-500">{orgError}</span>}
-        </form>
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'Organizations' && (
+        <>
+          {currentOrg && (
+            <form onSubmit={handleSaveOrg} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5 flex flex-wrap items-end gap-4 text-sm">
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-400 text-xs">Organization Name</span>
+                <input value={orgName} onChange={e => setOrgName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white" />
+              </label>
+              <div><span className="text-slate-400 text-xs block">Plan</span><div className="font-medium text-slate-800 dark:text-slate-100 capitalize">{currentOrg.plan}</div></div>
+              <div><span className="text-slate-400 text-xs block">Seats</span><div className="font-medium text-slate-800 dark:text-slate-100">{currentOrg.seats}</div></div>
+              <div><span className="text-slate-400 text-xs block">Your Role</span><div className="font-medium text-slate-800 dark:text-slate-100 capitalize">{currentOrg.myRole}</div></div>
+              <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Save</button>
+              {orgSaved && <span className="text-xs text-emerald-500">Saved.</span>}
+              {orgError && <span className="text-xs text-red-500">{orgError}</span>}
+            </form>
+          )}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Log</h3>
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
+              {auditLog.map(entry => (
+                <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
+                  <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                  <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                </li>
+              ))}
+              {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
+            </ul>
+          </div>
+        </>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Folders</h3>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-3">
-            {folders.map(f => (
-              <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-slate-700 dark:text-slate-200">📁 {f.name}</span>
-                <button onClick={() => void handleDeleteFolder(f.id)} className="text-xs text-red-500 hover:underline">Delete</button>
-              </li>
-            ))}
-            {folders.length === 0 && <li className="py-2 text-sm text-slate-400">No folders yet.</li>}
-          </ul>
-          <form onSubmit={handleCreateFolder} className="flex gap-2 flex-wrap">
-            <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white flex-1 min-w-[8rem]" />
-            <select value={newFolderParent} onChange={e => setNewFolderParent(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
-              <option value="">Top level</option>
-              {folders.map(f => <option key={f.id} value={f.id}>Inside {f.name}</option>)}
-            </select>
-            <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Add Folder</button>
-          </form>
-        </div>
+      {tab === 'Folders' && (
+        <>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Folders</h3>
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-3">
+              {folders.map(f => (
+                <li key={f.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-slate-700 dark:text-slate-200">📁 {f.name}</span>
+                  <button onClick={() => void handleDeleteFolder(f.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                </li>
+              ))}
+              {folders.length === 0 && <li className="py-2 text-sm text-slate-400">No folders yet.</li>}
+            </ul>
+            <form onSubmit={handleCreateFolder} className="flex gap-2 flex-wrap">
+              <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Folder name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white flex-1 min-w-[8rem]" />
+              <select value={newFolderParent} onChange={e => setNewFolderParent(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
+                <option value="">Top level</option>
+                {folders.map(f => <option key={f.id} value={f.id}>Inside {f.name}</option>)}
+              </select>
+              <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Add Folder</button>
+            </form>
+            {folderProjectError && <p className="text-sm text-red-500 mt-2">{folderProjectError}</p>}
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Hierarchy Explorer</h3>
+            {hierarchy ? (
+              <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                {hierarchy.folders.map(f => renderHierarchyFolder(f))}
+                {hierarchy.unfiledProjects.map(p => (
+                  <li key={p.id} className="py-1 text-sm text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />{p.name} <span className="text-slate-400">({p.connectionCount} connections)</span>
+                  </li>
+                ))}
+                {hierarchy.folders.length === 0 && hierarchy.unfiledProjects.length === 0 && <li className="py-2 text-sm text-slate-400">Nothing to show yet.</li>}
+              </ul>
+            ) : <p className="text-sm text-slate-400">Loading…</p>}
+          </div>
+        </>
+      )}
 
+      {tab === 'Projects' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Projects</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-3">
@@ -269,11 +316,26 @@ export function OrganizationManagement() {
             </select>
             <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Add Project</button>
           </form>
+          {folderProjectError && <p className="text-sm text-red-500 mt-2">{folderProjectError}</p>}
         </div>
-        {folderProjectError && <p className="text-sm text-red-500 lg:col-span-2">{folderProjectError}</p>}
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      {tab === 'Environments' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Environments</h3>
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+            {environments.map(e => (
+              <li key={e.environment} className="flex items-center justify-between py-2 text-sm">
+                <Badge tone="neutral">{e.environment}</Badge>
+                <span className="text-slate-500 dark:text-slate-400">{e.count} resources</span>
+              </li>
+            ))}
+            {environments.length === 0 && <li className="py-2 text-sm text-slate-400">No resources scanned yet.</li>}
+          </ul>
+        </div>
+      )}
+
+      {tab === 'Business Units' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Business Units</h3>
           <table className="w-full text-sm mb-3">
@@ -300,7 +362,9 @@ export function OrganizationManagement() {
           </form>
           {buError && <p className="text-sm text-red-500 mt-2">{buError}</p>}
         </div>
+      )}
 
+      {tab === 'Cost Centers' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost Centers</h3>
           <table className="w-full text-sm mb-3">
@@ -332,25 +396,12 @@ export function OrganizationManagement() {
           </form>
           {ccError && <p className="text-sm text-red-500 mt-2">{ccError}</p>}
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Environments</h3>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {environments.map(e => (
-              <li key={e.environment} className="flex items-center justify-between py-2 text-sm">
-                <Badge tone="neutral">{e.environment}</Badge>
-                <span className="text-slate-500 dark:text-slate-400">{e.count} resources</span>
-              </li>
-            ))}
-            {environments.length === 0 && <li className="py-2 text-sm text-slate-400">No resources scanned yet.</li>}
-          </ul>
-        </div>
-
+      {tab === 'Tags' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Organization Tags</h3>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-48 overflow-y-auto">
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
             {tags.map(t => (
               <li key={t.key} className="py-2 text-sm">
                 <div className="flex items-center justify-between">
@@ -363,14 +414,16 @@ export function OrganizationManagement() {
             {tags.length === 0 && <li className="py-2 text-sm text-slate-400">No tags found yet.</li>}
           </ul>
         </div>
+      )}
 
+      {tab === 'Ownership' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Ownership</h3>
-          <select value={ownershipTagKey} onChange={e => setOwnershipTagKey(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white w-full mb-2">
+          <select value={ownershipTagKey} onChange={e => setOwnershipTagKey(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white w-full max-w-xs mb-2">
             <option value="">owner (default)</option>
             {tags.map(t => <option key={t.key} value={t.key}>{t.key}</option>)}
           </select>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-40 overflow-y-auto">
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
             {owners.map(o => (
               <li key={o.owner} className="flex items-center justify-between py-1.5 text-sm">
                 <span className="text-slate-700 dark:text-slate-200">{o.owner}</span>
@@ -380,35 +433,7 @@ export function OrganizationManagement() {
             {owners.length === 0 && <li className="py-2 text-sm text-slate-400">No ownership data yet.</li>}
           </ul>
         </div>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Hierarchy Explorer</h3>
-        {hierarchy ? (
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {hierarchy.folders.map(f => renderHierarchyFolder(f))}
-            {hierarchy.unfiledProjects.map(p => (
-              <li key={p.id} className="py-1 text-sm text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />{p.name} <span className="text-slate-400">({p.connectionCount} connections)</span>
-              </li>
-            ))}
-            {hierarchy.folders.length === 0 && hierarchy.unfiledProjects.length === 0 && <li className="py-2 text-sm text-slate-400">Nothing to show yet.</li>}
-          </ul>
-        ) : <p className="text-sm text-slate-400">Loading…</p>}
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Log</h3>
-        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
-          {auditLog.map(entry => (
-            <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
-              <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-              <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-            </li>
-          ))}
-          {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
-        </ul>
-      </div>
+      )}
       {confirmDialog}
     </div>
   );
