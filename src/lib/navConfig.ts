@@ -134,14 +134,17 @@ export const NAV_MODULES: NavModule[] = [
     icon: '$',
     to: COST,
     children: [
+      // Cost Explorer is the default tab (see CostManagement.tsx's
+      // useTabParam), so its link is bare (no ?tab=) to match what
+      // useTabParam itself omits — see isChildActive's exact-match comparison.
       { label: 'Cost Explorer', to: COST, real: true },
-      { label: 'Cost Analytics', to: COST, real: true },
-      { label: 'Forecast', to: COST, real: true },
-      { label: 'Budgets', to: COST, real: true },
-      { label: 'Cost Allocation', to: COST, real: true },
-      { label: 'Chargeback', to: COST, real: true },
-      { label: 'Showback', to: COST, real: true },
-      { label: 'Cost Reports', to: COST, real: true },
+      { label: 'Cost Analytics', to: tabLink(COST, 'Cost Analytics'), real: true },
+      { label: 'Forecast', to: tabLink(COST, 'Forecast'), real: true },
+      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true },
+      { label: 'Cost Allocation', to: tabLink(COST, 'Cost Allocation'), real: true },
+      { label: 'Chargeback', to: tabLink(COST, 'Chargeback'), real: true },
+      { label: 'Showback', to: tabLink(COST, 'Showback'), real: true },
+      { label: 'Cost Reports', to: tabLink(COST, 'Cost Reports'), real: true },
     ],
   },
   {
