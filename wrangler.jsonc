@@ -10,6 +10,7 @@
   },
   "env": {
     "dev": { "name": "cloudops360-1-frontend-dev" },
-    "test": { "name": "cloudops360-1-frontend-test" }
+    "test": { "name": "cloudops360-1-frontend-test" },
+    "staging": { "name": "cloudops360-1-frontend-staging" }
   }
 }
