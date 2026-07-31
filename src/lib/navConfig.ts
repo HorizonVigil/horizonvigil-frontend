@@ -229,13 +229,19 @@ export const NAV_MODULES: NavModule[] = [
     icon: '▤',
     to: REPORTS,
     children: [
+      // Executive Reports is the default tab (see Reports.tsx's useTabParam),
+      // so its link is bare (no ?tab=) — see isChildActive's exact-match comparison.
       { label: 'Executive Reports', to: REPORTS, real: true },
-      { label: 'Cost Reports', to: REPORTS, real: true },
-      { label: 'Security Reports', to: REPORTS, real: true },
-      { label: 'Compliance Reports', to: REPORTS, real: true },
-      { label: 'Inventory Reports', to: REPORTS, real: true },
-      { label: 'Scheduled Reports', to: REPORTS, real: true },
-      { label: 'Export Center', to: REPORTS, real: true },
+      { label: 'Cost Reports', to: tabLink(REPORTS, 'Cost Reports'), real: true },
+      { label: 'Security Reports', to: tabLink(REPORTS, 'Security Reports'), real: true },
+      { label: 'Compliance Reports', to: tabLink(REPORTS, 'Compliance Reports'), real: true },
+      { label: 'Inventory Reports', to: tabLink(REPORTS, 'Inventory Reports'), real: true },
+      // Not one of the original 7 — added because reports-api genuinely
+      // supports a 'savings' category (the rule-based Savings Opportunities
+      // report) with no other reachable destination in the sidebar otherwise.
+      { label: 'Savings Reports', to: tabLink(REPORTS, 'Savings Reports'), real: true },
+      { label: 'Scheduled Reports', to: tabLink(REPORTS, 'Scheduled Reports'), real: true },
+      { label: 'Export Center', to: tabLink(REPORTS, 'Export Center'), real: true },
     ],
   },
   {

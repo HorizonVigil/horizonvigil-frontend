@@ -6,6 +6,7 @@ import { Donut } from '../components/charts/Donut';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type ReportRow, type ScheduledReport } from '../lib/api';
 
 const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance', 'savings'] as const;
@@ -22,7 +23,22 @@ const CATEGORY_LABELS: Record<Category, string> = {
   savings: 'Savings Opportunities',
 };
 
+const TABS = ['Executive Reports', 'Cost Reports', 'Security Reports', 'Compliance Reports', 'Inventory Reports', 'Savings Reports', 'Scheduled Reports', 'Export Center'] as const;
+type Tab = typeof TABS[number];
+
+const TAB_CATEGORY: Record<Tab, Category | null> = {
+  'Executive Reports': 'operational',
+  'Cost Reports': 'cost',
+  'Security Reports': 'security',
+  'Compliance Reports': 'compliance',
+  'Inventory Reports': 'resource',
+  'Savings Reports': 'savings',
+  'Scheduled Reports': null,
+  'Export Center': null,
+};
+
 export function Reports() {
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Executive Reports');
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledReport[]>([]);
   const [exportCenter, setExportCenter] = useState<ReportRow[]>([]);
@@ -67,6 +83,14 @@ export function Reports() {
     await load();
   }
 
+  function openNewReport() {
+    const tabCategory = TAB_CATEGORY[tab];
+    setCategory(tabCategory ?? 'cost');
+    setCadence(tab === 'Scheduled Reports' ? 'weekly' : 'one_time');
+    setName('');
+    setModalOpen(true);
+  }
+
   async function createReport(e: React.FormEvent) {
     e.preventDefault();
     setCreating(true);
@@ -90,9 +114,11 @@ export function Reports() {
   const byCategory: Record<string, number> = {};
   for (const r of reports) byCategory[r.category] = (byCategory[r.category] ?? 0) + 1;
 
+  const activeCategory = TAB_CATEGORY[tab];
+  const categoryReports = activeCategory ? reports.filter(r => r.category === activeCategory) : [];
+
   const columns: Column<ReportRow>[] = [
     { key: 'name', header: 'Report', render: r => r.name, sortValue: r => r.name },
-    { key: 'category', header: 'Category', render: r => <Badge tone="neutral">{CATEGORY_LABELS[r.category as Category] ?? r.category}</Badge>, sortValue: r => r.category },
     { key: 'format', header: 'Format', render: r => r.format.toUpperCase(), sortValue: r => r.format },
     {
       key: 'status', header: 'Status', render: r => (
@@ -140,33 +166,49 @@ export function Reports() {
         <Donut data={CATEGORIES.map(c => ({ label: CATEGORY_LABELS[c], value: byCategory[c] ?? 0 })).filter(d => d.value > 0)} />
       </div>
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Export Center</h3>
-        <p className="text-xs text-slate-400 mb-3">Every report that's finished generating and is ready to download, in one place.</p>
-        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-          {exportCenter.map(r => (
-            <li key={r.id} className="flex items-center justify-between py-2 text-sm">
-              <span className="text-slate-700 dark:text-slate-200">{r.name} <Badge tone="neutral">{CATEGORY_LABELS[r.category as Category] ?? r.category}</Badge></span>
-              <button onClick={() => void download(r.id)} disabled={busyId === r.id} className="text-brand-600 dark:text-brand-400 hover:underline text-xs disabled:opacity-50">{busyId === r.id ? 'Downloading…' : `Download ${r.format.toUpperCase()}`}</button>
-            </li>
-          ))}
-          {exportCenter.length === 0 && <li className="py-2 text-sm text-slate-400">No delivered reports yet — generated reports show up here once ready.</li>}
-        </ul>
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            {t}
+          </button>
+        ))}
       </div>
 
-      <div className="flex justify-end mb-3">
-        <button onClick={() => setModalOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">New Report</button>
-      </div>
+      {activeCategory && (
+        <>
+          <div className="flex justify-end mb-3">
+            <button onClick={openNewReport} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">New {CATEGORY_LABELS[activeCategory]} Report</button>
+          </div>
+          <DataTable columns={columns} rows={categoryReports} rowKey={r => r.id} emptyMessage={`No ${CATEGORY_LABELS[activeCategory].toLowerCase()} reports yet. Click "New ${CATEGORY_LABELS[activeCategory]} Report" — it's generated immediately, no separate step needed.`} />
+        </>
+      )}
 
-      <DataTable columns={columns} rows={reports} rowKey={r => r.id} emptyMessage="No reports yet. Click “New Report” — it's generated immediately, no separate step needed." />
+      {tab === 'Scheduled Reports' && (
+        <>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+            Scheduling isn't wired to a delivery engine yet — these are saved for later, but nothing generates or gets emailed automatically until that exists. Use "one time" in New Report to generate a report right now.
+          </p>
+          <div className="flex justify-end mb-3">
+            <button onClick={openNewReport} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">New Report</button>
+          </div>
+          <DataTable columns={scheduledColumns} rows={scheduled} rowKey={s => s.id} emptyMessage="No scheduled reports." />
+        </>
+      )}
 
-      <div className="mt-6">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Scheduled Reports</h3>
-        <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
-          Scheduling isn't wired to a delivery engine yet — these are saved for later, but nothing generates or gets emailed automatically until that exists. Use “one time” below to generate a report right now.
-        </p>
-        <DataTable columns={scheduledColumns} rows={scheduled} rowKey={s => s.id} emptyMessage="No scheduled reports." />
-      </div>
+      {tab === 'Export Center' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <p className="text-xs text-slate-400 mb-3">Every report that's finished generating and is ready to download, in one place.</p>
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+            {exportCenter.map(r => (
+              <li key={r.id} className="flex items-center justify-between py-2 text-sm">
+                <span className="text-slate-700 dark:text-slate-200">{r.name} <Badge tone="neutral">{CATEGORY_LABELS[r.category as Category] ?? r.category}</Badge></span>
+                <button onClick={() => void download(r.id)} disabled={busyId === r.id} className="text-brand-600 dark:text-brand-400 hover:underline text-xs disabled:opacity-50">{busyId === r.id ? 'Downloading…' : `Download ${r.format.toUpperCase()}`}</button>
+              </li>
+            ))}
+            {exportCenter.length === 0 && <li className="py-2 text-sm text-slate-400">No delivered reports yet — generated reports show up here once ready.</li>}
+          </ul>
+        </div>
+      )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="New Report">
         <form onSubmit={createReport} className="flex flex-col gap-3">
