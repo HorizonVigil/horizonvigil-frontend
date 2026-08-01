@@ -118,7 +118,10 @@ export const NAV_MODULES: NavModule[] = [
     // yet), so this list is intentionally short rather than padded with
     // tabs that show nothing.
     label: 'GCP Projects',
-    icon: '☁',
+    // Distinct from Cloud Accounts' ☁ — with the rail collapsed by default
+    // (only expands on hover, see AppRail.tsx), two entries sharing one
+    // icon looked identical at a glance, easy to miss as "nothing changed".
+    icon: '🌐',
     to: GCP,
     children: [
       { label: 'Project Inventory', to: GCP, real: true },
