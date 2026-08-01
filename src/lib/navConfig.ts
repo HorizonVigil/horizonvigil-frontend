@@ -8,7 +8,7 @@
  * "never build placeholder pages" rule — the label is honest about what's
  * planned, the disabled state is honest about what isn't built yet.
  *
- * Several modules render as an in-page tabbed workspace (AwsAccounts.tsx,
+ * Several modules render as an in-page tabbed workspace (CloudAccounts.tsx,
  * VulnerabilityManagement.tsx, Clusters.tsx, Alerts.tsx, CostOptimization.tsx,
  * Automation.tsx, CustomDashboards.tsx) rather than one flat view — for those,
  * `to` carries a `?tab=<value>` query string matching that page's own
@@ -41,7 +41,7 @@ export interface NavModule {
 }
 
 const OVERVIEW = '/overview';
-const ACCOUNTS = '/aws-accounts';
+const ACCOUNTS = '/cloud-accounts';
 const RESOURCES = '/resources';
 const COST = '/cost-management';
 const OPT = '/cost-optimization';
@@ -55,7 +55,6 @@ const ORG = '/organization';
 const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
-const GCP = '/gcp-projects';
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -75,12 +74,15 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    // Renamed from "AWS Accounts" — CloudOps360 is expanding beyond AWS
-    // (gcp-accounts-api shipped for GCP discovery), so the nav-level name
-    // shouldn't imply AWS-only. The page/route/wizard underneath are still
-    // AWS-specific for now (GCP has its own separate module) — this is a
-    // rename, not a merge; see the GCP Phase 1 plan doc for the later
-    // unification this sets up.
+    // Fully merged multi-cloud module — was briefly two separate modules
+    // ("Cloud Accounts" for AWS, "GCP Projects" for GCP) after the AWS ->
+    // Cloud Accounts rename, but two entries for what's conceptually one
+    // "your connected cloud accounts" concern was confusing (worse, they
+    // shared one icon in the collapsed-by-default rail, so the second
+    // module was easy to miss entirely). CloudAccounts.tsx's Inventory tab
+    // now lists AWS accounts and GCP projects in one merged table, and
+    // CloudAccountDetail.tsx routes a single /cloud-accounts/:id to
+    // whichever provider's detail view actually applies.
     label: 'Cloud Accounts',
     icon: '☁',
     to: ACCOUNTS,
@@ -91,11 +93,13 @@ export const NAV_MODULES: NavModule[] = [
     // their own sidebar entry — most pointed at a tab that just re-showed
     // Dashboard or Inventory under a different label, which is exactly the
     // "duplicate page, different name" problem this list is meant to avoid.
-    // Every entry below now maps to a tab that answers a genuinely distinct
-    // question (see the TABS comment in AwsAccounts.tsx for what merged
-    // where).
+    // Dashboard/Organizations/Regions/Sync Center/Reports stay AWS-only in
+    // their data (see the TABS comment in CloudAccounts.tsx) — GCP has no
+    // backend endpoints for those yet, so they're not padded with numbers
+    // that would be fake for GCP projects. Inventory and Onboarding are the
+    // two genuinely multi-cloud tabs.
     children: [
-      // Dashboard is the default tab (see AwsAccounts.tsx useTabParam), so
+      // Dashboard is the default tab (see CloudAccounts.tsx useTabParam), so
       // its link is bare (no ?tab=) to match what useTabParam itself omits —
       // see isChildActive's exact-match comparison below.
       { label: 'Dashboard', to: ACCOUNTS, real: true },
@@ -108,25 +112,6 @@ export const NAV_MODULES: NavModule[] = [
       // Per-domain settings (distinct from the global Settings module, which
       // already covers AWS credentials/integrations org-wide) isn't built.
       { label: 'Settings', real: false },
-    ],
-  },
-  {
-    // GCP Phase 1 — its own module rather than merged into Cloud Accounts
-    // above (user explicitly chose "rename only, keep separate for now"
-    // over full unification). Only two real tabs exist (GcpProjects.tsx has
-    // no Dashboard/Onboarding/Sync Center — no backend endpoints for those
-    // yet), so this list is intentionally short rather than padded with
-    // tabs that show nothing.
-    label: 'GCP Projects',
-    // Distinct from Cloud Accounts' ☁ — with the rail collapsed by default
-    // (only expands on hover, see AppRail.tsx), two entries sharing one
-    // icon looked identical at a glance, easy to miss as "nothing changed".
-    icon: '🌐',
-    to: GCP,
-    children: [
-      { label: 'Project Inventory', to: GCP, real: true },
-      { label: 'Cost & Billing', real: false },
-      { label: 'Permission Validation', real: false },
     ],
   },
   {

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import { OrgProvider } from './lib/orgContext';
@@ -11,10 +11,8 @@ import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { Overview } from './pages/Overview';
-import { AwsAccounts } from './pages/AwsAccounts';
-import { AwsAccountDetail } from './pages/AwsAccountDetail';
-import { GcpProjects } from './pages/GcpProjects';
-import { GcpProjectDetail } from './pages/GcpProjectDetail';
+import { CloudAccounts } from './pages/CloudAccounts';
+import { CloudAccountDetail } from './pages/CloudAccountDetail';
 import { Resources } from './pages/Resources';
 import { ResourcesOverview } from './pages/resources/ResourcesOverview';
 import { ResourcesCategory } from './pages/resources/ResourcesCategory';
@@ -30,6 +28,12 @@ import { OrganizationManagement } from './pages/OrganizationManagement';
 import { Settings } from './pages/Settings';
 import { CustomDashboards } from './pages/CustomDashboards';
 import { Automation } from './pages/Automation';
+
+/** Preserves :id across a route rename — /aws-accounts/:id and /gcp-projects/:id both used to be real routes (bookmarks, stored Favorites) before Cloud Accounts and GCP Projects merged into one unified list+detail. */
+function RedirectToAccountDetail() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={id ? `/cloud-accounts/${id}` : '/cloud-accounts'} replace />;
+}
 
 export default function App() {
   return (
@@ -50,10 +54,13 @@ export default function App() {
                         <Route element={<Layout />}>
                           <Route path="/" element={<Navigate to="/overview" replace />} />
                           <Route path="/overview" element={<Overview />} />
-                          <Route path="/aws-accounts" element={<AwsAccounts />} />
-                          <Route path="/aws-accounts/:id" element={<AwsAccountDetail />} />
-                          <Route path="/gcp-projects" element={<GcpProjects />} />
-                          <Route path="/gcp-projects/:id" element={<GcpProjectDetail />} />
+                          <Route path="/cloud-accounts" element={<CloudAccounts />} />
+                          <Route path="/cloud-accounts/:id" element={<CloudAccountDetail />} />
+                          {/* Legacy routes — AWS Accounts and GCP Projects merged into one unified module; these keep old bookmarks/Favorites working. */}
+                          <Route path="/aws-accounts" element={<Navigate to="/cloud-accounts" replace />} />
+                          <Route path="/aws-accounts/:id" element={<RedirectToAccountDetail />} />
+                          <Route path="/gcp-projects" element={<Navigate to="/cloud-accounts" replace />} />
+                          <Route path="/gcp-projects/:id" element={<RedirectToAccountDetail />} />
                           <Route path="/resources" element={<ResourcesOverview />} />
                           <Route path="/resources/all" element={<Resources />} />
                           <Route path="/resources/:category" element={<ResourcesCategory />} />

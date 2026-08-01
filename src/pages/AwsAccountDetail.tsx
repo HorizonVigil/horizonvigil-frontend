@@ -82,7 +82,7 @@ export function AwsAccountDetail() {
 
   useEffect(() => {
     if (!id) return;
-    void api.getFavorites().then(r => setFavorite(r.favorites.find(f => f.path === `/aws-accounts/${id}`) ?? null));
+    void api.getFavorites().then(r => setFavorite(r.favorites.find(f => f.path === `/cloud-accounts/${id}`) ?? null));
   }, [id]);
 
   async function toggleFavorite() {
@@ -93,7 +93,7 @@ export function AwsAccountDetail() {
       setFavorite(null);
       toast(`Removed "${name}" from Favorites`, 'success');
     } else {
-      const { favorite: created } = await api.addFavorite({ type: 'aws-account', label: name, path: `/aws-accounts/${id}` });
+      const { favorite: created } = await api.addFavorite({ type: 'aws-account', label: name, path: `/cloud-accounts/${id}` });
       setFavorite(created);
       toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
     }
@@ -262,7 +262,7 @@ export function AwsAccountDetail() {
 
   return (
     <div>
-      <FilterBar title={connection.connection_name ?? connection.aws_account_id} breadcrumb={<Link to="/aws-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} />
+      <FilterBar title={connection.connection_name ?? connection.aws_account_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} />
 
       <div className="flex items-center gap-2 mb-4">
         <Badge>{connection.status}</Badge>

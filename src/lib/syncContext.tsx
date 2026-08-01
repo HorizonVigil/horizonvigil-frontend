@@ -19,9 +19,8 @@ interface SyncContextType {
 const SyncContext = createContext<SyncContextType | null>(null);
 
 /**
- * Mounted once at the app root so a check/scan started from AwsAccounts.tsx
- * (or GcpProjects.tsx) keeps running even if that component unmounts
- * mid-request.
+ * Mounted once at the app root so a check/scan started from CloudAccounts.tsx
+ * keeps running even if that component unmounts mid-request.
  *
  * `startSync` is the lightweight credentials check (`/test` — no live cloud
  * call). `startDiscovery` drives the real multi-step scan (steps -> run-step
