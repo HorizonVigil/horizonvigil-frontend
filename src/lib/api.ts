@@ -5,13 +5,14 @@ import { supabase } from './supabase';
 const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.workers.dev';
 
 type Service =
-  | 'overview' | 'awsAccounts' | 'resources' | 'customDashboards' | 'costManagement'
+  | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
   | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings';
 
 const SERVICE_URLS: Record<Service, string> = {
   overview: import.meta.env.VITE_OVERVIEW_API_URL || `https://cloudops360-1-overview-api.${SUBDOMAIN}`,
   awsAccounts: import.meta.env.VITE_AWS_ACCOUNTS_API_URL || `https://cloudops360-1-aws-accounts-api.${SUBDOMAIN}`,
+  gcpAccounts: import.meta.env.VITE_GCP_ACCOUNTS_API_URL || `https://cloudops360-1-gcp-accounts-api.${SUBDOMAIN}`,
   resources: import.meta.env.VITE_RESOURCES_API_URL || `https://cloudops360-1-resources-api.${SUBDOMAIN}`,
   customDashboards: import.meta.env.VITE_CUSTOM_DASHBOARDS_API_URL || `https://cloudops360-1-custom-dashboards-api.${SUBDOMAIN}`,
   costManagement: import.meta.env.VITE_COST_MANAGEMENT_API_URL || `https://cloudops360-1-cost-management-api.${SUBDOMAIN}`,
@@ -26,6 +27,12 @@ const SERVICE_URLS: Record<Service, string> = {
   automation: import.meta.env.VITE_AUTOMATION_API_URL || `https://cloudops360-1-automation-api.${SUBDOMAIN}`,
   settings: import.meta.env.VITE_SETTINGS_API_URL || `https://cloudops360-1-settings-api.${SUBDOMAIN}`,
 };
+
+/** The two services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
+export type CloudAccountService = 'awsAccounts' | 'gcpAccounts';
+function accountsPathPrefix(service: CloudAccountService): string {
+  return service === 'gcpAccounts' ? '/api/gcp-accounts' : '/api/aws-accounts';
+}
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
 
@@ -145,15 +152,48 @@ class ApiClient {
   updateAccountRole(id: string, data: { roleArn: string; externalId: string }) {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/role`, data);
   }
-  testAccount(id: string) { return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/test`); }
-
-  // Real resource discovery — one request per scanner×region step, kept small enough to fit Cloudflare's free-tier CPU/subrequest budget per invocation.
-  getDiscoverySteps(id: string) { return this.get<{ steps: string[]; regions: string[]; scannerCount: number }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/steps`); }
-  runDiscoveryStep(id: string, stepId: string) {
-    return this.post<{ stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/run-step`, { stepId });
+  testAccount(id: string, service: CloudAccountService = 'awsAccounts') {
+    return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>(service, `${accountsPathPrefix(service)}/accounts/${id}/test`);
   }
-  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[]) {
-    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors });
+
+  // Real resource discovery — one request per step, kept small enough to fit
+  // Cloudflare's free-tier CPU/subrequest budget per invocation. Shared
+  // between AWS and GCP (both aws-accounts-api and gcp-accounts-api expose
+  // the identical steps/run-step/finalize contract) via the `service` param
+  // — syncContext.tsx's polling loop is provider-agnostic because of this.
+  getDiscoverySteps(id: string, service: CloudAccountService = 'awsAccounts') {
+    return this.get<{ steps: string[]; regions: string[]; scannerCount: number }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/steps`);
+  }
+  runDiscoveryStep(id: string, stepId: string, service: CloudAccountService = 'awsAccounts') {
+    return this.post<{ stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/run-step`, { stepId });
+  }
+  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[], service: CloudAccountService = 'awsAccounts') {
+    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors });
+  }
+
+  // ── gcp-accounts-api ─────────────────────────────────────────────────────
+  // GCP Phase 1: Compute Engine, Cloud Storage, Cloud SQL, GKE. Kept as its
+  // own separate method set (not merged into the AWS ones above) — the
+  // "Cloud Accounts" rename is a rename, not a unification; see navConfig.ts.
+
+  getGcpAccounts(params: { status?: string; environment?: string; connectionMethod?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<GcpConnection>>('gcpAccounts', `/api/gcp-accounts/accounts${qs(params)}`);
+  }
+  getGcpAccount(id: string) { return this.get<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`); }
+  createGcpAccount(data: {
+    connectionName: string; connectionMethod: 'service_account_key' | 'service_account_impersonation'; gcpProjectId: string;
+    serviceAccountKeyJson?: string; impersonatedServiceAccount?: string;
+    defaultRegion?: string; environment?: string; scanRegions?: string[]; projectId?: string;
+  }) {
+    return this.post<GcpConnection>('gcpAccounts', '/api/gcp-accounts/accounts', data);
+  }
+  updateGcpAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null; defaultRegion?: string; scanRegions?: string[] }) {
+    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`, data);
+  }
+  disconnectGcpAccount(id: string) { return this.delete<{ disconnected: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`); }
+  deleteGcpAccountPermanently(id: string) { return this.delete<{ deleted: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/permanently`); }
+  updateGcpAccountCredentials(id: string, data: { serviceAccountKeyJson: string }) {
+    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/credentials`, data);
   }
 
   getAwsAccountsDashboard() {
@@ -561,6 +601,17 @@ export interface CloudConnection {
   key_rotated_at: string | null; error_message: string | null; scan_regions: string[]; created_at: string; updated_at: string;
 }
 export interface AccountSummary { id: string; connection_name: string; status: string; environment?: string; last_sync_at: string | null; last_discovery_at: string | null; last_permission_check_at?: string | null; error_message: string | null; resource_summary?: unknown; key_rotated_at?: string | null }
+
+/** gcp-accounts-api's equivalent of CloudConnection — a distinct type rather than widening CloudConnection's AWS-specific required fields (aws_account_id, role_arn, external_id) to accommodate GCP's identifiers. */
+export interface GcpConnection {
+  id: string; org_id: string; project_id: string | null; provider: 'gcp'; connection_method: 'service_account_key' | 'service_account_impersonation';
+  gcp_project_id: string; connection_name: string | null; masked_access_key: string | null; gcp_impersonated_service_account: string | null;
+  default_region: string; status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired';
+  environment: Environment;
+  resource_summary: { totalResources?: number; categoryCounts?: Record<string, number> } | null;
+  last_discovery_at: string | null; last_full_scan_at: string | null; last_sync_at: string | null;
+  error_message: string | null; scan_regions: string[]; created_at: string; updated_at: string;
+}
 export interface CrossAccountRole { id: string; connection_name: string; aws_account_id: string; role_arn: string; external_id: string; status: string; created_at: string }
 
 export interface AwsAccountsDashboard {
