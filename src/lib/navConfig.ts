@@ -74,7 +74,13 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: 'AWS Accounts',
+    // Renamed from "AWS Accounts" — CloudOps360 is expanding beyond AWS
+    // (gcp-accounts-api shipped for GCP discovery), so the nav-level name
+    // shouldn't imply AWS-only. The page/route/wizard underneath are still
+    // AWS-specific for now (GCP has its own separate module) — this is a
+    // rename, not a merge; see the GCP Phase 1 plan doc for the later
+    // unification this sets up.
+    label: 'Cloud Accounts',
     icon: '☁',
     to: ACCOUNTS,
     // Consolidated from an earlier, larger list that had Account Explorer,

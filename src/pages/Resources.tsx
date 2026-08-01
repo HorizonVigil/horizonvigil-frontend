@@ -625,7 +625,7 @@ export function Resources() {
             {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
           </div>
 
-          <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from AWS Accounts." />
+          <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from Cloud Accounts." />
         </>
       )}
 

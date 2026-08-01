@@ -336,7 +336,7 @@ export function AwsAccounts() {
 
   return (
     <div>
-      <FilterBar title="AWS Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">

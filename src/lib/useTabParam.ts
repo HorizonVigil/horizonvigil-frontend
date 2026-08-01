@@ -6,7 +6,7 @@ import { useSearchParams } from 'react-router-dom';
  * Without this, the sidebar's submenu links (navConfig.ts) and a page's own
  * tab buttons were two disconnected navigation systems — every submenu item
  * for a module pointed at the exact same bare URL, so clicking "Organizations"
- * in the sidebar just reloaded the AWS Accounts page on whatever tab was
+ * in the sidebar just reloaded the Cloud Accounts page on whatever tab was
  * already showing, never actually switching to the Organizations tab. Now
  * the sidebar links carry `?tab=<value>` and this hook is the single source
  * of truth both directions: reading the URL on load/back-forward, and

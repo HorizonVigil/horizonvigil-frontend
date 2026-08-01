@@ -271,7 +271,7 @@ export function Automation() {
       {tab === 'scheduled' && <DataTable columns={jobColumns} rows={scheduledJobs} rowKey={j => j.id} emptyMessage="No scheduled jobs yet." />}
       {tab === 'remediation' && (
         <>
-          <p className="text-xs text-slate-400 mb-3">Requested from a resource's "Remediate" action (AWS Accounts &gt; Resources). Approve/Execute require an admin or owner role; requests use the account's own stored AWS credentials — no platform-level access is involved.</p>
+          <p className="text-xs text-slate-400 mb-3">Requested from a resource's "Remediate" action (Cloud Accounts &gt; Resources). Approve/Execute require an admin or owner role; requests use the account's own stored AWS credentials — no platform-level access is involved.</p>
           <DataTable columns={remediationColumns} rows={remediation} rowKey={r => r.id} emptyMessage="No remediation requested yet." />
         </>
       )}
