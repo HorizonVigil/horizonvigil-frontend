@@ -55,6 +55,7 @@ const ORG = '/organization';
 const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
+const GCP = '/gcp-projects';
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -107,6 +108,22 @@ export const NAV_MODULES: NavModule[] = [
       // Per-domain settings (distinct from the global Settings module, which
       // already covers AWS credentials/integrations org-wide) isn't built.
       { label: 'Settings', real: false },
+    ],
+  },
+  {
+    // GCP Phase 1 — its own module rather than merged into Cloud Accounts
+    // above (user explicitly chose "rename only, keep separate for now"
+    // over full unification). Only two real tabs exist (GcpProjects.tsx has
+    // no Dashboard/Onboarding/Sync Center — no backend endpoints for those
+    // yet), so this list is intentionally short rather than padded with
+    // tabs that show nothing.
+    label: 'GCP Projects',
+    icon: '☁',
+    to: GCP,
+    children: [
+      { label: 'Project Inventory', to: GCP, real: true },
+      { label: 'Cost & Billing', real: false },
+      { label: 'Permission Validation', real: false },
     ],
   },
   {

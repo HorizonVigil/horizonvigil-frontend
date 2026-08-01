@@ -13,6 +13,8 @@ import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { Overview } from './pages/Overview';
 import { AwsAccounts } from './pages/AwsAccounts';
 import { AwsAccountDetail } from './pages/AwsAccountDetail';
+import { GcpProjects } from './pages/GcpProjects';
+import { GcpProjectDetail } from './pages/GcpProjectDetail';
 import { Resources } from './pages/Resources';
 import { ResourcesOverview } from './pages/resources/ResourcesOverview';
 import { ResourcesCategory } from './pages/resources/ResourcesCategory';
@@ -50,6 +52,8 @@ export default function App() {
                           <Route path="/overview" element={<Overview />} />
                           <Route path="/aws-accounts" element={<AwsAccounts />} />
                           <Route path="/aws-accounts/:id" element={<AwsAccountDetail />} />
+                          <Route path="/gcp-projects" element={<GcpProjects />} />
+                          <Route path="/gcp-projects/:id" element={<GcpProjectDetail />} />
                           <Route path="/resources" element={<ResourcesOverview />} />
                           <Route path="/resources/all" element={<Resources />} />
                           <Route path="/resources/:category" element={<ResourcesCategory />} />
