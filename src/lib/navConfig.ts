@@ -206,14 +206,17 @@ export const NAV_MODULES: NavModule[] = [
     icon: '∿',
     to: MON,
     children: [
+      // CloudWatch is the default tab (see Monitoring.tsx's useTabParam), so
+      // its link is bare (no ?tab=) to match what useTabParam itself omits —
+      // see isChildActive's exact-match comparison above.
       { label: 'CloudWatch', to: MON, real: true },
-      { label: 'Metrics', to: MON, real: true },
-      { label: 'Logs', to: MON, real: true },
-      { label: 'Traces', to: MON, real: true },
-      { label: 'Dashboards', to: MON, real: true },
-      { label: 'Health', to: MON, real: true },
-      { label: 'Service Map', to: MON, real: true },
-      { label: 'Performance', to: MON, real: true },
+      { label: 'Metrics', to: tabLink(MON, 'Metrics'), real: true },
+      { label: 'Logs', to: tabLink(MON, 'Logs'), real: true },
+      { label: 'Traces', to: tabLink(MON, 'Traces'), real: true },
+      { label: 'Dashboards', to: tabLink(MON, 'Dashboards'), real: true },
+      { label: 'Health', to: tabLink(MON, 'Health'), real: true },
+      { label: 'Service Map', to: tabLink(MON, 'Service Map'), real: true },
+      { label: 'Performance', to: tabLink(MON, 'Performance'), real: true },
     ],
   },
   {

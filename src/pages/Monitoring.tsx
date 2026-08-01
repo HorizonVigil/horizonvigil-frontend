@@ -6,6 +6,7 @@ import { Donut } from '../components/charts/Donut';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useFilters } from '../lib/filterContext';
+import { useTabParam } from '../lib/useTabParam';
 import { api, type MonitoringAlarm, type ResourceMetric } from '../lib/api';
 
 function timeAgo(ts: string): string {
@@ -29,14 +30,29 @@ interface HealthByConnection {
 
 interface NotIntegratedSection { key: string; label: string; reason: string }
 
+// Must match navConfig.ts's Monitoring children labels exactly — that file
+// links here via ?tab=<value>, not derived from this array.
+const TABS = ['CloudWatch', 'Metrics', 'Logs', 'Traces', 'Dashboards', 'Health', 'Service Map', 'Performance'] as const;
+type Tab = typeof TABS[number];
+
+function NotIntegratedPanel({ section }: { section: NotIntegratedSection | undefined }) {
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">{section?.label}</h3>
+      <p className="text-xs text-slate-400">{section?.reason ?? 'Not pulled into this build yet.'}</p>
+    </div>
+  );
+}
+
 export function Monitoring() {
   const { account, refreshToken } = useFilters();
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'CloudWatch');
   const [dashboard, setDashboard] = useState<MonitoringDashboard | null>(null);
   const [alarms, setAlarms] = useState<MonitoringAlarm[]>([]);
   const [metrics, setMetrics] = useState<ResourceMetric[]>([]);
   const [metricsTotal, setMetricsTotal] = useState(0);
   const [healthByConnection, setHealthByConnection] = useState<HealthByConnection[]>([]);
-  const [notIntegrated, setNotIntegrated] = useState<NotIntegratedSection[]>([]);
+  const [notIntegrated, setNotIntegrated] = useState<Record<string, NotIntegratedSection>>({});
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -56,13 +72,13 @@ export function Monitoring() {
     setMetrics(metricsRes.items);
     setMetricsTotal(metricsRes.pagination.total);
     setHealthByConnection(healthRes.connections);
-    setNotIntegrated([
-      { key: 'logs', label: 'Logs', reason: logs.reason },
-      { key: 'traces', label: 'Traces', reason: traces.reason },
-      { key: 'serviceMap', label: 'Service Map', reason: serviceMap.reason },
-      { key: 'performance', label: 'Performance / APM', reason: performance.reason },
-      { key: 'dashboards', label: 'CloudWatch Dashboards', reason: dashboards.reason },
-    ]);
+    setNotIntegrated({
+      Logs: { key: 'logs', label: 'Logs', reason: logs.reason },
+      Traces: { key: 'traces', label: 'Traces', reason: traces.reason },
+      'Service Map': { key: 'serviceMap', label: 'Service Map', reason: serviceMap.reason },
+      Performance: { key: 'performance', label: 'Performance / APM', reason: performance.reason },
+      Dashboards: { key: 'dashboards', label: 'CloudWatch Dashboards', reason: dashboards.reason },
+    });
   }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -105,57 +121,62 @@ export function Monitoring() {
     <div>
       <FilterBar title="Monitoring" breadcrumb={<Breadcrumb />} />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Monitored Resources" value={String(dashboard?.resourceHealth.total ?? 0)} />
-        <StatCard label="CloudWatch Alarms" value={String(dashboard?.alarms.total ?? 0)} caption={dashboard?.alarms.note} />
-        <StatCard label="Alarms in ALARM state" value={String(dashboard?.alarms.byState['ALARM'] ?? 0)} />
-        <StatCard label="Metrics Collected" value={metricsTotal.toLocaleString()} />
+      <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+        {TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            {t}
+          </button>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      {tab === 'CloudWatch' && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <StatCard label="Monitored Resources" value={String(dashboard?.resourceHealth.total ?? 0)} />
+            <StatCard label="CloudWatch Alarms" value={String(dashboard?.alarms.total ?? 0)} caption={dashboard?.alarms.note} />
+            <StatCard label="Alarms in ALARM state" value={String(dashboard?.alarms.byState['ALARM'] ?? 0)} />
+            <StatCard label="Metrics Collected" value={metricsTotal.toLocaleString()} />
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Alarms by State</h3>
+            <Donut data={Object.entries(dashboard?.alarms.byState ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value }))} />
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">CloudWatch Alarms</h3>
+            <DataTable columns={alarmColumns} rows={alarms} rowKey={a => a.id} emptyMessage="No CloudWatch alarms discovered yet." />
+          </div>
+        </>
+      )}
+
+      {tab === 'Metrics' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Health State</h3>
-          <Donut data={Object.entries(dashboard?.resourceHealth.byState ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value }))} />
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Metrics</h3>
+          <p className="text-xs text-slate-400 mb-3">CloudWatch metrics collected per resource. These populate as your connected accounts sync — nothing to configure per resource.</p>
+          <DataTable
+            columns={metricColumns}
+            rows={metrics}
+            rowKey={m => m.id}
+            emptyMessage="No metrics collected yet — these populate automatically once a CloudWatch pull runs for a connected account."
+          />
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Alarms by State</h3>
-          <Donut data={Object.entries(dashboard?.alarms.byState ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value }))} />
-        </div>
-      </div>
+      )}
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Health by Connection</h3>
-        <DataTable columns={healthColumns} rows={healthByConnection} rowKey={h => h.connectionId} emptyMessage="No connections to report health for yet." />
-      </div>
+      {tab === 'Health' && (
+        <>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Health State</h3>
+            <Donut data={Object.entries(dashboard?.resourceHealth.byState ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value }))} />
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Health by Connection</h3>
+            <DataTable columns={healthColumns} rows={healthByConnection} rowKey={h => h.connectionId} emptyMessage="No connections to report health for yet." />
+          </div>
+        </>
+      )}
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Metrics</h3>
-        <p className="text-xs text-slate-400 mb-3">CloudWatch metrics collected per resource. These populate as your connected accounts sync — nothing to configure per resource.</p>
-        <DataTable
-          columns={metricColumns}
-          rows={metrics}
-          rowKey={m => m.id}
-          emptyMessage="No metrics collected yet — these populate automatically once a CloudWatch pull runs for a connected account."
-        />
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">CloudWatch Alarms</h3>
-        <DataTable columns={alarmColumns} rows={alarms} rowKey={a => a.id} emptyMessage="No CloudWatch alarms discovered yet." />
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Additional Observability</h3>
-        <p className="text-xs text-slate-400 mb-3">Logs, distributed traces, service maps, APM, and CloudWatch dashboards aren't pulled into this build yet — each section below reports honestly rather than showing a silent empty table.</p>
-        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-          {notIntegrated.map(section => (
-            <li key={section.key} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 py-2 text-sm">
-              <span className="font-medium text-slate-600 dark:text-slate-300 shrink-0">{section.label}</span>
-              <span className="text-xs text-slate-400">{section.reason}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {(tab === 'Logs' || tab === 'Traces' || tab === 'Dashboards' || tab === 'Service Map' || tab === 'Performance') && (
+        <NotIntegratedPanel section={notIntegrated[tab]} />
+      )}
     </div>
   );
 }
