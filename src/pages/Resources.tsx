@@ -400,6 +400,9 @@ export function Resources() {
     const c = connections.find(c => c.id === connectionId);
     return c ? c.name : connectionId;
   }, [connections]);
+  const providerFor = useCallback((connectionId: string): 'aws' | 'gcp' | null => {
+    return connections.find(c => c.id === connectionId)?.provider ?? null;
+  }, [connections]);
 
   // dashboard/explorerServices/recentEvents (below) are org-wide aggregates
   // fetched once, unaffected by the URL's category/service filter — fine for
@@ -462,6 +465,11 @@ export function Resources() {
         <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} onClick={e => e.stopPropagation()} />
       ),
     } as Column<CloudResource>] : []),
+    {
+      key: 'provider', header: 'Provider',
+      render: r => { const p = providerFor(r.connection_id); return p ? <Badge tone="neutral">{p === 'gcp' ? 'GCP' : 'AWS'}</Badge> : '—'; },
+      sortValue: r => providerFor(r.connection_id) ?? '',
+    },
     { key: 'displayName', header: 'Service', render: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key, sortValue: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key },
     { key: 'account', header: 'Account', render: r => <span className="text-xs">{accountLabel(r.connection_id)}</span>, sortValue: r => accountLabel(r.connection_id) },
     { key: 'resourceId', header: 'Resource ID', render: r => <span className="font-mono text-xs">{r.resource_id.length > 40 ? `${r.resource_id.slice(0, 37)}…` : r.resource_id}</span>, sortValue: r => r.resource_id },

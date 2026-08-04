@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { FilterBar } from '../../components/FilterBar';
 import { Breadcrumb } from '../../components/Breadcrumb';
 import { useTheme } from '../../lib/theme';
+import { useFilters } from '../../lib/filterContext';
 import { categoryColor } from '../../components/charts/palette';
 import { api, type ResourceCatalogEntry } from '../../lib/api';
 import { CategoryIcon } from '../Resources';
@@ -18,14 +19,24 @@ export function ResourcesOverview() {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { account, refreshToken } = useFilters();
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   const [byCategory, setByCategory] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     void api.getResourceCatalog().then(r => setCatalog(r.items));
-    void api.getResourceExplorer().then(r => setByCategory(Object.fromEntries(r.categories.map(c => [c.category, c.total]))));
   }, []);
+
+  // Re-fetches whenever the header's Account filter changes — this is the
+  // one control that lets you tell "is this AWS or GCP" apart on this page:
+  // picking a specific "AWS — ..." or "GCP — ..." account re-scopes every
+  // category count to just that connection. There's no separate provider
+  // toggle; the Account dropdown already lists both, labeled.
+  useEffect(() => {
+    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account })
+      .then(r => setByCategory(Object.fromEntries(r.categories.map(c => [c.category, c.total]))));
+  }, [account, refreshToken]);
 
   const categoryMeta = useMemo(() => {
     const byCat = new Map<string, { services: Set<string>; live: Set<string> }>();
@@ -46,7 +57,7 @@ export function ResourcesOverview() {
 
   return (
     <div>
-      <FilterBar title="Resources" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Resources" breadcrumb={<Breadcrumb />} />
 
       <form onSubmit={submitSearch} className="mb-5">
         <input

@@ -262,7 +262,7 @@ class ApiClient {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/inventory${qs(params)}`);
   }
   getResource(id: string) { return this.get<CloudResource>('resources', `/api/resources/inventory/${id}`); }
-  getResourceExplorer() { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', '/api/resources/explorer'); }
+  getResourceExplorer(params: { connectionId?: string } = {}) { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', `/api/resources/explorer${qs(params)}`); }
   getResourceExplorerCategory(category: string, params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/explorer/${encodeURIComponent(category)}${qs(params)}`);
   }

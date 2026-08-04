@@ -15,6 +15,11 @@ export function AddAccountChooser({ open, onClose, onChoose }: { open: boolean; 
           <div className="text-sm font-medium text-slate-800 dark:text-slate-100">GCP Project</div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Connect via a service account key or impersonation</div>
         </button>
+        <div className="flex-1 text-left rounded-lg border border-dashed border-slate-200 dark:border-slate-700 p-4 opacity-60 cursor-not-allowed" title="On the roadmap — not built yet">
+          <div className="text-2xl mb-2">🔷</div>
+          <div className="text-sm font-medium text-slate-500 dark:text-slate-400">Azure Subscription</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Coming soon — not built yet</div>
+        </div>
       </div>
     </Modal>
   );

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { FilterBar } from '../../components/FilterBar';
 import { WorkspaceBreadcrumb } from '../../components/WorkspaceBreadcrumb';
+import { useFilters } from '../../lib/filterContext';
 import { api, type ResourceCatalogEntry } from '../../lib/api';
 import { serviceLabel } from '../Resources';
 
@@ -10,6 +11,7 @@ import { serviceLabel } from '../Resources';
  * live or not; only live ones are clickable into a workspace. */
 export function ResourcesCategory() {
   const { category = '' } = useParams<{ category: string }>();
+  const { account, refreshToken } = useFilters();
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   // getResourceExplorer() has no per-category variant, but it's a small,
   // cheap-to-fetch aggregate (every category + its services in one call) —
@@ -18,11 +20,14 @@ export function ResourcesCategory() {
 
   useEffect(() => {
     void api.getResourceCatalog({ category }).then(r => setCatalog(r.items));
-    void api.getResourceExplorer().then(r => {
+  }, [category]);
+
+  useEffect(() => {
+    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account }).then(r => {
       const entry = r.categories.find(c => c.category === category);
       setByService(Object.fromEntries((entry?.services ?? []).map(s => [s.service, s.count])));
     });
-  }, [category]);
+  }, [category, account, refreshToken]);
 
   const services = useMemo(() => {
     const byServiceMeta = new Map<string, { live: boolean; typeCount: number }>();
@@ -45,7 +50,6 @@ export function ResourcesCategory() {
       <FilterBar
         title={category}
         breadcrumb={<WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: category }]} />}
-        showAccountFilter={false}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

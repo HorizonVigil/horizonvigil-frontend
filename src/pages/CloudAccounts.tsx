@@ -551,6 +551,7 @@ export function CloudAccounts() {
             {PROVIDER_CHIPS.map(p => (
               <button key={p.value} onClick={() => setProviderFilter(p.value)} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${providerFilter === p.value ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{p.label}</button>
             ))}
+            <span className="text-xs rounded-full px-2.5 py-1 border border-dashed border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed" title="On the roadmap — not built yet">Azure</span>
           </div>
           <div className="flex items-center gap-1.5 mb-3 flex-wrap">
             <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Status</span>
