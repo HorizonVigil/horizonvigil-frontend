@@ -19,7 +19,11 @@ const RANGE_LABELS: Record<DateRangePreset, string> = {
  * Persistent header bar present on every page (account + region + date-range
  * + refresh) — spec §5. The Account filter lives here, not as a one-off
  * dropdown on individual pages, so it's in the same place on every screen
- * regardless of how many AWS accounts are connected.
+ * regardless of how many AWS accounts or GCP projects are connected. Options
+ * are prefixed "AWS —"/"GCP —" since it's one flat list across both
+ * providers — that prefix is also the only "filter by provider" control
+ * this app has; there's no separate all-AWS/all-GCP toggle, only
+ * all-accounts or one specific one.
  *
  * `showAccountFilter` defaults to true; pass false on pages whose data has
  * no per-account dimension (Reports has no connection_id column at all) —
@@ -41,7 +45,7 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true }: { tit
             <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
             <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
               <option value="all">All Accounts</option>
-              {connections.map(c => <option key={c.id} value={c.id}>{c.connection_name ?? c.aws_account_id}</option>)}
+              {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : 'AWS'} — {c.name}</option>)}
             </select>
           </label>
         )}

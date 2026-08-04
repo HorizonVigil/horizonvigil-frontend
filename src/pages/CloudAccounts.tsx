@@ -17,6 +17,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
+import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from '../lib/unifiedAccounts';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -40,40 +41,6 @@ import { api, ApiError, type CloudConnection, type GcpConnection, type AccountSu
 // own "never ship a tab with nothing real behind it" rule.
 const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports'] as const;
 type Tab = typeof TABS[number];
-
-/** Normalized shape both AWS and GCP rows get squashed into for the merged Inventory table — everything downstream (search, filters, sort, actions) reads from this instead of branching on provider at every field access. */
-interface UnifiedAccountRow {
-  id: string;
-  provider: 'aws' | 'gcp';
-  name: string;
-  identifier: string; // aws_account_id or gcp_project_id
-  environment: string;
-  status: string;
-  errorMessage: string | null;
-  connectionMethod: string;
-  connectionMethodLabel: string;
-  region: string;
-  resources: number | null;
-  lastSync: string | null;
-  raw: CloudConnection | GcpConnection;
-}
-
-function toUnifiedRow(c: CloudConnection): UnifiedAccountRow {
-  return {
-    id: c.id, provider: 'aws', name: c.connection_name ?? c.aws_account_id, identifier: c.aws_account_id,
-    environment: c.environment, status: c.status, errorMessage: c.error_message,
-    connectionMethod: c.connection_method, connectionMethodLabel: c.connection_method === 'cross_account_role' ? 'Cross-account role' : 'Access key',
-    region: c.default_region, resources: c.resource_summary?.totalResources ?? null, lastSync: c.last_sync_at, raw: c,
-  };
-}
-function toUnifiedGcpRow(c: GcpConnection): UnifiedAccountRow {
-  return {
-    id: c.id, provider: 'gcp', name: c.connection_name ?? c.gcp_project_id, identifier: c.gcp_project_id,
-    environment: c.environment, status: c.status, errorMessage: c.error_message,
-    connectionMethod: c.connection_method, connectionMethodLabel: c.connection_method === 'service_account_impersonation' ? 'Impersonation' : 'Service account key',
-    region: c.default_region, resources: c.resource_summary?.totalResources ?? null, lastSync: c.last_sync_at, raw: c,
-  };
-}
 
 const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
 const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }] as const;

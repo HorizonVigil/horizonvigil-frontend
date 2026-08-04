@@ -398,7 +398,7 @@ export function Resources() {
   }, [catalog]);
   const accountLabel = useCallback((connectionId: string) => {
     const c = connections.find(c => c.id === connectionId);
-    return c ? (c.connection_name ?? c.aws_account_id) : connectionId;
+    return c ? c.name : connectionId;
   }, [connections]);
 
   // dashboard/explorerServices/recentEvents (below) are org-wide aggregates

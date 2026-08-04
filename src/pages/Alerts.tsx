@@ -331,7 +331,7 @@ export function Alerts() {
 
   function connectionName(id: string | null): string {
     if (!id) return 'All accounts';
-    return connections.find(c => c.id === id)?.connection_name ?? id;
+    return connections.find(c => c.id === id)?.name ?? id;
   }
 
   const maintenanceColumns: Column<MaintenanceWindow>[] = [
@@ -569,7 +569,7 @@ export function Alerts() {
             <span className="text-slate-600 dark:text-slate-300">Scope</span>
             <select value={maintenanceConnectionId} onChange={e => setMaintenanceConnectionId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
               <option value="">All accounts</option>
-              {connections.map(c => <option key={c.id} value={c.id}>{c.connection_name ?? c.aws_account_id}</option>)}
+              {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : 'AWS'} — {c.name}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-import { api, type CloudConnection } from './api';
+import { api } from './api';
+import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from './unifiedAccounts';
 
 export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd' | 'custom';
 
@@ -8,7 +9,8 @@ export interface GlobalFilters {
   account: string; // 'all' or a specific connection id
   dateRange: DateRangePreset;
   refreshToken: number;
-  connections: CloudConnection[]; // powers the Account dropdown, fetched once here instead of per-page
+  /** Every connected AWS account AND GCP project, merged — was AWS-only until this fix, which meant the app-wide Account dropdown (FilterBar, budget/maintenance-window scope pickers, ...) could never even show a GCP project, let alone filter by one. */
+  connections: UnifiedAccountRow[];
 }
 
 interface FilterContextType extends GlobalFilters {
@@ -25,7 +27,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangePreset>('30d');
   const [refreshToken, setRefreshToken] = useState(0);
-  const [connections, setConnections] = useState<CloudConnection[]>([]);
+  const [connections, setConnections] = useState<UnifiedAccountRow[]>([]);
 
   const refresh = useCallback(() => setRefreshToken(t => t + 1), []);
 
@@ -33,7 +35,19 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // by every page that wants an Account filter — every page reads the same
   // list, and it refetches whenever something bumps refreshToken (e.g. the
   // FilterBar's Refresh button, or connecting/disconnecting an account).
-  useEffect(() => { void api.getAccounts({ limit: 200 }).then(r => setConnections(r.items)); }, [refreshToken]);
+  // Both providers, merged client-side — same reasoning as CloudAccounts.tsx's
+  // Inventory table (gcp-accounts-api paginates independently, and the
+  // realistic per-org account count is low enough this doesn't need
+  // server-side merging).
+  // allSettled, not all — a hiccup in one provider's API (e.g. gcp-accounts-api
+  // briefly unavailable) must not blank out the other provider's accounts too.
+  useEffect(() => {
+    void Promise.allSettled([api.getAccounts({ limit: 200 }), api.getGcpAccounts({ limit: 200 })]).then(([aws, gcp]) => {
+      const awsRows = aws.status === 'fulfilled' ? aws.value.items.map(toUnifiedRow) : [];
+      const gcpRows = gcp.status === 'fulfilled' ? gcp.value.items.map(toUnifiedGcpRow) : [];
+      setConnections([...awsRows, ...gcpRows]);
+    });
+  }, [refreshToken]);
 
   return (
     <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, setRegion, setAccount, setDateRange, refresh }}>

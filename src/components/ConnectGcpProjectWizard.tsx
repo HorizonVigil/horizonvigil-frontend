@@ -17,11 +17,13 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
     defaultRegion: 'us-central1', projectId: '', connectionName: '', environment: 'production' as Environment,
   });
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
       await api.createGcpAccount({
@@ -58,8 +60,8 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
         }
         if (existing.connection_method !== method) {
           setMethod(existing.connection_method);
-          setError(
-            `This GCP project is already connected using ${existing.connection_method === 'service_account_key' ? 'a service account key' : 'service account impersonation'} — switched the form to match. Fill in the fields above and submit again to update it.`,
+          setNotice(
+            `This GCP project is already connected using ${existing.connection_method === 'service_account_key' ? 'a service account key' : 'service account impersonation'} — switched the form to match. Fill in the fields above and submit again to update it, or close this and use the "…" menu on its Account Inventory row to Disconnect or permanently Delete it instead.`,
           );
           return;
         }
@@ -139,6 +141,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
           </select>
         </label>
 
+        {notice && <p className="col-span-2 text-sm rounded-md border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300 px-3 py-2">{notice}</p>}
         {error && <p className="col-span-2 text-sm text-red-500">{error}</p>}
         <button type="submit" disabled={loading} className="col-span-2 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
           {loading ? 'Validating & connecting…' : 'Connect GCP Project'}
