@@ -7,6 +7,7 @@ import { Donut } from '../components/charts/Donut';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
+import { EmptyState } from '../components/EmptyState';
 import { api, type GcpConnection, type CloudResource } from '../lib/api';
 
 const TABS = ['Overview', 'Resources'] as const;
@@ -31,6 +32,10 @@ export function GcpProjectDetail() {
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<GcpConnection | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
+  const [resourceSearch, setResourceSearch] = useState('');
+  const [resourceCategory, setResourceCategory] = useState('');
+  const [resourceRegion, setResourceRegion] = useState('');
+  const [resourceStatus, setResourceStatus] = useState('');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -50,6 +55,20 @@ export function GcpProjectDetail() {
     for (const r of resources) counts[r.category] = (counts[r.category] ?? 0) + 1;
     return counts;
   }, [resources]);
+
+  const resourceCategories = useMemo(() => Array.from(new Set(resources.map(r => r.category))).sort(), [resources]);
+  const resourceRegions = useMemo(() => Array.from(new Set(resources.map(r => r.region).filter((r): r is string => !!r))).sort(), [resources]);
+  const resourceStatuses = useMemo(() => Array.from(new Set(resources.map(r => r.status))).sort(), [resources]);
+  const filteredResources = useMemo(() => resources.filter(r => {
+    if (resourceCategory && r.category !== resourceCategory) return false;
+    if (resourceRegion && r.region !== resourceRegion) return false;
+    if (resourceStatus && r.status !== resourceStatus) return false;
+    if (resourceSearch) {
+      const q = resourceSearch.toLowerCase();
+      if (!(r.resource_name ?? r.resource_id).toLowerCase().includes(q) && !r.resource_type_key.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }), [resources, resourceCategory, resourceRegion, resourceStatus, resourceSearch]);
 
   if (!connection) {
     return (
@@ -115,32 +134,76 @@ export function GcpProjectDetail() {
       )}
 
       {tab === 'Resources' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Region</th>
-                <th className="px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {resources.slice(0, 200).map(r => (
-                <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
-                  <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
-                  <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
-                  <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
-                </tr>
-              ))}
-              {resources.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">No resources discovered for this project yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
+              <input value={resourceSearch} onChange={e => setResourceSearch(e.target.value)} placeholder="Name or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-52" />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
+              <select value={resourceCategory} onChange={e => setResourceCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceCategory ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Categories</option>
+                {resourceCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Region</span>
+              <select value={resourceRegion} onChange={e => setResourceRegion(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceRegion ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Regions</option>
+                {resourceRegions.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
+              <select value={resourceStatus} onChange={e => setResourceStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceStatus ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="">All Statuses</option>
+                {resourceStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            {(resourceSearch || resourceCategory || resourceRegion || resourceStatus) && (
+              <button onClick={() => { setResourceSearch(''); setResourceCategory(''); setResourceRegion(''); setResourceStatus(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+            )}
+            <span className="text-xs text-slate-400 pb-2 ml-auto">{filteredResources.length.toLocaleString()} of {resources.length.toLocaleString()} loaded</span>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+            {filteredResources.length === 0 ? (
+              <EmptyState
+                icon="◇"
+                title={resources.length === 0 ? 'No resources discovered for this project yet' : 'No resources match these filters'}
+                description={resources.length === 0 ? 'Run Discover Resources above to scan this project.' : undefined}
+              />
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Category</th>
+                    <th className="px-3 py-2">Region</th>
+                    <th className="px-3 py-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredResources.slice(0, 200).map(r => (
+                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
+                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
+                      <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
+                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
+                      <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {resources.length >= 200 && (
+              <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
+                <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this project →</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

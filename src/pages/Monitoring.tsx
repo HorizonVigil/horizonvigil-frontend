@@ -5,6 +5,7 @@ import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
+import { RoadmapPanel } from '../components/EmptyState';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { api, type MonitoringAlarm, type ResourceMetric } from '../lib/api';
@@ -35,12 +36,15 @@ interface NotIntegratedSection { key: string; label: string; reason: string }
 const TABS = ['CloudWatch', 'Metrics', 'Logs', 'Traces', 'Dashboards', 'Health', 'Service Map', 'Performance'] as const;
 type Tab = typeof TABS[number];
 
-function NotIntegratedPanel({ section }: { section: NotIntegratedSection | undefined }) {
+const NOT_INTEGRATED_ICON: Record<string, string> = { Logs: '▤', Traces: '↝', Dashboards: '▦', 'Service Map': '⬡', Performance: '∿' };
+
+function NotIntegratedPanel({ tab, section }: { tab: string; section: NotIntegratedSection | undefined }) {
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-      <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">{section?.label}</h3>
-      <p className="text-xs text-slate-400">{section?.reason ?? 'Not pulled into this build yet.'}</p>
-    </div>
+    <RoadmapPanel
+      icon={NOT_INTEGRATED_ICON[tab] ?? '◌'}
+      title={`${section?.label ?? tab} — on the roadmap, not yet built`}
+      description={section?.reason ?? 'This capability is planned but not pulled into the current build.'}
+    />
   );
 }
 
@@ -175,7 +179,7 @@ export function Monitoring() {
       )}
 
       {(tab === 'Logs' || tab === 'Traces' || tab === 'Dashboards' || tab === 'Service Map' || tab === 'Performance') && (
-        <NotIntegratedPanel section={notIntegrated[tab]} />
+        <NotIntegratedPanel tab={tab} section={notIntegrated[tab]} />
       )}
     </div>
   );

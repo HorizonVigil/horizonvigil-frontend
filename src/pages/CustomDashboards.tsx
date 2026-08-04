@@ -3,9 +3,73 @@ import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { EmptyState } from '../components/EmptyState';
+import { StatCard } from '../components/StatCard';
+import { Donut } from '../components/charts/Donut';
+import { BarChart } from '../components/charts/BarChart';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type CustomDashboard, type DashboardWidgetCatalogEntry } from '../lib/api';
+import { api, type CustomDashboard, type DashboardWidgetCatalogEntry, type ActivityEntry, type MonitoringAlarm } from '../lib/api';
 import { useAuth } from '../lib/auth';
+
+function money(n: number): string {
+  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+/** Live data backing widget previews, fetched once per dashboard-detail open — reuses the same aggregate endpoints Overview.tsx already calls, so a widget shows the same real numbers a user would see there, not a separate mock. */
+interface WidgetData {
+  resourceTotal: number;
+  resourceByCategory: Record<string, number>;
+  costMtd: number;
+  costByService: Record<string, number>;
+  openFindings: number;
+  activity: ActivityEntry[];
+  alarms: MonitoringAlarm[];
+}
+
+function WidgetPreview({ widget, data }: { widget: { key: string; config: unknown }; data: WidgetData | null }) {
+  if (!data) return <div className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />;
+
+  switch (widget.key) {
+    case 'kpi_cost_mtd':
+      return <StatCard label="Cost (Month to Date)" value={money(data.costMtd)} />;
+    case 'kpi_resource_count':
+      return <StatCard label="Resource Count" value={data.resourceTotal.toLocaleString()} />;
+    case 'kpi_open_findings':
+      return <StatCard label="Open Security Findings" value={data.openFindings.toLocaleString()} />;
+    case 'resource_distribution_pie':
+      return Object.keys(data.resourceByCategory).length > 0
+        ? <Donut size={100} thickness={16} data={Object.entries(data.resourceByCategory).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} />
+        : <EmptyState icon="◔" title="No resources yet" />;
+    case 'cost_by_service_bar':
+      return Object.keys(data.costByService).length > 0
+        ? <BarChart data={Object.entries(data.costByService).sort(([, a], [, b]) => b - a).slice(0, 5).map(([label, value]) => ({ label, value }))} valueFormatter={money} />
+        : <EmptyState icon="$" title="No cost data yet" />;
+    case 'resource_inventory_table':
+      return Object.keys(data.resourceByCategory).length > 0 ? (
+        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+          {Object.entries(data.resourceByCategory).filter(([, v]) => v > 0).slice(0, 5).map(([cat, count]) => (
+            <li key={cat} className="flex justify-between py-1.5"><span className="text-slate-600 dark:text-slate-300">{cat}</span><span className="text-slate-400 tabular-nums">{count}</span></li>
+          ))}
+        </ul>
+      ) : <EmptyState icon="▤" title="No resources yet" />;
+    case 'recent_alerts_list':
+      return data.alarms.length > 0 ? (
+        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+          {data.alarms.slice(0, 4).map(a => <li key={a.id} className="flex justify-between py-1.5"><span className="text-slate-600 dark:text-slate-300 truncate">{a.alarm_name}</span><span className={a.state === 'ALARM' ? 'text-red-500' : 'text-slate-400'}>{a.state}</span></li>)}
+        </ul>
+      ) : <EmptyState icon="⚠" title="No alarms yet" />;
+    case 'audit_activity_list':
+      return data.activity.length > 0 ? (
+        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+          {data.activity.slice(0, 4).map(entry => <li key={entry.id} className="py-1.5 text-slate-600 dark:text-slate-300 truncate">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')}</li>)}
+        </ul>
+      ) : <EmptyState icon="▤" title="No activity yet" />;
+    case 'cost_trend_line':
+      return <EmptyState icon="∿" title="Trend not available yet" description="Daily cost history isn't collected yet — only period totals are, which is what the other cost widgets use." />;
+    default:
+      return <EmptyState icon="○" title="Preview not available for this widget type" />;
+  }
+}
 
 type Tab = 'mine' | 'shared' | 'templates' | 'widgets';
 const TAB_KEYS: Tab[] = ['mine', 'shared', 'templates', 'widgets'];
@@ -20,6 +84,7 @@ export function CustomDashboards() {
   const [widgets, setWidgets] = useState<DashboardWidgetCatalogEntry[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<CustomDashboard | null>(null);
+  const [widgetData, setWidgetData] = useState<WidgetData | null>(null);
 
   const load = useCallback(async () => {
     const [m, s, t, w] = await Promise.all([
@@ -35,6 +100,28 @@ export function CustomDashboards() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!detail) { setWidgetData(null); return; }
+    let cancelled = false;
+    (async () => {
+      const [resources, cost, costAnalytics, security, activityRes, alarmsRes] = await Promise.all([
+        api.getOverviewResources(),
+        api.getOverviewCost(),
+        api.getCostAnalytics(),
+        api.getOverviewSecurity(),
+        api.getRecentActivity(1, 5),
+        api.getAlarms({ limit: 5 }),
+      ]);
+      if (cancelled) return;
+      setWidgetData({
+        resourceTotal: resources.total, resourceByCategory: resources.byCategory,
+        costMtd: cost.monthToDate, costByService: costAnalytics.byService,
+        openFindings: security.openFindings, activity: activityRes.items, alarms: alarmsRes.items,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [detail]);
 
   async function handleDelete(id: string) {
     if (!(await confirm('Delete this dashboard? This cannot be undone.'))) return;
@@ -85,7 +172,7 @@ export function CustomDashboards() {
               <span className="text-[10px] text-slate-400 mt-2 block">{w.category}</span>
             </div>
           ))}
-          {widgets.length === 0 && <p className="text-sm text-slate-400 col-span-full">No widgets in the catalog yet.</p>}
+          {widgets.length === 0 && <div className="col-span-full"><EmptyState icon="▦" title="No widgets in the catalog yet" /></div>}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -102,7 +189,16 @@ export function CustomDashboards() {
               )}
             </button>
           ))}
-          {rows.length === 0 && <p className="text-sm text-slate-400 col-span-full">{tab === 'mine' ? 'No dashboards yet — click “+ New Dashboard” to build one.' : tab === 'shared' ? 'No dashboards have been shared in this org yet.' : 'No templates yet.'}</p>}
+          {rows.length === 0 && (
+            <div className="col-span-full">
+              <EmptyState
+                icon="▦"
+                title={tab === 'mine' ? 'No dashboards yet' : tab === 'shared' ? 'No dashboards have been shared in this org yet' : 'No templates yet'}
+                description={tab === 'mine' ? 'Click "+ New Dashboard" to build one.' : undefined}
+                action={tab === 'mine' ? { label: '+ New Dashboard', onClick: () => setCreateOpen(true) } : undefined}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -130,8 +226,36 @@ export function CustomDashboards() {
                 </button>
               ))}
             </div>
-            {Array.isArray(detail.widgets) && detail.widgets.length > 0 && (
-              <pre className="text-[10px] leading-tight bg-slate-900 text-slate-200 rounded-lg p-3 overflow-auto max-h-40 mt-3">{JSON.stringify(detail.widgets, null, 2)}</pre>
+            {Array.isArray(detail.widgets) && detail.widgets.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                {(detail.widgets as { key: string; config: unknown }[]).map((w, i) => {
+                  const catalogEntry = widgets.find(c => c.key === w.key);
+                  return (
+                    <div key={`${w.key}-${i}`} className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{catalogEntry?.display_name ?? w.key}</span>
+                        {detail.owner_id === user?.id && (
+                          <button
+                            onClick={async () => {
+                              const nextWidgets = (detail.widgets as unknown[]).filter((_, idx) => idx !== i);
+                              const updated = await api.updateDashboard(detail.id, { widgets: nextWidgets });
+                              setDetail(updated);
+                              await load();
+                            }}
+                            className="text-slate-300 hover:text-red-500 text-xs"
+                            title="Remove widget"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      <WidgetPreview widget={w} data={widgetData} />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3"><EmptyState icon="▦" title="No widgets added yet" description="Add one from the buttons above." /></div>
             )}
           </div>
           {detail.owner_id === user?.id && (
