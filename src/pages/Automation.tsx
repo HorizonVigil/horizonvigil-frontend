@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
+import { StatCard } from '../components/StatCard';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
@@ -238,6 +239,14 @@ export function Automation() {
     },
   ];
 
+  const pendingApprovals = useMemo(() => remediation.filter(r => r.status === 'pending_approval').length, [remediation]);
+  const enabledScheduled = useMemo(() => scheduledJobs.filter(j => j.enabled).length, [scheduledJobs]);
+  const executionStats = useMemo(() => {
+    const recent = history.filter(e => e.status === 'succeeded' || e.status === 'failed');
+    const succeeded = recent.filter(e => e.status === 'succeeded').length;
+    return { total: recent.length, rate: recent.length > 0 ? Math.round((succeeded / recent.length) * 100) : null };
+  }, [history]);
+
   const historyColumns: Column<AutomationExecution>[] = [
     { key: 'type', header: 'Type', render: e => <Badge tone="neutral">{e.automation_type}</Badge>, sortValue: e => e.automation_type },
     { key: 'status', header: 'Status', render: e => <Badge>{e.status}</Badge>, sortValue: e => e.status },
@@ -251,6 +260,13 @@ export function Automation() {
 
       <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
         Runbooks and workflows can be defined and viewed, but the execution engine that actually runs them isn't built in this pass — "Execute" records a real, honest attempt in Execution History rather than pretending to run anything.
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <StatCard label="Runbooks & Workflows" value={String(runbooks.length + workflows.length)} caption={`${workflows.filter(w => w.enabled).length} workflow${workflows.filter(w => w.enabled).length === 1 ? '' : 's'} enabled`} />
+        <StatCard label="Pending Approvals" value={String(pendingApprovals)} caption={pendingApprovals > 0 ? 'needs review' : undefined} />
+        <StatCard label="Scheduled Jobs" value={`${enabledScheduled} / ${scheduledJobs.length}`} caption="enabled" />
+        <StatCard label="Execution Success Rate" value={executionStats.rate !== null ? `${executionStats.rate}%` : '—'} caption={executionStats.total > 0 ? `${executionStats.total} run${executionStats.total === 1 ? '' : 's'}` : 'no runs yet'} />
       </div>
 
       <div className="flex items-center justify-between mb-4">

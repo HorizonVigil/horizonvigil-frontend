@@ -63,6 +63,9 @@ export function Alerts() {
   const [escalations, setEscalations] = useState<EscalationPolicy[]>([]);
   const [maintenanceWindows, setMaintenanceWindows] = useState<MaintenanceWindow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -96,7 +99,33 @@ export function Alerts() {
     }
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // No dedicated bulk-status endpoint exists yet — this drives the same
+  // single-alert PATCH the per-row buttons use, once per selected id. Real
+  // requests, real results; just not a single round trip.
+  async function bulkUpdateStatus(status: AlertRow['status']) {
+    setBulkBusy(true);
+    try {
+      await Promise.all([...selectedIds].map(id => api.updateAlertStatus(id, status)));
+      setSelectedIds(new Set());
+      await load();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const alertColumns: Column<AlertRow>[] = [
+    ...(bulkMode && activeTab === 'active' ? [{
+      key: 'select', header: '',
+      render: (a: AlertRow) => <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggleSelected(a.id)} onClick={e => e.stopPropagation()} />,
+    }] : []),
     { key: 'severity', header: 'Severity', render: a => <Badge>{a.severity}</Badge>, sortValue: a => a.severity },
     { key: 'name', header: 'Alert', render: a => a.alert_name, sortValue: a => a.alert_name },
     { key: 'status', header: 'Status', render: a => <Badge>{a.status}</Badge>, sortValue: a => a.status },
@@ -353,6 +382,24 @@ export function Alerts() {
 
       {activeTab === 'active' && (
         <div>
+          <div className="flex items-center justify-end gap-2 mb-3">
+            {bulkMode && selectedIds.size > 0 && (
+              <>
+                <button disabled={bulkBusy} onClick={() => void bulkUpdateStatus('acknowledged')} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-brand-600 dark:text-brand-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+                  Acknowledge {selectedIds.size} selected
+                </button>
+                <button disabled={bulkBusy} onClick={() => void bulkUpdateStatus('resolved')} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+                  {bulkBusy ? 'Working…' : `Resolve ${selectedIds.size} selected`}
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => { setBulkMode(v => !v); setSelectedIds(new Set()); }}
+              className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            >
+              {bulkMode ? 'Exit Bulk Operations' : 'Bulk Operations'}
+            </button>
+          </div>
           <DataTable
             columns={alertColumns}
             rows={activeAlerts}
