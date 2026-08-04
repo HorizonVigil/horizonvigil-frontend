@@ -16,7 +16,7 @@ import {
   type RemediationActionType,
 } from '../lib/api';
 
-/** Which of the four supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
+/** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
 function eligibleRemediationAction(r: CloudResource): RemediationActionType | null {
   if (r.resource_type_key === 'ec2_instance') {
     if (r.state === 'running') return 'stop_instance';
@@ -30,11 +30,18 @@ function eligibleRemediationAction(r: CloudResource): RemediationActionType | nu
     const attached = (r.relationships?.attachedInstanceIds as unknown[] | undefined ?? []).filter(Boolean);
     return attached.length > 0 ? null : 'delete_volume';
   }
+  if (r.resource_type_key === 'ebs_snapshot') {
+    return r.state === 'completed' ? 'delete_snapshot' : null;
+  }
+  if (r.resource_type_key === 'ec2_ami') {
+    return r.state === 'available' ? 'deregister_ami' : null;
+  }
   return null;
 }
 
 const ACTION_LABEL: Record<RemediationActionType, string> = {
   stop_instance: 'Stop instance', start_instance: 'Start instance', release_eip: 'Release Elastic IP', delete_volume: 'Delete volume',
+  delete_snapshot: 'Delete snapshot', deregister_ami: 'Deregister AMI',
 };
 
 function money(n: number): string {
