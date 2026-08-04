@@ -41,7 +41,7 @@ function eligibleRemediationAction(r: CloudResource): RemediationActionType | nu
 
 const ACTION_LABEL: Record<RemediationActionType, string> = {
   stop_instance: 'Stop instance', start_instance: 'Start instance', release_eip: 'Release Elastic IP', delete_volume: 'Delete volume',
-  delete_snapshot: 'Delete snapshot', deregister_ami: 'Deregister AMI',
+  delete_snapshot: 'Delete snapshot', deregister_ami: 'Deregister AMI', resize_instance: 'Resize instance',
 };
 
 function money(n: number): string {

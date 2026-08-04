@@ -8,7 +8,9 @@ import { Drawer } from '../components/Drawer';
 import { LineChart } from '../components/charts/LineChart';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest } from '../lib/api';
 
 /** cost-optimization-api's rightsizing text always has this exact shape (see generateRecommendations.ts's rightsizing issue text) — parsed back out here rather than duplicated as structured columns, since the string is the one source of truth for it and this codebase already leans on that pattern (e.g. Alerts' connectionName lookup) rather than a schema change for a single derived display value. */
 function parseRecommendedType(recommendedAction: string): string | null {
@@ -23,6 +25,8 @@ const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'R
 
 export function CostOptimization() {
   const { account, refreshToken } = useFilters();
+  const { toast } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [dashboard, setDashboard] = useState<Awaited<ReturnType<typeof api.getCostOptimizationDashboard>> | null>(null);
   // The general open savings-opportunities feed — powers the Recommendations
   // tab and (since there's no single "everything" endpoint anymore) the
@@ -41,11 +45,17 @@ export function CostOptimization() {
   const [selectedResource, setSelectedResource] = useState<CloudResource | null>(null);
   const [selectedCpuHistory, setSelectedCpuHistory] = useState<ResourceMetric[]>([]);
   const [selectedDetailLoading, setSelectedDetailLoading] = useState(false);
+  // The most recent resize_instance remediation request (if any) already
+  // filed for this resource — lets the drawer show "Resize requested",
+  // "Awaiting approval", etc. instead of offering a duplicate request.
+  const [resizeRequest, setResizeRequest] = useState<RemediationRequest | null>(null);
+  const [resizeRequesting, setResizeRequesting] = useState(false);
 
   useEffect(() => {
     if (!selected || selected.category !== 'rightsizing' || !selected.resource_id) {
       setSelectedResource(null);
       setSelectedCpuHistory([]);
+      setResizeRequest(null);
       return;
     }
     let cancelled = false;
@@ -53,13 +63,57 @@ export function CostOptimization() {
     void Promise.all([
       api.getResource(selected.resource_id),
       api.getMetrics({ resourceId: selected.resource_id, metricName: 'CPUUtilization', limit: 60 }),
-    ]).then(([resource, metrics]) => {
+      api.listRemediation({ connectionId: selected.connection_id }),
+    ]).then(([resource, metrics, remediation]) => {
       if (cancelled) return;
       setSelectedResource(resource);
       setSelectedCpuHistory([...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)));
+      setResizeRequest(remediation.items.find(r => r.resource_id === selected.resource_id && r.action_type === 'resize_instance') ?? null);
     }).finally(() => { if (!cancelled) setSelectedDetailLoading(false); });
     return () => { cancelled = true; };
   }, [selected]);
+
+  // resize_instance's execute step can only ever safely issue StopInstances
+  // and stop there — AWS's stop is itself asynchronous, so a Worker
+  // invocation can't block waiting for it. Once a request lands in
+  // 'awaiting_stop', this polls finish-resize every few seconds (same "small
+  // step, caller drives the loop" shape as the sync/discovery polling
+  // elsewhere in this app) until the instance is confirmed stopped and the
+  // resize completes.
+  // Keyed on id+status (not the resizeRequest object itself) so the interval
+  // isn't torn down and rebuilt on every poll tick — setResizeRequest(updated)
+  // below produces a new object each time even when status hasn't changed,
+  // which would otherwise clear and never recreate the interval.
+  const resizeRequestId = resizeRequest?.id;
+  const resizeRequestStatus = resizeRequest?.status;
+  useEffect(() => {
+    if (!resizeRequestId || resizeRequestStatus !== 'awaiting_stop') return;
+    const interval = setInterval(() => {
+      void api.finishResizeRemediation(resizeRequestId).then(updated => setResizeRequest(updated)).catch(() => {});
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [resizeRequestId, resizeRequestStatus]);
+
+  async function requestAutomatedResize(recommendation: CostRecommendation, targetInstanceType: string) {
+    if (!recommendation.resource_id) return;
+    const ok = await confirm(
+      `Request an automated resize to "${targetInstanceType}"? This goes through an approval + dry-run before anything actually runs against AWS. Once executed, the instance will stop, resize, and restart — there will be real downtime for that duration.`,
+    );
+    if (!ok) return;
+    setResizeRequesting(true);
+    try {
+      const created = await api.requestRemediation({
+        connectionId: recommendation.connection_id, resourceId: recommendation.resource_id, actionType: 'resize_instance',
+        recommendationId: recommendation.id, targetConfig: { targetInstanceType },
+      });
+      setResizeRequest(created);
+      toast('Resize requested — an admin needs to approve it in Automation → Remediation before it runs.', 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not request automated resize', 'error');
+    } finally {
+      setResizeRequesting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -226,6 +280,9 @@ export function CostOptimization() {
             onCopy={copyText}
             onApply={() => void markDone(selected.id, 'applied')}
             onDismiss={() => void markDone(selected.id, 'dismissed')}
+            resizeRequest={resizeRequest}
+            resizeRequesting={resizeRequesting}
+            onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
           />
         ) : selected && (
           <div className="flex flex-col gap-4 text-sm">
@@ -254,6 +311,7 @@ export function CostOptimization() {
           </div>
         )}
       </Drawer>
+      {confirmDialog}
     </div>
   );
 }
@@ -268,7 +326,17 @@ export function CostOptimization() {
  * action it yourself" posture as the generic drawer — this composes real
  * commands from real data, it doesn't execute them.
  */
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss }: {
+const RESIZE_STATUS_LABEL: Record<RemediationRequest['status'], string> = {
+  pending_approval: 'Requested — awaiting admin approval', rejected: 'Request rejected', approved: 'Approved — awaiting dry-run',
+  dry_run_passed: 'Dry-run passed — awaiting execution', dry_run_failed: 'Dry-run failed', executing: 'Executing…',
+  awaiting_stop: 'Stopping instance…', completed: 'Resize completed', failed: 'Resize failed', rolled_back: 'Rolled back',
+};
+const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning' | 'critical' | 'neutral'> = {
+  pending_approval: 'neutral', rejected: 'critical', approved: 'neutral', dry_run_passed: 'neutral', dry_run_failed: 'critical',
+  executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
+};
+
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, resizeRequest, resizeRequesting, onRequestResize }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -277,6 +345,9 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   onCopy: (text: string) => void;
   onApply: () => void;
   onDismiss: () => void;
+  resizeRequest: RemediationRequest | null;
+  resizeRequesting: boolean;
+  onRequestResize: (targetInstanceType: string) => void;
 }) {
   const currentType = typeof resource?.metadata.instanceType === 'string' ? resource.metadata.instanceType : null;
   const recommendedType = parseRecommendedType(recommendation.recommended_action);
@@ -340,7 +411,34 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
       </div>
 
       <div>
-        <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Guided Fix — AWS CLI</div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Automated Resize</h3>
+          {resizeRequest && <Badge tone={RESIZE_STATUS_TONE[resizeRequest.status]}>{RESIZE_STATUS_LABEL[resizeRequest.status]}</Badge>}
+        </div>
+        {resizeRequest ? (
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-500 dark:text-slate-400 space-y-1">
+            <p>Target: <span className="font-mono text-slate-700 dark:text-slate-200">{resizeRequest.target_config?.targetInstanceType ?? recommendedType}</span></p>
+            {resizeRequest.status === 'pending_approval' && <p>An admin needs to approve this in Automation → Remediation before it runs.</p>}
+            {resizeRequest.status === 'dry_run_failed' && <p>{resizeRequest.dry_run_result?.reason ?? 'The pre-execution dry-run failed — see Automation → Remediation for details.'}</p>}
+            {resizeRequest.status === 'awaiting_stop' && <p>Instance is stopping — this page checks progress automatically every few seconds, then resizes and restarts it once stopped.</p>}
+            {resizeRequest.status === 'failed' && <p>{resizeRequest.execution_result?.errorMessage ?? resizeRequest.execution_result?.reason ?? 'The resize failed — see Automation → Remediation for details.'}</p>}
+            {resizeRequest.status === 'completed' && <p>Resize completed successfully — the instance is running on {resizeRequest.target_config?.targetInstanceType}.</p>}
+            {resizeRequest.status === 'rejected' && <p>This request was rejected. Dismiss this recommendation or use the manual CLI steps below instead.</p>}
+          </div>
+        ) : recommendedType ? (
+          <>
+            <button onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+              {resizeRequesting ? 'Requesting…' : 'Request Automated Resize'}
+            </button>
+            <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. CloudOps360 executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-400">Not enough resource detail to request an automated resize — see the manual CLI steps below instead.</p>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Guided Fix — AWS CLI (manual alternative)</div>
         {cliCommands ? (
           <>
             <pre className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 overflow-x-auto whitespace-pre">{cliCommands}</pre>

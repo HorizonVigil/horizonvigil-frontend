@@ -234,15 +234,17 @@ class ApiClient {
     return this.get<{ connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; roleArn: string | null; externalId: string | null }>('awsAccounts', `/api/aws-accounts/credentials/${id}`);
   }
 
-  // Safe Automated Remediation — real AWS mutation calls (StopInstances/StartInstances/ReleaseAddress/DeleteVolume) using the connection's own credentials, gated by request -> approve -> dry-run -> execute.
+  // Safe Automated Remediation — real AWS mutation calls (StopInstances/StartInstances/ReleaseAddress/DeleteVolume/DeleteSnapshot/DeregisterImage/ModifyInstanceAttribute) using the connection's own credentials, gated by request -> approve -> dry-run -> execute.
   listRemediation(params: { status?: string; connectionId?: string } = {}) { return this.get<{ items: RemediationRequest[] }>('awsAccounts', `/api/aws-accounts/remediation${qs(params)}`); }
-  requestRemediation(data: { connectionId: string; resourceId: string; actionType: RemediationActionType; recommendationId?: string }) {
+  requestRemediation(data: { connectionId: string; resourceId: string; actionType: RemediationActionType; recommendationId?: string; targetConfig?: { targetInstanceType?: string } }) {
     return this.post<RemediationRequest>('awsAccounts', '/api/aws-accounts/remediation/request', data);
   }
   approveRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/approve`); }
   rejectRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/reject`); }
   dryRunRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/dry-run`); }
   executeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/execute`); }
+  /** Polled by the caller (Automation's Remediation tab) while a resize_instance request sits in 'awaiting_stop' — AWS's StopInstances is async, so this re-checks live state each call and only finishes (ModifyInstanceAttribute + StartInstances) once the instance is actually stopped. */
+  finishResizeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/finish-resize`); }
   rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/rollback`); }
 
   // Cost & Usage Report (CUR) ingestion — real per-resource cost, populating resource_costs for the existing Cost Allocation/Chargeback/Showback pages in cost-management-api.
@@ -678,14 +680,15 @@ export interface CostRecommendation { id: string; connection_id: string; resourc
 export interface RecommendationListParams { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
 
-export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume';
+export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume' | 'delete_snapshot' | 'deregister_ami' | 'resize_instance';
 export interface RemediationRequest {
   id: string; org_id: string; connection_id: string; resource_id: string | null; recommendation_id: string | null;
   action_type: RemediationActionType; target_resource_id: string; region: string | null;
-  status: 'pending_approval' | 'rejected' | 'approved' | 'dry_run_passed' | 'dry_run_failed' | 'executing' | 'completed' | 'failed' | 'rolled_back';
+  status: 'pending_approval' | 'rejected' | 'approved' | 'dry_run_passed' | 'dry_run_failed' | 'executing' | 'awaiting_stop' | 'completed' | 'failed' | 'rolled_back';
   requested_by: string | null; approved_by: string | null; dry_run_result: { eligible?: boolean; wouldSucceed?: boolean; reason?: string } | null;
-  execution_result: { ok?: boolean; errorCode?: string; errorMessage?: string; snapshotId?: string; reason?: string } | null;
-  rollback_of: string | null; created_at: string; approved_at: string | null; executed_at: string | null;
+  execution_result: { ok?: boolean; errorCode?: string; errorMessage?: string; snapshotId?: string; reason?: string; step?: string; observedState?: string } | null;
+  rollback_of: string | null; target_config: { targetInstanceType?: string } | null;
+  created_at: string; approved_at: string | null; executed_at: string | null;
 }
 
 export interface VulnerabilityFinding {

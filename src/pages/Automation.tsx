@@ -71,6 +71,26 @@ export function Automation() {
   }
   async function handleRollbackRemediation(id: string) { await api.rollbackRemediation(id); await loadRemediation(); }
 
+  // resize_instance's execute step can only ever safely issue StopInstances
+  // and stop there (AWS's stop is itself asynchronous, and a Worker
+  // invocation can't block waiting for it) — so any request sitting in
+  // 'awaiting_stop' needs a caller to keep polling finish-resize until the
+  // instance is confirmed stopped and the resize completes. Poll here
+  // automatically so a request left mid-resize on this page still finishes
+  // without the user having to click anything.
+  // Joined into a stable string key (not the array itself) so this effect
+  // doesn't tear down and rebuild its interval every 8s just because
+  // loadRemediation() produces a new array reference each poll tick.
+  const awaitingStopKey = useMemo(() => remediation.filter(r => r.status === 'awaiting_stop').map(r => r.id).join(','), [remediation]);
+  useEffect(() => {
+    if (!awaitingStopKey) return;
+    const ids = awaitingStopKey.split(',');
+    const interval = setInterval(() => {
+      void Promise.all(ids.map(id => api.finishResizeRemediation(id).catch(() => null))).then(loadRemediation);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [awaitingStopKey, loadRemediation]);
+
   function toggleAutoFileEvent(event: string) {
     setJiraForm(f => ({ ...f, autoFileEvents: f.autoFileEvents.includes(event) ? f.autoFileEvents.filter(e => e !== event) : [...f.autoFileEvents, event] }));
   }
@@ -212,15 +232,22 @@ export function Automation() {
   ];
 
   const remediationColumns: Column<RemediationRequest>[] = [
-    { key: 'action', header: 'Action', render: r => <Badge tone="neutral">{r.action_type.replace(/_/g, ' ')}</Badge>, sortValue: r => r.action_type },
+    {
+      key: 'action', header: 'Action',
+      render: r => <Badge tone="neutral">{r.action_type.replace(/_/g, ' ')}{r.action_type === 'resize_instance' && r.target_config?.targetInstanceType ? ` → ${r.target_config.targetInstanceType}` : ''}</Badge>,
+      sortValue: r => r.action_type,
+    },
     { key: 'target', header: 'Resource', render: r => <span className="font-mono text-xs">{r.target_resource_id}</span>, sortValue: r => r.target_resource_id },
     { key: 'region', header: 'Region', render: r => r.region ?? '—', sortValue: r => r.region ?? '' },
     {
       key: 'status', header: 'Status',
-      render: r => <Badge tone={r.status === 'completed' ? 'good' : ['failed', 'dry_run_failed', 'rejected'].includes(r.status) ? 'critical' : 'neutral'}>{r.status.replace(/_/g, ' ')}</Badge>,
+      render: r => <Badge tone={r.status === 'completed' ? 'good' : ['failed', 'dry_run_failed', 'rejected'].includes(r.status) ? 'critical' : r.status === 'awaiting_stop' || r.status === 'executing' ? 'warning' : 'neutral'}>{r.status.replace(/_/g, ' ')}</Badge>,
       sortValue: r => r.status,
     },
-    { key: 'detail', header: 'Detail', render: r => <span className="text-xs text-slate-500 max-w-xs truncate inline-block">{r.dry_run_result?.reason ?? r.execution_result?.errorMessage ?? r.execution_result?.reason ?? '—'}</span> },
+    {
+      key: 'detail', header: 'Detail',
+      render: r => <span className="text-xs text-slate-500 max-w-xs truncate inline-block">{r.status === 'awaiting_stop' ? 'Stopping instance — resize continues automatically once stopped' : r.dry_run_result?.reason ?? r.execution_result?.errorMessage ?? r.execution_result?.reason ?? '—'}</span>,
+    },
     { key: 'created', header: 'Requested', render: r => new Date(r.created_at).toLocaleString(), sortValue: r => r.created_at },
     {
       key: 'actions', header: 'Actions', render: r => (
