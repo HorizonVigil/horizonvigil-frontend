@@ -282,7 +282,7 @@ export function AwsAccountDetail() {
         <button onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Test Connection'}
         </button>
-        <button onClick={() => id && startDiscovery(id)} disabled={syncing} title="Scans this account's regions for resources across 30+ AWS services, plus real GuardDuty and Security Hub findings (see Vulnerability Management) — real AWS API calls" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <button onClick={() => id && startDiscovery(id)} disabled={syncing} title="Scans this account's regions for resources across 30+ AWS services, plus real GuardDuty, Security Hub, and IAM Access Analyzer findings (see Vulnerability Management) — real AWS API calls" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>
         <button onClick={() => void runValidation()} disabled={validating} title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
