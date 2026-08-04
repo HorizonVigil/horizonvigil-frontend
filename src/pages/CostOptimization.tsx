@@ -5,9 +5,15 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { LineChart } from '../components/charts/LineChart';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type CostRecommendation, type RecommendationListParams, type CostAnomaly } from '../lib/api';
+import { api, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric } from '../lib/api';
+
+/** cost-optimization-api's rightsizing text always has this exact shape (see generateRecommendations.ts's rightsizing issue text) — parsed back out here rather than duplicated as structured columns, since the string is the one source of truth for it and this codebase already leans on that pattern (e.g. Alerts' connectionName lookup) rather than a schema change for a single derived display value. */
+function parseRecommendedType(recommendedAction: string): string | null {
+  return /Downsize to (\S+)/.exec(recommendedAction)?.[1] ?? null;
+}
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -28,6 +34,32 @@ export function CostOptimization() {
   const [selected, setSelected] = useState<CostRecommendation | null>(null);
   const [copied, setCopied] = useState(false);
   const [anomalies, setAnomalies] = useState<CostAnomaly[]>([]);
+  // Populated only for a rightsizing recommendation — the resource's own
+  // record (for its current instanceType/region/AWS id) plus its collected
+  // CPU history, both real data already gathered by aws-accounts-api's
+  // ec2Metrics.ts scanner, not fetched fresh here.
+  const [selectedResource, setSelectedResource] = useState<CloudResource | null>(null);
+  const [selectedCpuHistory, setSelectedCpuHistory] = useState<ResourceMetric[]>([]);
+  const [selectedDetailLoading, setSelectedDetailLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selected || selected.category !== 'rightsizing' || !selected.resource_id) {
+      setSelectedResource(null);
+      setSelectedCpuHistory([]);
+      return;
+    }
+    let cancelled = false;
+    setSelectedDetailLoading(true);
+    void Promise.all([
+      api.getResource(selected.resource_id),
+      api.getMetrics({ resourceId: selected.resource_id, metricName: 'CPUUtilization', limit: 60 }),
+    ]).then(([resource, metrics]) => {
+      if (cancelled) return;
+      setSelectedResource(resource);
+      setSelectedCpuHistory([...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)));
+    }).finally(() => { if (!cancelled) setSelectedDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [selected]);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -183,8 +215,19 @@ export function CostOptimization() {
         </>
       )}
 
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title="Apply recommendation">
-        {selected && (
+      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.category === 'rightsizing' ? 'Rightsizing recommendation' : 'Apply recommendation'} wide={selected?.category === 'rightsizing'}>
+        {selected && selected.category === 'rightsizing' ? (
+          <RightsizingDetail
+            recommendation={selected}
+            resource={selectedResource}
+            cpuHistory={selectedCpuHistory}
+            loading={selectedDetailLoading}
+            copied={copied}
+            onCopy={copyText}
+            onApply={() => void markDone(selected.id, 'applied')}
+            onDismiss={() => void markDone(selected.id, 'dismissed')}
+          />
+        ) : selected && (
           <div className="flex flex-col gap-4 text-sm">
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Resource ID</div>
@@ -211,6 +254,112 @@ export function CostOptimization() {
           </div>
         )}
       </Drawer>
+    </div>
+  );
+}
+
+/**
+ * The rich per-recommendation view rightsizing gets instead of the generic
+ * drawer — current vs. recommended instance size, real collected CPU
+ * history (aws-accounts-api's ec2Metrics.ts scanner), and a real,
+ * copy-pasteable AWS CLI guided fix (stop -> resize -> start, the only
+ * correct order — AWS rejects ModifyInstanceAttribute's InstanceType
+ * change on a running instance). Still manual, same "read-only access,
+ * action it yourself" posture as the generic drawer — this composes real
+ * commands from real data, it doesn't execute them.
+ */
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss }: {
+  recommendation: CostRecommendation;
+  resource: CloudResource | null;
+  cpuHistory: ResourceMetric[];
+  loading: boolean;
+  copied: boolean;
+  onCopy: (text: string) => void;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  const currentType = typeof resource?.metadata.instanceType === 'string' ? resource.metadata.instanceType : null;
+  const recommendedType = parseRecommendedType(recommendation.recommended_action);
+  const avgCpu = cpuHistory.length > 0 ? cpuHistory.reduce((s, m) => s + m.value, 0) / cpuHistory.length : null;
+  const region = resource?.region ?? '';
+  const instanceId = resource?.resource_id ?? '';
+
+  const cliCommands = instanceId && region && recommendedType
+    ? [
+        `aws ec2 stop-instances --instance-ids ${instanceId} --region ${region}`,
+        `aws ec2 wait instance-stopped --instance-ids ${instanceId} --region ${region}`,
+        `aws ec2 modify-instance-attribute --instance-id ${instanceId} --instance-type "{\\"Value\\": \\"${recommendedType}\\"}" --region ${region}`,
+        `aws ec2 start-instances --instance-ids ${instanceId} --region ${region}`,
+      ].join('\n')
+    : null;
+
+  return (
+    <div className="flex flex-col gap-5 text-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge tone={recommendation.priority === 'high' ? 'critical' : recommendation.priority === 'medium' ? 'warning' : 'good'}>{recommendation.priority} priority</Badge>
+        {region && <Badge tone="neutral">{region}</Badge>}
+        <span className="text-xs text-slate-400 font-mono">{instanceId || recommendation.resource_id}</span>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+              <th className="px-3 py-2"></th>
+              <th className="px-3 py-2">Instance Type</th>
+              <th className="px-3 py-2 text-right">Est. Monthly Impact</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-slate-100 dark:border-slate-800/60">
+              <td className="px-3 py-2 text-slate-500 dark:text-slate-400">Current</td>
+              <td className="px-3 py-2 font-mono text-slate-800 dark:text-slate-100">{currentType ?? (loading ? '…' : '—')}</td>
+              <td className="px-3 py-2 text-right text-slate-400">—</td>
+            </tr>
+            <tr>
+              <td className="px-3 py-2 text-slate-500 dark:text-slate-400">Recommended</td>
+              <td className="px-3 py-2 font-mono font-medium text-emerald-600 dark:text-emerald-400">{recommendedType ?? '—'}</td>
+              <td className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Save {money(recommendation.potential_monthly_savings)}/mo</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">CPU Utilization (last {cpuHistory.length} day{cpuHistory.length === 1 ? '' : 's'} collected)</h3>
+          {avgCpu !== null && <span className="text-xs text-slate-400">Avg: {avgCpu.toFixed(1)}%</span>}
+        </div>
+        {loading ? (
+          <div className="h-40 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />
+        ) : cpuHistory.length > 0 ? (
+          <LineChart series={[{ label: 'CPU %', points: cpuHistory.map(m => ({ x: m.ts, y: m.value })) }]} valueFormatter={v => `${v.toFixed(1)}%`} height={160} />
+        ) : (
+          <p className="text-xs text-slate-400 py-6 text-center">No CPU history collected yet for this instance.</p>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Guided Fix — AWS CLI</div>
+        {cliCommands ? (
+          <>
+            <pre className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 overflow-x-auto whitespace-pre">{cliCommands}</pre>
+            <button onClick={() => onCopy(cliCommands)} className="mt-2 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+              {copied ? 'Copied' : 'Copy commands'}
+            </button>
+            <p className="text-xs text-slate-400 mt-2">Stops the instance (required — AWS rejects an instance-type change while running), resizes it, then starts it back up. There will be real downtime for the duration of the stop/resize/start cycle.</p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-400">{loading ? 'Loading resource details…' : 'Not enough resource detail to generate exact commands — see the recommended action text below instead.'}</p>
+        )}
+      </div>
+
+      <p className="text-xs text-slate-400 dark:text-slate-500">CloudOps360 only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
+
+      <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        <button onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
+      </div>
     </div>
   );
 }
