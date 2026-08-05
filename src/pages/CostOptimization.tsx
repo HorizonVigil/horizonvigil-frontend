@@ -11,7 +11,7 @@ import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration } from '../lib/api';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member } from '../lib/api';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -249,6 +249,40 @@ export function CostOptimization() {
     }
   }
 
+  const [members, setMembers] = useState<Member[]>([]);
+  useEffect(() => { void api.getMembers().then(res => setMembers(res.members)).catch(() => {}); }, []);
+
+  const [notifyTarget, setNotifyTarget] = useState<CostRecommendation | null>(null);
+  const [notifyRecipientUserId, setNotifyRecipientUserId] = useState('');
+  const [notifyAdditionalEmails, setNotifyAdditionalEmails] = useState('');
+  const [notifySubmitting, setNotifySubmitting] = useState(false);
+
+  function openNotifyModal(r: CostRecommendation) {
+    setNotifyRecipientUserId(r.assigned_to ?? '');
+    setNotifyAdditionalEmails('');
+    setNotifyTarget(r);
+  }
+
+  async function submitNotify() {
+    if (!notifyTarget) return;
+    const additionalEmails = notifyAdditionalEmails.split(',').map(e => e.trim()).filter(Boolean);
+    if (!notifyRecipientUserId && additionalEmails.length === 0) {
+      toast('Pick an assignee or enter at least one email address.', 'error');
+      return;
+    }
+    setNotifySubmitting(true);
+    try {
+      const result = await api.notifyOwner(notifyTarget.id, { recipientUserId: notifyRecipientUserId || undefined, additionalEmails });
+      toast(result.emailSent ? 'Owner notified — email sent.' : `Assignment saved, but the email wasn't sent: ${result.emailError}`, result.emailSent ? 'success' : 'error');
+      setNotifyTarget(null);
+      await refreshLists();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not notify the owner', 'error');
+    } finally {
+      setNotifySubmitting(false);
+    }
+  }
+
   const displayedRows = tab === 'Recommendations' ? savingsOpportunities : tabRows;
 
   const baseColumns: Column<CostRecommendation>[] = [
@@ -262,6 +296,7 @@ export function CostOptimization() {
     key: 'actions', header: 'Actions', render: r => (
       <div className="flex gap-2 text-xs">
         <button onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+        <button onClick={e => { e.stopPropagation(); openNotifyModal(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Notify Owner</button>
         <button onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
         <button onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} className="text-slate-400 hover:underline">Dismiss</button>
       </div>
@@ -339,6 +374,7 @@ export function CostOptimization() {
             onApply={() => void markDone(selected.id, 'applied')}
             onDismiss={() => void markDone(selected.id, 'dismissed')}
             onExclude={() => openExcludeModal(selected)}
+            onNotifyOwner={() => openNotifyModal(selected)}
             resizeRequest={resizeRequest}
             resizeRequesting={resizeRequesting}
             onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
@@ -365,6 +401,7 @@ export function CostOptimization() {
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              <button onClick={() => openNotifyModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
               <button onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
               <button onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
             </div>
@@ -406,6 +443,41 @@ export function CostOptimization() {
           </div>
         )}
       </Modal>
+
+      <Modal open={!!notifyTarget} onClose={() => setNotifyTarget(null)} title="Notify owner">
+        {notifyTarget && (
+          <div className="flex flex-col gap-4 text-sm">
+            <p className="text-xs text-slate-500 dark:text-slate-400">{notifyTarget.issue}</p>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Assign to (org member)</label>
+              <select value={notifyRecipientUserId} onChange={e => setNotifyRecipientUserId(e.target.value)} className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                <option value="">— none —</option>
+                {members.map(m => <option key={m.userId} value={m.userId}>{m.fullName ?? m.email ?? m.userId}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Additional emails (optional, comma-separated)</label>
+              <input value={notifyAdditionalEmails} onChange={e => setNotifyAdditionalEmails(e.target.value)} placeholder="someone@example.com, another@example.com" className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Email preview</div>
+              <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                <p>A cost optimization recommendation in CloudOps360 has been assigned to you.</p>
+                <p><strong>Issue:</strong> {notifyTarget.issue}</p>
+                <p><strong>Recommended action:</strong> {notifyTarget.recommended_action}</p>
+                <p><strong>Potential savings:</strong> {money(notifyTarget.potential_monthly_savings)}/month</p>
+              </div>
+            </div>
+            {notifyTarget.last_notified_at && (
+              <p className="text-xs text-slate-400">Last notified {new Date(notifyTarget.last_notified_at).toLocaleString()}.</p>
+            )}
+            <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => void submitNotify()} disabled={notifySubmitting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{notifySubmitting ? 'Sending…' : 'Notify'}</button>
+              <button onClick={() => setNotifyTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+            </div>
+          </div>
+        )}
+      </Modal>
       {confirmDialog}
     </div>
   );
@@ -431,7 +503,7 @@ const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning
   executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
 };
 
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, resizeRequest, resizeRequesting, onRequestResize }: {
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, resizeRequest, resizeRequesting, onRequestResize }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -441,6 +513,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   onApply: () => void;
   onDismiss: () => void;
   onExclude: () => void;
+  onNotifyOwner: () => void;
   resizeRequest: RemediationRequest | null;
   resizeRequesting: boolean;
   onRequestResize: (targetInstanceType: string) => void;
@@ -552,6 +625,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
         <button onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        <button onClick={onNotifyOwner} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
         <button onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
         <button onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
       </div>

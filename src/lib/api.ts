@@ -361,6 +361,10 @@ class ApiClient {
     return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/exclude`, data);
   }
   unexcludeSavingsOpportunity(id: string) { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/unexclude`); }
+  /** Assigns (optional) and/or emails (best-effort — see emailSent in the response) an owner about this recommendation. */
+  notifyOwner(id: string, data: { recipientUserId?: string; additionalEmails?: string[] }) {
+    return this.patch<CostRecommendation & { emailSent: boolean; emailError: string | null }>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/notify-owner`, data);
+  }
   // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
   generateRecommendations(connectionId?: string) {
     return this.post<{ connectionsScanned: number; flagged: number; cleared: number }>('costOptimization', '/api/cost-optimization/generate', connectionId ? { connectionId } : {});
@@ -696,6 +700,7 @@ export interface CostRecommendation {
   id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string;
   potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; external_key: string | null;
   excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
+  assigned_to: string | null; last_notified_at: string | null; last_notified_by: string | null;
 }
 export interface RecommendationListParams { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
