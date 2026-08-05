@@ -8,10 +8,21 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
-import { api, type GcpConnection, type CloudResource } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { useConfirm } from '../components/ConfirmDialog';
+import { api, ApiError, type GcpConnection, type CloudResource } from '../lib/api';
 
 const TABS = ['Overview', 'Resources'] as const;
 type Tab = typeof TABS[number];
+
+/** GCP Compute Engine's own status values (RUNNING/TERMINATED/...), not AWS's lowercase 'running'/'stopped' — see gcp-accounts-api's scanners/compute.ts, which stores GCP's status verbatim. Only stop/start are wired yet (see gcpRemediation.ts's doc comment on why setMachineType/disk-delete equivalents of AWS's resize/delete_volume aren't built in this pass). */
+function eligibleGcpRemediationAction(r: CloudResource): 'stop_instance' | 'start_instance' | null {
+  if (r.resource_type_key !== 'gcp_compute_instance') return null;
+  if (r.state === 'RUNNING') return 'stop_instance';
+  if (r.state === 'TERMINATED') return 'start_instance';
+  return null;
+}
+const GCP_ACTION_LABEL: Record<'stop_instance' | 'start_instance', string> = { stop_instance: 'Stop instance', start_instance: 'Start instance' };
 
 /**
  * Deliberately two tabs, not a mirror of AwsAccountDetail.tsx's eight — GCP
@@ -29,6 +40,8 @@ export function GcpProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { syncStates, startDiscovery } = useSync();
+  const { toast } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<GcpConnection | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
@@ -36,6 +49,7 @@ export function GcpProjectDetail() {
   const [resourceCategory, setResourceCategory] = useState('');
   const [resourceRegion, setResourceRegion] = useState('');
   const [resourceStatus, setResourceStatus] = useState('');
+  const [remediating, setRemediating] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -69,6 +83,23 @@ export function GcpProjectDetail() {
     }
     return true;
   }), [resources, resourceCategory, resourceRegion, resourceStatus, resourceSearch]);
+
+  async function requestGcpRemediation(r: CloudResource, actionType: 'stop_instance' | 'start_instance') {
+    if (!id) return;
+    const ok = await confirm(
+      `Request "${GCP_ACTION_LABEL[actionType]}" for ${r.resource_name ?? r.resource_id}? This goes through an approval + dry-run before anything actually runs against GCP — nothing happens immediately.`,
+    );
+    if (!ok) return;
+    setRemediating(r.id);
+    try {
+      await api.requestGcpRemediation({ connectionId: id, resourceId: r.id, actionType });
+      toast('Remediation requested — an admin needs to approve it in Automation → Remediation before it runs.', 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not request remediation', 'error');
+    } finally {
+      setRemediating(null);
+    }
+  }
 
   if (!connection) {
     return (
@@ -183,18 +214,29 @@ export function GcpProjectDetail() {
                     <th className="px-3 py-2">Category</th>
                     <th className="px-3 py-2">Region</th>
                     <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredResources.slice(0, 200).map(r => (
-                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
-                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
-                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
-                      <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
-                      <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
-                      <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
-                    </tr>
-                  ))}
+                  {filteredResources.slice(0, 200).map(r => {
+                    const action = eligibleGcpRemediationAction(r);
+                    return (
+                      <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
+                        <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
+                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
+                        <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
+                        <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
+                        <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
+                        <td className="px-3 py-2 text-xs">
+                          {action && (
+                            <button onClick={e => { e.stopPropagation(); void requestGcpRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against GCP — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                              {remediating === r.id ? 'Requesting…' : GCP_ACTION_LABEL[action]}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -206,6 +248,7 @@ export function GcpProjectDetail() {
           </div>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

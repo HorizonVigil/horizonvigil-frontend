@@ -247,6 +247,16 @@ class ApiClient {
   finishResizeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/finish-resize`); }
   rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/rollback`); }
 
+  // GCP's own Safe Automated Remediation — same remediation_requests table (provider='gcp'), same request -> approve -> dry-run -> execute lifecycle, currently stop_instance/start_instance only (see gcp-accounts-api/src/routes/remediation.ts).
+  listGcpRemediation(params: { status?: string; connectionId?: string } = {}) { return this.get<{ items: RemediationRequest[] }>('gcpAccounts', `/api/gcp-accounts/remediation${qs(params)}`); }
+  requestGcpRemediation(data: { connectionId: string; resourceId: string; actionType: 'stop_instance' | 'start_instance'; recommendationId?: string }) {
+    return this.post<RemediationRequest>('gcpAccounts', '/api/gcp-accounts/remediation/request', data);
+  }
+  approveGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/approve`); }
+  rejectGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/reject`); }
+  dryRunGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/dry-run`); }
+  executeGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/execute`); }
+
   // Cost & Usage Report (CUR) ingestion — real per-resource cost, populating resource_costs for the existing Cost Allocation/Chargeback/Showback pages in cost-management-api.
   discoverCur(id: string) { return this.post<{ reportName: string; bucket: string; prefix: string; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/discover`); }
   getCurManifest(id: string) { return this.get<{ billingPeriod: string; reportKeys: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/manifest`); }
@@ -724,8 +734,8 @@ export interface RemediationRequest {
   status: 'pending_approval' | 'rejected' | 'approved' | 'dry_run_passed' | 'dry_run_failed' | 'executing' | 'awaiting_stop' | 'completed' | 'failed' | 'rolled_back';
   requested_by: string | null; approved_by: string | null; dry_run_result: { eligible?: boolean; wouldSucceed?: boolean; reason?: string } | null;
   execution_result: { ok?: boolean; errorCode?: string; errorMessage?: string; snapshotId?: string; reason?: string; step?: string; observedState?: string } | null;
-  rollback_of: string | null; target_config: { targetInstanceType?: string } | null;
-  created_at: string; approved_at: string | null; executed_at: string | null;
+  rollback_of: string | null; target_config: { targetInstanceType?: string; zone?: string } | null;
+  provider: 'aws' | 'gcp'; created_at: string; approved_at: string | null; executed_at: string | null;
 }
 
 export interface VulnerabilityFinding {

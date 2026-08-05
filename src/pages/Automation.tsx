@@ -44,9 +44,14 @@ export function Automation() {
     }
   }, []);
 
+  // Merges AWS's and GCP's remediation queues client-side (each provider's
+  // requests are written by its own Worker, aws-accounts-api /
+  // gcp-accounts-api, to the same remediation_requests table) — same
+  // pattern as Issues.tsx's cross-service merge, not a shared backend
+  // aggregation endpoint.
   const loadRemediation = useCallback(async () => {
-    const res = await api.listRemediation({});
-    setRemediation(res.items);
+    const [aws, gcp] = await Promise.all([api.listRemediation({}), api.listGcpRemediation({})]);
+    setRemediation([...aws.items, ...gcp.items].sort((a, b) => b.created_at.localeCompare(a.created_at)));
   }, []);
 
   const load = useCallback(async () => {
@@ -61,12 +66,16 @@ export function Automation() {
 
   useEffect(() => { void load(); }, [load]);
 
-  async function handleApproveRemediation(id: string) { await api.approveRemediation(id); await loadRemediation(); }
-  async function handleRejectRemediation(id: string) { if (!(await confirm('Reject this remediation request?'))) return; await api.rejectRemediation(id); await loadRemediation(); }
-  async function handleDryRunRemediation(id: string) { await api.dryRunRemediation(id); await loadRemediation(); }
-  async function handleExecuteRemediation(id: string) {
-    if (!(await confirm("Execute this action for real against AWS? This calls a real mutating API using the account's own stored credentials — only Stop Instance can be automatically rolled back."))) return;
-    await api.executeRemediation(id);
+  async function handleApproveRemediation(row: RemediationRequest) { await (row.provider === 'gcp' ? api.approveGcpRemediation(row.id) : api.approveRemediation(row.id)); await loadRemediation(); }
+  async function handleRejectRemediation(row: RemediationRequest) {
+    if (!(await confirm('Reject this remediation request?'))) return;
+    await (row.provider === 'gcp' ? api.rejectGcpRemediation(row.id) : api.rejectRemediation(row.id));
+    await loadRemediation();
+  }
+  async function handleDryRunRemediation(row: RemediationRequest) { await (row.provider === 'gcp' ? api.dryRunGcpRemediation(row.id) : api.dryRunRemediation(row.id)); await loadRemediation(); }
+  async function handleExecuteRemediation(row: RemediationRequest) {
+    if (!(await confirm(`Execute this action for real against ${row.provider === 'gcp' ? 'GCP' : 'AWS'}? This calls a real mutating API using the account's own stored credentials — only Stop Instance can be automatically rolled back, and only on AWS.`))) return;
+    await (row.provider === 'gcp' ? api.executeGcpRemediation(row.id) : api.executeRemediation(row.id));
     await loadRemediation();
   }
   async function handleRollbackRemediation(id: string) { await api.rollbackRemediation(id); await loadRemediation(); }
@@ -232,6 +241,7 @@ export function Automation() {
   ];
 
   const remediationColumns: Column<RemediationRequest>[] = [
+    { key: 'provider', header: 'Provider', render: r => <Badge tone="neutral">{r.provider === 'gcp' ? 'GCP' : 'AWS'}</Badge>, sortValue: r => r.provider },
     {
       key: 'action', header: 'Action',
       render: r => <Badge tone="neutral">{r.action_type.replace(/_/g, ' ')}{r.action_type === 'resize_instance' && r.target_config?.targetInstanceType ? ` → ${r.target_config.targetInstanceType}` : ''}</Badge>,
@@ -254,13 +264,14 @@ export function Automation() {
         <div className="flex gap-2 text-xs">
           {r.status === 'pending_approval' && (
             <>
-              <button onClick={e => { e.stopPropagation(); void handleApproveRemediation(r.id); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Approve</button>
-              <button onClick={e => { e.stopPropagation(); void handleRejectRemediation(r.id); }} className="text-red-500 hover:underline">Reject</button>
+              <button onClick={e => { e.stopPropagation(); void handleApproveRemediation(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Approve</button>
+              <button onClick={e => { e.stopPropagation(); void handleRejectRemediation(r); }} className="text-red-500 hover:underline">Reject</button>
             </>
           )}
-          {r.status === 'approved' && <button onClick={e => { e.stopPropagation(); void handleDryRunRemediation(r.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Dry Run</button>}
-          {r.status === 'dry_run_passed' && <button onClick={e => { e.stopPropagation(); void handleExecuteRemediation(r.id); }} className="text-red-600 dark:text-red-400 hover:underline font-medium">Execute</button>}
-          {r.status === 'completed' && r.action_type === 'stop_instance' && <button onClick={e => { e.stopPropagation(); void handleRollbackRemediation(r.id); }} className="text-slate-500 hover:underline">Roll back</button>}
+          {r.status === 'approved' && <button onClick={e => { e.stopPropagation(); void handleDryRunRemediation(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Dry Run</button>}
+          {r.status === 'dry_run_passed' && <button onClick={e => { e.stopPropagation(); void handleExecuteRemediation(r); }} className="text-red-600 dark:text-red-400 hover:underline font-medium">Execute</button>}
+          {/* Rollback only exists for AWS's stop_instance — GCP's remediation engine doesn't have a rollback route yet (see gcp-accounts-api/src/routes/remediation.ts's doc comment on scope). */}
+          {r.status === 'completed' && r.provider !== 'gcp' && r.action_type === 'stop_instance' && <button onClick={e => { e.stopPropagation(); void handleRollbackRemediation(r.id); }} className="text-slate-500 hover:underline">Roll back</button>}
         </div>
       ),
     },
