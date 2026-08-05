@@ -356,6 +356,11 @@ class ApiClient {
   getSavingsPlans(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-plans${qs(params)}`); }
   getOptimizationHistory(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/optimization-history${qs(params)}`); }
   updateSavingsOpportunity(id: string, status: 'applied' | 'dismissed') { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}`, { status }); }
+  /** Skips a recommendation from the "open" views for a stated reason/duration without dismissing it outright — it re-surfaces on its own once excluded_until passes (or never, for a permanent exclusion). */
+  excludeSavingsOpportunity(id: string, data: { reason: ExclusionReason; justification?: string; duration: ExclusionDuration; until?: string }) {
+    return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/exclude`, data);
+  }
+  unexcludeSavingsOpportunity(id: string) { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/unexclude`); }
   // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
   generateRecommendations(connectionId?: string) {
     return this.post<{ connectionsScanned: number; flagged: number; cleared: number }>('costOptimization', '/api/cost-optimization/generate', connectionId ? { connectionId } : {});
@@ -676,7 +681,13 @@ export interface Budget {
   id: string; org_id: string; scope_type: BudgetScopeType; scope_id: string; name: string; monthly_limit: number; alert_thresholds: number[]; created_at: string;
   currentSpend: number; projectedSpend: number; forecastMethod: string; percentOfLimit: number; status: 'ok' | 'warning' | 'exceeded';
 }
-export interface CostRecommendation { id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string; potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; external_key: string | null }
+export type ExclusionReason = 'business_critical' | 'performance_required' | 'temporary_workload' | 'false_positive' | 'other';
+export type ExclusionDuration = '30d' | '90d' | 'permanent' | 'custom';
+export interface CostRecommendation {
+  id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string;
+  potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; external_key: string | null;
+  excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
+}
 export interface RecommendationListParams { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
 

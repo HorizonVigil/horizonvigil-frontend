@@ -5,12 +5,27 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { Modal } from '../components/Modal';
 import { LineChart } from '../components/charts/LineChart';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest } from '../lib/api';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration } from '../lib/api';
+
+const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
+  { value: 'business_critical', label: 'Business Critical' },
+  { value: 'performance_required', label: 'Performance Required' },
+  { value: 'temporary_workload', label: 'Temporary Workload' },
+  { value: 'false_positive', label: 'False Positive' },
+  { value: 'other', label: 'Other' },
+];
+const EXCLUSION_DURATIONS: { value: ExclusionDuration; label: string }[] = [
+  { value: '30d', label: '30 days' },
+  { value: '90d', label: '90 days' },
+  { value: 'permanent', label: 'Permanent' },
+  { value: 'custom', label: 'Custom date' },
+];
 
 /** cost-optimization-api's rightsizing text always has this exact shape (see generateRecommendations.ts's rightsizing issue text) — parsed back out here rather than duplicated as structured columns, since the string is the one source of truth for it and this codebase already leans on that pattern (e.g. Alerts' connectionName lookup) rather than a schema change for a single derived display value. */
 function parseRecommendedType(recommendedAction: string): string | null {
@@ -171,6 +186,16 @@ export function CostOptimization() {
     // of which category endpoint it was listed under.
     await api.updateSavingsOpportunity(id, status);
     setSelected(null);
+    await refreshLists();
+  }
+
+  function copyText(text: string) {
+    void navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function refreshLists() {
     await load();
     if (tab !== 'Overview' && tab !== 'Recommendations') {
       const connectionId = account === 'all' ? undefined : account;
@@ -186,10 +211,42 @@ export function CostOptimization() {
     }
   }
 
-  function copyText(text: string) {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const [excludeTarget, setExcludeTarget] = useState<CostRecommendation | null>(null);
+  const [excludeReason, setExcludeReason] = useState<ExclusionReason>('business_critical');
+  const [excludeJustification, setExcludeJustification] = useState('');
+  const [excludeDuration, setExcludeDuration] = useState<ExclusionDuration>('30d');
+  const [excludeUntil, setExcludeUntil] = useState('');
+  const [excludeSubmitting, setExcludeSubmitting] = useState(false);
+
+  function openExcludeModal(r: CostRecommendation) {
+    setExcludeReason('business_critical');
+    setExcludeJustification('');
+    setExcludeDuration('30d');
+    setExcludeUntil('');
+    setExcludeTarget(r);
+  }
+
+  async function submitExclude() {
+    if (!excludeTarget) return;
+    if (excludeDuration === 'custom' && !excludeUntil) {
+      toast('Pick a date for a custom exclusion.', 'error');
+      return;
+    }
+    setExcludeSubmitting(true);
+    try {
+      await api.excludeSavingsOpportunity(excludeTarget.id, {
+        reason: excludeReason, justification: excludeJustification || undefined, duration: excludeDuration,
+        until: excludeDuration === 'custom' ? new Date(excludeUntil).toISOString() : undefined,
+      });
+      toast('Recommendation excluded — it will stop appearing in open views until the exclusion lapses (or is reversed).', 'success');
+      setExcludeTarget(null);
+      if (selected?.id === excludeTarget.id) setSelected(null);
+      await refreshLists();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not exclude this recommendation', 'error');
+    } finally {
+      setExcludeSubmitting(false);
+    }
   }
 
   const displayedRows = tab === 'Recommendations' ? savingsOpportunities : tabRows;
@@ -205,6 +262,7 @@ export function CostOptimization() {
     key: 'actions', header: 'Actions', render: r => (
       <div className="flex gap-2 text-xs">
         <button onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+        <button onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
         <button onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} className="text-slate-400 hover:underline">Dismiss</button>
       </div>
     ),
@@ -280,6 +338,7 @@ export function CostOptimization() {
             onCopy={copyText}
             onApply={() => void markDone(selected.id, 'applied')}
             onDismiss={() => void markDone(selected.id, 'dismissed')}
+            onExclude={() => openExcludeModal(selected)}
             resizeRequest={resizeRequest}
             resizeRequesting={resizeRequesting}
             onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
@@ -306,11 +365,47 @@ export function CostOptimization() {
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              <button onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
               <button onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
             </div>
           </div>
         )}
       </Drawer>
+
+      <Modal open={!!excludeTarget} onClose={() => setExcludeTarget(null)} title="Exclude recommendation">
+        {excludeTarget && (
+          <div className="flex flex-col gap-4 text-sm">
+            <p className="text-xs text-slate-500 dark:text-slate-400">{excludeTarget.issue}</p>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Reason</label>
+              <select value={excludeReason} onChange={e => setExcludeReason(e.target.value as ExclusionReason)} className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                {EXCLUSION_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Justification (optional)</label>
+              <textarea value={excludeJustification} onChange={e => setExcludeJustification(e.target.value)} rows={3} placeholder="Why should this be skipped?" className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Duration</label>
+              <select value={excludeDuration} onChange={e => setExcludeDuration(e.target.value as ExclusionDuration)} className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                {EXCLUSION_DURATIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </div>
+            {excludeDuration === 'custom' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Excluded until</label>
+                <input type="date" value={excludeUntil} onChange={e => setExcludeUntil(e.target.value)} min={new Date().toISOString().slice(0, 10)} className="w-full text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+              </div>
+            )}
+            <p className="text-xs text-slate-400">{excludeDuration === 'permanent' ? 'This recommendation will stay hidden from open views indefinitely, until manually reversed.' : 'This recommendation reappears automatically once the exclusion period ends.'}</p>
+            <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button onClick={() => void submitExclude()} disabled={excludeSubmitting} className="text-xs px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">{excludeSubmitting ? 'Excluding…' : 'Exclude'}</button>
+              <button onClick={() => setExcludeTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+            </div>
+          </div>
+        )}
+      </Modal>
       {confirmDialog}
     </div>
   );
@@ -336,7 +431,7 @@ const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning
   executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
 };
 
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, resizeRequest, resizeRequesting, onRequestResize }: {
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, resizeRequest, resizeRequesting, onRequestResize }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -345,6 +440,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   onCopy: (text: string) => void;
   onApply: () => void;
   onDismiss: () => void;
+  onExclude: () => void;
   resizeRequest: RemediationRequest | null;
   resizeRequesting: boolean;
   onRequestResize: (targetInstanceType: string) => void;
@@ -456,6 +552,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
         <button onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        <button onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
         <button onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
       </div>
     </div>
