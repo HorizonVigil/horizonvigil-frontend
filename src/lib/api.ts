@@ -696,7 +696,7 @@ export interface CloudResource {
   first_seen_at: string; last_seen_at: string; deleted_at: string | null; created_at: string;
 }
 export interface ResourceLifecycleEvent { id: string; connection_id: string; resource_id: string | null; resource_type_key: string; aws_resource_id: string; event_type: string; detail: Record<string, unknown>; occurred_at: string }
-export interface ContainerListParams { connectionId?: string; region?: string; status?: string; search?: string; page?: number; limit?: number }
+export type ContainerListParams = { connectionId?: string; region?: string; status?: string; search?: string; page?: number; limit?: number }
 
 export interface MonitoringAlarm { id: string; connection_id: string; resource_id: string | null; alarm_name: string; metric_name: string; namespace: string; region: string; state: 'OK' | 'ALARM' | 'INSUFFICIENT_DATA'; threshold: number | null; comparison_operator: string | null; updated_at: string; created_at: string }
 export interface ResourceMetric { id: string; connection_id: string; resource_id: string | null; resource_type_key: string; metric_name: string; namespace: string; unit: string | null; region: string; ts: string; value: number; created_at: string }
@@ -724,7 +724,7 @@ export interface CostRecommendation {
   excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
   assigned_to: string | null; last_notified_at: string | null; last_notified_by: string | null;
 }
-export interface RecommendationListParams { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
+export type RecommendationListParams = { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
 
 export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume' | 'delete_snapshot' | 'deregister_ami' | 'resize_instance';

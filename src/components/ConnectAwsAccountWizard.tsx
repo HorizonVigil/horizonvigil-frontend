@@ -62,7 +62,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         defaultRegion: form.defaultRegion,
         scanRegions,
         projectId: form.projectId || undefined,
-        connectionName: form.connectionName || undefined,
+        connectionName: form.connectionName.trim() || form.awsAccountId.trim(),
         environment: form.environment,
       });
       autoSync(created.id);

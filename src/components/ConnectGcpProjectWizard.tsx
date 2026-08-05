@@ -33,7 +33,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
         impersonatedServiceAccount: method === 'service_account_impersonation' ? form.impersonatedServiceAccount.trim() : undefined,
         defaultRegion: form.defaultRegion,
         projectId: form.projectId || undefined,
-        connectionName: form.connectionName || undefined,
+        connectionName: form.connectionName.trim() || form.gcpProjectId.trim(),
         environment: form.environment,
       });
       onConnected();
