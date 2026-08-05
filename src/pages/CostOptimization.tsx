@@ -11,7 +11,7 @@ import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member } from '../lib/api';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -252,6 +252,9 @@ export function CostOptimization() {
   const [members, setMembers] = useState<Member[]>([]);
   useEffect(() => { void api.getMembers().then(res => setMembers(res.members)).catch(() => {}); }, []);
 
+  const [gitInstallations, setGitInstallations] = useState<GitInstallation[]>([]);
+  useEffect(() => { void api.getGitInstallations().then(res => setGitInstallations(res.items)).catch(() => {}); }, []);
+
   const [notifyTarget, setNotifyTarget] = useState<CostRecommendation | null>(null);
   const [notifyRecipientUserId, setNotifyRecipientUserId] = useState('');
   const [notifyAdditionalEmails, setNotifyAdditionalEmails] = useState('');
@@ -378,6 +381,7 @@ export function CostOptimization() {
             resizeRequest={resizeRequest}
             resizeRequesting={resizeRequesting}
             onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
+            gitInstallations={gitInstallations}
           />
         ) : selected && (
           <div className="flex flex-col gap-4 text-sm">
@@ -503,7 +507,7 @@ const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning
   executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
 };
 
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, resizeRequest, resizeRequesting, onRequestResize }: {
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, resizeRequest, resizeRequesting, onRequestResize, gitInstallations }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -517,12 +521,59 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   resizeRequest: RemediationRequest | null;
   resizeRequesting: boolean;
   onRequestResize: (targetInstanceType: string) => void;
+  gitInstallations: GitInstallation[];
 }) {
   const currentType = typeof resource?.metadata.instanceType === 'string' ? resource.metadata.instanceType : null;
   const recommendedType = parseRecommendedType(recommendation.recommended_action);
   const avgCpu = cpuHistory.length > 0 ? cpuHistory.reduce((s, m) => s + m.value, 0) / cpuHistory.length : null;
   const region = resource?.region ?? '';
   const instanceId = resource?.resource_id ?? '';
+
+  const [autoPrInstallationRowId, setAutoPrInstallationRowId] = useState('');
+  const [autoPrRepos, setAutoPrRepos] = useState<GitRepo[]>([]);
+  const [autoPrReposLoading, setAutoPrReposLoading] = useState(false);
+  const [autoPrRepoFullName, setAutoPrRepoFullName] = useState('');
+  const [autoPrFilePath, setAutoPrFilePath] = useState('');
+  const [autoPrSubmitting, setAutoPrSubmitting] = useState(false);
+  const [autoPrResult, setAutoPrResult] = useState<{ prUrl: string } | { error: string } | null>(null);
+
+  // Auto-PR working state is scoped to whichever recommendation is open —
+  // React reuses this component instance across different open
+  // recommendations (same JSX position in the Drawer), so without this the
+  // last recommendation's repo/path selection would leak into the next one.
+  useEffect(() => {
+    setAutoPrInstallationRowId(''); setAutoPrRepos([]); setAutoPrRepoFullName(''); setAutoPrFilePath(''); setAutoPrResult(null);
+  }, [recommendation.id]);
+
+  async function loadAutoPrRepos(installationRowId: string) {
+    setAutoPrInstallationRowId(installationRowId);
+    setAutoPrRepoFullName('');
+    setAutoPrRepos([]);
+    if (!installationRowId) return;
+    setAutoPrReposLoading(true);
+    try {
+      const res = await api.getInstallationRepos(installationRowId);
+      setAutoPrRepos(res.items);
+    } catch {
+      setAutoPrRepos([]);
+    } finally {
+      setAutoPrReposLoading(false);
+    }
+  }
+
+  async function submitAutoPr() {
+    if (!autoPrInstallationRowId || !autoPrRepoFullName || !autoPrFilePath) return;
+    setAutoPrSubmitting(true);
+    setAutoPrResult(null);
+    try {
+      const res = await api.openAutoPr(recommendation.id, { installationRowId: autoPrInstallationRowId, repoFullName: autoPrRepoFullName, filePath: autoPrFilePath });
+      setAutoPrResult({ prUrl: res.prUrl });
+    } catch (err) {
+      setAutoPrResult({ error: err instanceof ApiError ? err.message : 'Could not open the pull request.' });
+    } finally {
+      setAutoPrSubmitting(false);
+    }
+  }
 
   const cliCommands = instanceId && region && recommendedType
     ? [
@@ -603,6 +654,41 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           </>
         ) : (
           <p className="text-xs text-slate-400">Not enough resource detail to request an automated resize — see the manual CLI steps below instead.</p>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Auto-PR (GitHub) — Terraform/Pulumi</div>
+        {gitInstallations.length === 0 ? (
+          <p className="text-xs text-slate-400">No GitHub repository connected yet — connect one in Settings → Git Integration to open a pull request that updates your Terraform/Pulumi instance_type directly.</p>
+        ) : recommendedType && currentType ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-400">Finds <span className="font-mono">instance_type = "{currentType}"</span> (Terraform) or <span className="font-mono">instanceType: "{currentType}"</span> (Pulumi) in the file below and opens a real PR changing it to <span className="font-mono text-emerald-600 dark:text-emerald-400">{recommendedType}</span> — only if it appears exactly once.</p>
+            <select value={autoPrInstallationRowId} onChange={e => void loadAutoPrRepos(e.target.value)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+              <option value="">Select a GitHub installation…</option>
+              {gitInstallations.map(inst => <option key={inst.id} value={inst.id}>{inst.account_login}</option>)}
+            </select>
+            {autoPrInstallationRowId && (
+              <select value={autoPrRepoFullName} onChange={e => setAutoPrRepoFullName(e.target.value)} disabled={autoPrReposLoading} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 disabled:opacity-50">
+                <option value="">{autoPrReposLoading ? 'Loading repos…' : 'Select a repository…'}</option>
+                {autoPrRepos.map(r => <option key={r.fullName} value={r.fullName}>{r.fullName}</option>)}
+              </select>
+            )}
+            {autoPrRepoFullName && (
+              <input value={autoPrFilePath} onChange={e => setAutoPrFilePath(e.target.value)} placeholder="path/to/instance.tf" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+            )}
+            {autoPrRepoFullName && autoPrFilePath && (
+              <button onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
+            )}
+            {autoPrResult && 'prUrl' in autoPrResult && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: <a href={autoPrResult.prUrl} target="_blank" rel="noreferrer" className="underline">{autoPrResult.prUrl}</a></p>
+            )}
+            {autoPrResult && 'error' in autoPrResult && (
+              <p className="text-xs text-red-500">{autoPrResult.error}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">Not enough resource detail to open a pull request.</p>
         )}
       </div>
 

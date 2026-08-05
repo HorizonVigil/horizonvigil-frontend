@@ -365,6 +365,10 @@ class ApiClient {
   notifyOwner(id: string, data: { recipientUserId?: string; additionalEmails?: string[] }) {
     return this.patch<CostRecommendation & { emailSent: boolean; emailError: string | null }>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/notify-owner`, data);
   }
+  /** Real end-to-end: reads the actual file from the connected repo, finds the current instance_type/instanceType by exact literal match, commits the change on a new branch, opens a real PR. Fails honestly (400) if the match isn't found exactly once — see lib/github.ts's openResizeAutoPr server-side. */
+  openAutoPr(id: string, data: { installationRowId: string; repoFullName: string; filePath: string }) {
+    return this.patch<{ prUrl: string }>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/auto-pr`, data);
+  }
   // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
   generateRecommendations(connectionId?: string) {
     return this.post<{ connectionsScanned: number; flagged: number; cleared: number }>('costOptimization', '/api/cost-optimization/generate', connectionId ? { connectionId } : {});
