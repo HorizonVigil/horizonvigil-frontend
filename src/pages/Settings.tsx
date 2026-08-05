@@ -7,7 +7,7 @@ import { useTheme } from '../lib/theme';
 import { useOrg } from '../lib/orgContext';
 import { supabase } from '../lib/supabase';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type Role, type RecommendationRules } from '../lib/api';
+import { api, type Role, type RecommendationRules, type GitInstallation, type GitRepo } from '../lib/api';
 
 const TIMEZONES = ['UTC', 'America/New_York', 'America/Los_Angeles', 'America/Chicago', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
 const DATE_FORMATS = ['YYYY-MM-DD', 'MM/DD/YYYY', 'DD/MM/YYYY'];
@@ -16,7 +16,7 @@ const REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1'
 // Profile/Appearance/Session aren't among the 8 org-wide settings the
 // sidebar names (those are all per-org; these are per-you) — grouped
 // under one Profile tab since none of the 8 is a natural home for them.
-const TABS = ['Profile', 'AWS Integrations', 'Billing', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Branding', 'License'] as const;
+const TABS = ['Profile', 'AWS Integrations', 'Billing', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Git Integration', 'Branding', 'License'] as const;
 type Tab = typeof TABS[number];
 
 const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
@@ -70,6 +70,15 @@ export function Settings() {
   const [rulesSaved, setRulesSaved] = useState(false);
   const [rulesError, setRulesError] = useState<string | null>(null);
 
+  // ── Git integration (cost-optimization-api, GitHub App for Auto-PR) ──
+  const [gitInstallations, setGitInstallations] = useState<GitInstallation[]>([]);
+  const [gitReposByInstallation, setGitReposByInstallation] = useState<Record<string, GitRepo[]>>({});
+  const [gitReposLoading, setGitReposLoading] = useState<string | null>(null);
+  const [gitReposError, setGitReposError] = useState<Record<string, string>>({});
+  const [connectInstallationId, setConnectInstallationId] = useState('');
+  const [gitConnecting, setGitConnecting] = useState(false);
+  const [gitError, setGitError] = useState<string | null>(null);
+
   // ── Branding (settings-api) ──
   const [branding, setBranding] = useState<Record<string, unknown>>({});
   const [logoUrl, setLogoUrl] = useState('');
@@ -90,10 +99,11 @@ export function Settings() {
   const planLimits = license?.planLimits ?? null;
 
   const load = useCallback(async () => {
-    const [notif, sys, rec, brand, aws, bill, lic, creds, rbac] = await Promise.all([
+    const [notif, sys, rec, git, brand, aws, bill, lic, creds, rbac] = await Promise.all([
       api.getNotificationSettings(),
       api.getSystemSettings(),
       api.getRecommendationRules(),
+      api.getGitInstallations(),
       api.getBranding(),
       api.getAwsIntegrationsSummary(),
       api.getBilling(),
@@ -101,6 +111,7 @@ export function Settings() {
       api.getSettingsCredentials(),
       api.getRbac(),
     ]);
+    setGitInstallations(git.items);
     setNotifications(notif);
     setSystemSettings(sys);
     setDefaultRegion(typeof sys.defaultRegion === 'string' ? sys.defaultRegion : 'us-east-1');
@@ -125,6 +136,52 @@ export function Settings() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (currentOrg) setMfaRequired(currentOrg.mfa_required); }, [currentOrg]);
+
+  // GitHub redirects back with ?installation_id=... after the App install
+  // flow (once the App's Setup URL is pointed here) — pre-fill rather than
+  // require the user to dig the number out of the URL by hand.
+  useEffect(() => {
+    const installationId = new URLSearchParams(window.location.search).get('installation_id');
+    if (installationId) setConnectInstallationId(installationId);
+  }, []);
+
+  async function handleConnectGit() {
+    const installationId = Number(connectInstallationId);
+    if (!Number.isInteger(installationId) || installationId <= 0) {
+      setGitError('Enter a valid numeric installation ID.');
+      return;
+    }
+    setGitError(null);
+    setGitConnecting(true);
+    try {
+      const created = await api.connectGitInstallation(installationId);
+      setGitInstallations(prev => [created, ...prev]);
+      setConnectInstallationId('');
+    } catch (err) {
+      setGitError(err instanceof Error ? err.message : 'Could not connect this installation.');
+    } finally {
+      setGitConnecting(false);
+    }
+  }
+
+  async function handleDisconnectGit(id: string) {
+    await api.disconnectGitInstallation(id);
+    setGitInstallations(prev => prev.filter(i => i.id !== id));
+    setGitReposByInstallation(prev => { const next = { ...prev }; delete next[id]; return next; });
+  }
+
+  async function handleLoadRepos(id: string) {
+    setGitReposLoading(id);
+    setGitReposError(prev => { const next = { ...prev }; delete next[id]; return next; });
+    try {
+      const res = await api.getInstallationRepos(id);
+      setGitReposByInstallation(prev => ({ ...prev, [id]: res.items }));
+    } catch (err) {
+      setGitReposError(prev => ({ ...prev, [id]: err instanceof Error ? err.message : 'Could not load repositories.' }));
+    } finally {
+      setGitReposLoading(null);
+    }
+  }
 
   async function handleSaveNotifications(e: React.FormEvent) {
     e.preventDefault();
@@ -459,6 +516,50 @@ export function Settings() {
               <Badge tone="neutral">Coming soon</Badge>
             </div>
             <p className="text-xs text-slate-400 mt-1">Flagging instances that run 24/7 but could be scheduled off nights/weekends — not built yet.</p>
+          </div>
+        </div>
+      )}
+
+      {tab === 'Git Integration' && (
+        <div className="flex flex-col gap-4 max-w-2xl">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Connect a GitHub repository</h3>
+            <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the CloudOps360 GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
+            <div className="flex gap-2">
+              <input value={connectInstallationId} onChange={e => setConnectInstallationId(e.target.value)} placeholder="Installation ID, e.g. 12345678" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              <button onClick={() => void handleConnectGit()} disabled={gitConnecting} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 disabled:opacity-50">{gitConnecting ? 'Connecting…' : 'Connect'}</button>
+            </div>
+            {gitError && <p className="text-xs text-red-500">{gitError}</p>}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Connected installations</h3>
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+              {gitInstallations.map(inst => (
+                <li key={inst.id} className="py-2.5 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-700 dark:text-slate-200 font-medium">{inst.account_login}</span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => void handleLoadRepos(inst.id)} disabled={gitReposLoading === inst.id} className="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">{gitReposLoading === inst.id ? 'Loading…' : 'View repos'}</button>
+                      <button onClick={() => void handleDisconnectGit(inst.id)} className="text-xs text-red-500 hover:underline">Disconnect</button>
+                    </div>
+                  </div>
+                  {gitReposError[inst.id] && <p className="text-xs text-red-500 mt-1">{gitReposError[inst.id]}</p>}
+                  {gitReposByInstallation[inst.id] && (
+                    <ul className="mt-2 flex flex-col gap-1">
+                      {gitReposByInstallation[inst.id].map(repo => (
+                        <li key={repo.fullName} className="text-xs text-slate-500 dark:text-slate-400 font-mono flex items-center gap-2">
+                          {repo.fullName}
+                          {repo.private && <Badge tone="neutral">private</Badge>}
+                        </li>
+                      ))}
+                      {gitReposByInstallation[inst.id].length === 0 && <li className="text-xs text-slate-400">No repositories granted to this installation.</li>}
+                    </ul>
+                  )}
+                </li>
+              ))}
+              {gitInstallations.length === 0 && <li className="py-2 text-sm text-slate-400">No GitHub installations connected yet.</li>}
+            </ul>
           </div>
         </div>
       )}

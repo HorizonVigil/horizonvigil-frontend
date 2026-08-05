@@ -378,6 +378,12 @@ class ApiClient {
     return this.post<{ connectionsScanned: number; flagged: number }>('costOptimization', '/api/cost-optimization/anomalies/detect', connectionId ? { connectionId } : {});
   }
 
+  // GitHub App integration for the Guided Fix "Auto-PR" workflow — real installation-token exchange server-side; this client only ever sees the installation id/repo names, never a token.
+  getGitInstallations() { return this.get<{ items: GitInstallation[] }>('costOptimization', '/api/cost-optimization/git/installations'); }
+  connectGitInstallation(installationId: number) { return this.post<GitInstallation>('costOptimization', '/api/cost-optimization/git/installations', { installationId }); }
+  disconnectGitInstallation(id: string) { return this.delete<{ removed: string }>('costOptimization', `/api/cost-optimization/git/installations/${id}`); }
+  getInstallationRepos(installationRowId: string) { return this.get<{ items: GitRepo[] }>('costOptimization', `/api/cost-optimization/git/installations/${installationRowId}/repos`); }
+
   // ── vulnerability-management-api ────────────────────────────────────────
 
   getVulnerabilityDashboard() {
@@ -694,6 +700,8 @@ export interface RecommendationRules {
   rightsizingCpuThresholdPct: number;
   minMonthlySavingsToFlag: number;
 }
+export interface GitInstallation { id: string; org_id: string; installation_id: number; account_login: string; connected_by: string | null; created_at: string }
+export interface GitRepo { fullName: string; defaultBranch: string; private: boolean }
 export type ExclusionReason = 'business_critical' | 'performance_required' | 'temporary_workload' | 'false_positive' | 'other';
 export type ExclusionDuration = '30d' | '90d' | 'permanent' | 'custom';
 export interface CostRecommendation {
