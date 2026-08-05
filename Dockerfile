@@ -43,7 +43,9 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_ORGANIZATION_MANAGEMENT_API_URL=$VITE_ORGANIZATION_MANAGEMENT_API_URL \
     VITE_AUTOMATION_API_URL=$VITE_AUTOMATION_API_URL \
     VITE_SETTINGS_API_URL=$VITE_SETTINGS_API_URL
-RUN npm run build
+# npx vite build directly, not `npm run build` (= tsc -b && vite build) --
+# matches the original monorepo's Cloudflare pipeline, see deploy.yml for why.
+RUN npx vite build
 
 FROM node:22-slim
 WORKDIR /app
