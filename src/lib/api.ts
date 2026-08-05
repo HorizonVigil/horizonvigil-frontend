@@ -570,6 +570,8 @@ class ApiClient {
   updateNotificationSettings(data: Record<string, unknown>) { return this.put<Record<string, unknown>>('settings', '/api/settings/notifications', data); }
   getSystemSettings() { return this.get<Record<string, unknown>>('settings', '/api/settings/system-settings'); }
   updateSystemSettings(data: Record<string, unknown>) { return this.put<Record<string, unknown>>('settings', '/api/settings/system-settings', data); }
+  getRecommendationRules() { return this.get<Partial<RecommendationRules>>('settings', '/api/settings/recommendation-rules'); }
+  updateRecommendationRules(data: RecommendationRules) { return this.put<RecommendationRules>('settings', '/api/settings/recommendation-rules', data); }
   getBranding() { return this.get<Record<string, unknown>>('settings', '/api/settings/branding'); }
   updateBranding(data: Record<string, unknown>) { return this.put<Record<string, unknown>>('settings', '/api/settings/branding', data); }
   getRbac() { return this.get<{ roleGrants: { id: string; user_id: string; role: Role; created_at: string; profiles: { email: string; full_name: string | null } | null }[]; roleDefinitions: { role: Role; description: string }[] }>('settings', '/api/settings/rbac'); }
@@ -680,6 +682,13 @@ export interface CostAllocation { tagKey: string; totalCost: number; buckets: { 
 export interface Budget {
   id: string; org_id: string; scope_type: BudgetScopeType; scope_id: string; name: string; monthly_limit: number; alert_thresholds: number[]; created_at: string;
   currentSpend: number; projectedSpend: number; forecastMethod: string; percentOfLimit: number; status: 'ok' | 'warning' | 'exceeded';
+}
+/** Mirrors cost-optimization-api's lib/rules.ts DEFAULT_RECOMMENDATION_RULES exactly — see that file's comment for why there's no "minimum days idle" or "Scheduling" knob (no groundable data source for either yet). */
+export interface RecommendationRules {
+  idleDetectionEnabled: boolean;
+  rightsizingEnabled: boolean;
+  rightsizingCpuThresholdPct: number;
+  minMonthlySavingsToFlag: number;
 }
 export type ExclusionReason = 'business_critical' | 'performance_required' | 'temporary_workload' | 'false_positive' | 'other';
 export type ExclusionDuration = '30d' | '90d' | 'permanent' | 'custom';

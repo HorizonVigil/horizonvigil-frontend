@@ -7,7 +7,7 @@ import { useTheme } from '../lib/theme';
 import { useOrg } from '../lib/orgContext';
 import { supabase } from '../lib/supabase';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type Role } from '../lib/api';
+import { api, type Role, type RecommendationRules } from '../lib/api';
 
 const TIMEZONES = ['UTC', 'America/New_York', 'America/Los_Angeles', 'America/Chicago', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
 const DATE_FORMATS = ['YYYY-MM-DD', 'MM/DD/YYYY', 'DD/MM/YYYY'];
@@ -16,8 +16,10 @@ const REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1'
 // Profile/Appearance/Session aren't among the 8 org-wide settings the
 // sidebar names (those are all per-org; these are per-you) — grouped
 // under one Profile tab since none of the 8 is a natural home for them.
-const TABS = ['Profile', 'AWS Integrations', 'Billing', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Branding', 'License'] as const;
+const TABS = ['Profile', 'AWS Integrations', 'Billing', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Branding', 'License'] as const;
 type Tab = typeof TABS[number];
+
+const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
 
 export function Settings() {
   const { user, signOut } = useAuth();
@@ -63,6 +65,11 @@ export function Settings() {
   const [systemSaved, setSystemSaved] = useState(false);
   const [systemError, setSystemError] = useState<string | null>(null);
 
+  // ── Recommendation rules (settings-api, read by cost-optimization-api) ──
+  const [rules, setRules] = useState<RecommendationRules>(DEFAULT_RECOMMENDATION_RULES);
+  const [rulesSaved, setRulesSaved] = useState(false);
+  const [rulesError, setRulesError] = useState<string | null>(null);
+
   // ── Branding (settings-api) ──
   const [branding, setBranding] = useState<Record<string, unknown>>({});
   const [logoUrl, setLogoUrl] = useState('');
@@ -83,9 +90,10 @@ export function Settings() {
   const planLimits = license?.planLimits ?? null;
 
   const load = useCallback(async () => {
-    const [notif, sys, brand, aws, bill, lic, creds, rbac] = await Promise.all([
+    const [notif, sys, rec, brand, aws, bill, lic, creds, rbac] = await Promise.all([
       api.getNotificationSettings(),
       api.getSystemSettings(),
+      api.getRecommendationRules(),
       api.getBranding(),
       api.getAwsIntegrationsSummary(),
       api.getBilling(),
@@ -97,6 +105,12 @@ export function Settings() {
     setSystemSettings(sys);
     setDefaultRegion(typeof sys.defaultRegion === 'string' ? sys.defaultRegion : 'us-east-1');
     setSessionTimeoutMinutes(typeof sys.sessionTimeoutMinutes === 'number' ? String(sys.sessionTimeoutMinutes) : '60');
+    setRules({
+      idleDetectionEnabled: typeof rec.idleDetectionEnabled === 'boolean' ? rec.idleDetectionEnabled : DEFAULT_RECOMMENDATION_RULES.idleDetectionEnabled,
+      rightsizingEnabled: typeof rec.rightsizingEnabled === 'boolean' ? rec.rightsizingEnabled : DEFAULT_RECOMMENDATION_RULES.rightsizingEnabled,
+      rightsizingCpuThresholdPct: typeof rec.rightsizingCpuThresholdPct === 'number' ? rec.rightsizingCpuThresholdPct : DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct,
+      minMonthlySavingsToFlag: typeof rec.minMonthlySavingsToFlag === 'number' ? rec.minMonthlySavingsToFlag : DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
+    });
     setBranding(brand);
     setLogoUrl(typeof brand.logoUrl === 'string' ? brand.logoUrl : '');
     setPrimaryColor(typeof brand.primaryColor === 'string' ? brand.primaryColor : '');
@@ -136,6 +150,19 @@ export function Settings() {
       setTimeout(() => setSystemSaved(false), 2000);
     } catch (err) {
       setSystemError(err instanceof Error ? err.message : 'Could not save system settings.');
+    }
+  }
+
+  async function handleSaveRules(e: React.FormEvent) {
+    e.preventDefault();
+    setRulesError(null);
+    try {
+      const saved = await api.updateRecommendationRules(rules);
+      setRules(saved);
+      setRulesSaved(true);
+      setTimeout(() => setRulesSaved(false), 2000);
+    } catch (err) {
+      setRulesError(err instanceof Error ? err.message : 'Could not save recommendation rules.');
     }
   }
 
@@ -390,6 +417,50 @@ export function Settings() {
           {systemSaved && <p className="text-xs text-emerald-500">Saved.</p>}
           {systemError && <p className="text-xs text-red-500">{systemError}</p>}
         </form>
+      )}
+
+      {tab === 'Recommendation Rules' && (
+        <div className="flex flex-col gap-4 max-w-md">
+          <form onSubmit={handleSaveRules} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Recommendation Rules</h3>
+            <p className="text-xs text-slate-400">Controls what "Sync Now" flags as a savings opportunity going forward. Turning a category off doesn't remove recommendations already flagged — only new ones on future syncs.</p>
+
+            <label className="flex items-center justify-between text-sm pt-1">
+              <span className="text-slate-600 dark:text-slate-300">Unused resource detection (idle instances, unattached volumes/IPs)</span>
+              <input type="checkbox" checked={rules.idleDetectionEnabled} onChange={e => setRules(r => ({ ...r, idleDetectionEnabled: e.target.checked }))} />
+            </label>
+
+            <label className="flex items-center justify-between text-sm">
+              <span className="text-slate-600 dark:text-slate-300">Rightsizing detection</span>
+              <input type="checkbox" checked={rules.rightsizingEnabled} onChange={e => setRules(r => ({ ...r, rightsizingEnabled: e.target.checked }))} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-500 dark:text-slate-400">Flag instances averaging below this CPU %</span>
+              <input type="number" min={1} max={100} value={rules.rightsizingCpuThresholdPct} disabled={!rules.rightsizingEnabled}
+                onChange={e => setRules(r => ({ ...r, rightsizingCpuThresholdPct: Number(e.target.value) || DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct }))}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm pt-1">
+              <span className="text-slate-500 dark:text-slate-400">Minimum $/month savings to flag (reduces noise)</span>
+              <input type="number" min={0} step={0.5} value={rules.minMonthlySavingsToFlag}
+                onChange={e => setRules(r => ({ ...r, minMonthlySavingsToFlag: Number(e.target.value) || 0 }))}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            </label>
+
+            <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save</button>
+            {rulesSaved && <p className="text-xs text-emerald-500">Saved.</p>}
+            {rulesError && <p className="text-xs text-red-500">{rulesError}</p>}
+          </form>
+
+          <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 opacity-60">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Scheduling rules</h3>
+              <Badge tone="neutral">Coming soon</Badge>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Flagging instances that run 24/7 but could be scheduled off nights/weekends — not built yet.</p>
+          </div>
+        </div>
       )}
 
       {tab === 'Branding' && (
