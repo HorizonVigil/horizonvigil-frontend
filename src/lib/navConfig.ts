@@ -1,5 +1,6 @@
 /**
- * Full 15-module information architecture. Every module and sub-item below
+ * Full information architecture (16 modules — Issues added as a
+ * cross-cutting triage view alongside the original 15). Every module and sub-item below
  * is real product scope, not aspiration copy — but not everything listed has
  * a feature behind it yet. `to` present + `real: true` means the item
  * genuinely opens the thing it describes (often a section of a bigger page,
@@ -49,6 +50,7 @@ const VULN = '/vulnerability-management';
 const CLUSTERS = '/clusters';
 const MON = '/monitoring';
 const ALERTS = '/alerts';
+const ISSUES = '/issues';
 const REPORTS = '/reports';
 const USERS = '/users-groups';
 const ORG = '/organization';
@@ -241,6 +243,18 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Escalation Policies', to: tabLink(ALERTS, 'escalations'), real: true },
       { label: 'Alert History', to: tabLink(ALERTS, 'history'), real: true },
       { label: 'Maintenance Windows', to: tabLink(ALERTS, 'maintenance'), real: true },
+    ],
+  },
+  {
+    // Cross-cutting triage view — merges cost recommendations, security
+    // findings, and alerts client-side (see Issues.tsx's doc comment for
+    // why that's a client-side merge of three already-real feeds, not a
+    // new backend service). One page, so it has no sub-tabs of its own.
+    label: 'Issues',
+    icon: '⚠',
+    to: ISSUES,
+    children: [
+      { label: 'All Issues', to: ISSUES, real: true },
     ],
   },
   {

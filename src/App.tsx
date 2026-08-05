@@ -22,6 +22,7 @@ import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
 import { Clusters } from './pages/Clusters';
 import { Monitoring } from './pages/Monitoring';
 import { Alerts } from './pages/Alerts';
+import { Issues } from './pages/Issues';
 import { Reports } from './pages/Reports';
 import { UsersGroups } from './pages/UsersGroups';
 import { OrganizationManagement } from './pages/OrganizationManagement';
@@ -71,6 +72,7 @@ export default function App() {
                           <Route path="/clusters" element={<Clusters />} />
                           <Route path="/monitoring" element={<Monitoring />} />
                           <Route path="/alerts" element={<Alerts />} />
+                          <Route path="/issues" element={<Issues />} />
                           <Route path="/reports" element={<Reports />} />
                           <Route path="/integrations" element={<Navigate to="/automation" replace />} />
                           <Route path="/users-groups" element={<UsersGroups />} />
