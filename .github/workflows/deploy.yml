@@ -107,11 +107,11 @@ jobs:
       - name: Show service URL
         run: gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --format='value(status.url)'
 
-  # Separate frontend build for the billing feature: same prod backends and
-  # prod Supabase auth as the main frontend (so a real prod-authenticated
-  # user session works against it), but built with VITE_BILLING_API_URL set
-  # so the Subscription nav module and routes are included -- the prod
-  # deploy above never sets that build-arg, so prod stays billing-free.
+  # Genuinely separate test environment: its own GCP project
+  # (cloudops360-test, own CPU quota) and its own Supabase project
+  # (staging) for auth and every backend it talks to, not just billing.
+  # Deployed as a plain "frontend" service inside that project -- no name
+  # collision risk since prod lives in a different project entirely.
   deploy-test:
     needs: build-and-test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -119,14 +119,15 @@ jobs:
     permissions:
       contents: read
     env:
-      SERVICE: frontend-test
+      PROJECT_ID: cloudops360-test
+      SERVICE: frontend
     steps:
       - uses: actions/checkout@v4
 
       - id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_SA_KEY_TEST }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
@@ -138,25 +139,25 @@ jobs:
         run: |
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}:${{ github.sha }}"
           docker build \
-            --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
-            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" \
-            --build-arg VITE_AWS_ACCOUNTS_API_URL="https://connector-aws-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_GCP_ACCOUNTS_API_URL="https://connector-gcp-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_RESOURCES_API_URL="https://resources-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_CONTAINERS_API_URL="https://resources-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_COST_MANAGEMENT_API_URL="https://cost-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_COST_OPTIMIZATION_API_URL="https://cost-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_VULNERABILITY_MANAGEMENT_API_URL="https://security-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_MONITORING_API_URL="https://observability-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_ALERTS_API_URL="https://observability-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_USERS_API_URL="https://admin-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_ORGANIZATION_MANAGEMENT_API_URL="https://admin-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_SETTINGS_API_URL="https://admin-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_AUTOMATION_API_URL="https://automation-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_REPORTS_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_CUSTOM_DASHBOARDS_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_OVERVIEW_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
-            --build-arg VITE_BILLING_API_URL="https://billing-test-7yo5yw7xca-uc.a.run.app" \
+            --build-arg VITE_SUPABASE_URL="https://jhwaujnlgjlvixnvleqc.supabase.co" \
+            --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_baBKAWA0j4QkFYzbpJBM5Q_J4q-EXlP" \
+            --build-arg VITE_AWS_ACCOUNTS_API_URL="https://connector-aws-975304691244.us-central1.run.app" \
+            --build-arg VITE_GCP_ACCOUNTS_API_URL="https://connector-gcp-975304691244.us-central1.run.app" \
+            --build-arg VITE_RESOURCES_API_URL="https://resources-975304691244.us-central1.run.app" \
+            --build-arg VITE_CONTAINERS_API_URL="https://resources-975304691244.us-central1.run.app" \
+            --build-arg VITE_COST_MANAGEMENT_API_URL="https://cost-975304691244.us-central1.run.app" \
+            --build-arg VITE_COST_OPTIMIZATION_API_URL="https://cost-975304691244.us-central1.run.app" \
+            --build-arg VITE_VULNERABILITY_MANAGEMENT_API_URL="https://security-975304691244.us-central1.run.app" \
+            --build-arg VITE_MONITORING_API_URL="https://observability-975304691244.us-central1.run.app" \
+            --build-arg VITE_ALERTS_API_URL="https://observability-975304691244.us-central1.run.app" \
+            --build-arg VITE_USERS_API_URL="https://admin-975304691244.us-central1.run.app" \
+            --build-arg VITE_ORGANIZATION_MANAGEMENT_API_URL="https://admin-975304691244.us-central1.run.app" \
+            --build-arg VITE_SETTINGS_API_URL="https://admin-975304691244.us-central1.run.app" \
+            --build-arg VITE_AUTOMATION_API_URL="https://automation-975304691244.us-central1.run.app" \
+            --build-arg VITE_REPORTS_API_URL="https://reports-975304691244.us-central1.run.app" \
+            --build-arg VITE_CUSTOM_DASHBOARDS_API_URL="https://reports-975304691244.us-central1.run.app" \
+            --build-arg VITE_OVERVIEW_API_URL="https://reports-975304691244.us-central1.run.app" \
+            --build-arg VITE_BILLING_API_URL="https://billing-975304691244.us-central1.run.app" \
             -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
@@ -166,6 +167,7 @@ jobs:
           gcloud run deploy ${{ env.SERVICE }} \
             --image="${{ env.IMAGE }}" \
             --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
             --platform=managed \
             --allow-unauthenticated \
             --min-instances=0 \
@@ -173,4 +175,4 @@ jobs:
             --memory=256Mi
 
       - name: Show service URL
-        run: gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --format='value(status.url)'
+        run: gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --project=${{ env.PROJECT_ID }} --format='value(status.url)'
