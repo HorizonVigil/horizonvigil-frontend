@@ -24,6 +24,8 @@
  * per-module breadcrumb/quick-nav that wants the same list.
  */
 
+import { isBillingEnabled } from './api';
+
 export interface NavChild {
   label: string;
   to?: string;
@@ -57,6 +59,7 @@ const ORG = '/organization';
 const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
+const SUBSCRIPTION = '/subscription';
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -345,6 +348,20 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'License', to: tabLink(SETTINGS, 'License'), real: true },
     ],
   },
+  // Test-env only (VITE_BILLING_API_URL unset in the prod build) — see
+  // isBillingEnabled()'s doc comment in api.ts. Kept entirely separate from
+  // the pre-existing Settings > Billing stub tab rather than replacing it,
+  // so prod's Settings page is untouched either way.
+  ...(isBillingEnabled() ? [{
+    label: 'Subscription',
+    icon: '$',
+    to: SUBSCRIPTION,
+    children: [
+      { label: 'Plans', to: SUBSCRIPTION, real: true },
+      { label: 'Usage', to: tabLink(SUBSCRIPTION, 'Usage'), real: true },
+      { label: 'Invoices', to: tabLink(SUBSCRIPTION, 'Invoices'), real: true },
+    ],
+  }] : []),
 ];
 
 function pathOnly(to: string): string {

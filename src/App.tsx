@@ -29,6 +29,9 @@ import { OrganizationManagement } from './pages/OrganizationManagement';
 import { Settings } from './pages/Settings';
 import { CustomDashboards } from './pages/CustomDashboards';
 import { Automation } from './pages/Automation';
+import { Subscription } from './pages/Subscription';
+import { BillingSuccess } from './pages/BillingSuccess';
+import { BillingCanceled } from './pages/BillingCanceled';
 
 /** Preserves :id across a route rename — /aws-accounts/:id and /gcp-projects/:id both used to be real routes (bookmarks, stored Favorites) before Cloud Accounts and GCP Projects merged into one unified list+detail. */
 function RedirectToAccountDetail() {
@@ -80,6 +83,9 @@ export default function App() {
                           <Route path="/settings" element={<Settings />} />
                           <Route path="/custom-dashboards" element={<CustomDashboards />} />
                           <Route path="/automation" element={<Automation />} />
+                          <Route path="/subscription" element={<Subscription />} />
+                          <Route path="/billing/success" element={<BillingSuccess />} />
+                          <Route path="/billing/canceled" element={<BillingCanceled />} />
                         </Route>
                       </Route>
                     </Route>

@@ -7,7 +7,12 @@ const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.work
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
-  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings';
+  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing';
+
+/** Unset in the prod build on purpose — billing is a test-env-only feature for now (see cloudops-billing's README). Nav/routes check this before ever rendering anything that would call it. */
+export function isBillingEnabled(): boolean {
+  return Boolean(import.meta.env.VITE_BILLING_API_URL);
+}
 
 const SERVICE_URLS: Record<Service, string> = {
   overview: import.meta.env.VITE_OVERVIEW_API_URL || `https://cloudops360-1-overview-api.${SUBDOMAIN}`,
@@ -26,6 +31,7 @@ const SERVICE_URLS: Record<Service, string> = {
   organizationManagement: import.meta.env.VITE_ORGANIZATION_MANAGEMENT_API_URL || `https://cloudops360-1-organization-management-api.${SUBDOMAIN}`,
   automation: import.meta.env.VITE_AUTOMATION_API_URL || `https://cloudops360-1-automation-api.${SUBDOMAIN}`,
   settings: import.meta.env.VITE_SETTINGS_API_URL || `https://cloudops360-1-settings-api.${SUBDOMAIN}`,
+  billing: import.meta.env.VITE_BILLING_API_URL || '',
 };
 
 /** The two services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
@@ -607,6 +613,20 @@ class ApiClient {
   updateBranding(data: Record<string, unknown>) { return this.put<Record<string, unknown>>('settings', '/api/settings/branding', data); }
   getRbac() { return this.get<{ roleGrants: { id: string; user_id: string; role: Role; created_at: string; profiles: { email: string; full_name: string | null } | null }[]; roleDefinitions: { role: Role; description: string }[] }>('settings', '/api/settings/rbac'); }
   setMfaRequired(mfaRequired: boolean) { return this.put<{ mfaRequired: boolean }>('settings', '/api/settings/rbac/mfa-required', { mfaRequired }); }
+
+  // ── billing (test-env only — see isBillingEnabled()) ────────────────────
+
+  getBillingPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/plans'); }
+  getBillingAddons() { return this.get<{ items: BillingAddon[] }>('billing', '/api/billing/addons'); }
+  getCurrentSubscription() { return this.get<{ subscription: BillingSubscription | null; plan: BillingPlan | null }>('billing', '/api/billing/subscriptions/current'); }
+  createSubscription(data: { planKey: string; billingInterval: 'monthly' | 'annual'; successPath?: string; cancelPath?: string }) {
+    return this.post<{ subscription: BillingSubscription | null; checkoutUrl: string | null }>('billing', '/api/billing/subscriptions', data);
+  }
+  getBillingPortalUrl(returnPath?: string) { return this.post<{ portalUrl: string }>('billing', '/api/billing/subscriptions/portal', { returnPath }); }
+  getBillingInvoices(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<BillingInvoice>>('billing', `/api/billing/invoices${qs(params)}`); }
+  getBillingUsage() { return this.get<{ metrics: Record<string, BillingUsageMetric>; planKey: string | null }>('billing', '/api/billing/usage'); }
+  validateCoupon(code: string, planKey?: string) { return this.post<{ valid: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/validate', { code, planKey }); }
+  redeemCoupon(code: string, planKey?: string) { return this.post<{ redeemed: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/redeem', { code, planKey }); }
 }
 
 export const api = new ApiClient();
@@ -616,6 +636,29 @@ export const api = new ApiClient();
 export type Role = 'owner' | 'admin' | 'editor' | 'viewer' | 'billing_admin';
 export type Environment = 'production' | 'staging' | 'dev' | 'sandbox' | 'qa' | 'security' | 'dr' | 'legacy';
 export type BudgetScopeType = 'org' | 'folder' | 'project' | 'connection';
+
+export interface BillingPlan {
+  id: string; key: string; name: string; monthly_price_cents: number; annual_price_cents: number; currency: string;
+  included_cloud_accounts: number; included_organizations: number; included_users: number;
+  included_api_requests: number; included_ai_requests: number; included_storage_gb: number; included_automations: number;
+  support_level: string; sla_percent: number | null; data_retention_days: number; audit_log_enabled: boolean;
+  sso_enabled: boolean; saml_sso_enabled: boolean; compliance_features: string[]; security_features: string[];
+  is_active: boolean; is_public: boolean; sort_order: number;
+}
+export interface BillingAddon {
+  id: string; key: string; name: string; description: string | null; price_cents: number; billing_unit: string; unit_label: string | null; is_active: boolean;
+}
+export interface BillingSubscription {
+  id: string; org_id: string; plan_id: string; status: string; billing_interval: string;
+  current_period_start: string; current_period_end: string; trial_end: string | null;
+  cancel_at_period_end: boolean; payment_provider: string | null;
+}
+export interface BillingInvoice {
+  id: string; invoice_number: string; status: string; amount_due_cents: number; amount_paid_cents: number;
+  currency: string; period_start: string; period_end: string; paid_at: string | null; pdf_url: string | null; created_at: string;
+}
+export interface BillingUsageMetric { used: number | null; included: number | null; tracked: boolean; reason?: string }
+export interface BillingCoupon { id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number }
 
 export interface OverviewDashboard {
   connections: { total: number; connected: number; error: number; pending: number; disconnected: number };
