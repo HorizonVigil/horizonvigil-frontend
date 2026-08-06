@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -60,7 +61,7 @@ function money(n: number): string {
 
 export function CloudAccounts() {
   const { projects } = useOrg();
-  const { refreshToken } = useFilters();
+  const { refreshToken, region } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
@@ -175,12 +176,17 @@ export function CloudAccounts() {
     if (statusFilter && r.status !== statusFilter) return false;
     if (environmentFilter && r.environment !== environmentFilter) return false;
     if (providerFilter && r.provider !== providerFilter) return false;
+    // FilterBar's Region select is AWS-region-shaped (see its own REGIONS
+    // list) -- a GCP row's region string never matches one of those values,
+    // so picking a specific region correctly excludes all GCP rows rather
+    // than silently including them.
+    if (region !== 'all' && r.region !== region) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!r.name.toLowerCase().includes(q) && !r.identifier.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [allRows, statusFilter, environmentFilter, providerFilter, search]);
+  }), [allRows, statusFilter, environmentFilter, providerFilter, region, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize]);
@@ -362,7 +368,7 @@ export function CloudAccounts() {
 
   return (
     <div>
-      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} showDateFilter={false} />
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
@@ -779,16 +785,45 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Anchor position for the portaled menu (see below for why this is
+  // portaled rather than just position:absolute inside this cell).
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const { toast } = useToast();
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const MENU_WIDTH = 224; // w-56
 
+  function openMenu() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setOpen(true);
+  }
+
+  // Portaled to document.body (see render below) specifically because this
+  // menu lives inside DataTable's `overflow-x-auto` scroll container — an
+  // `overflow` ancestor clips any `position: absolute` descendant that
+  // would render outside its bounds, no matter the z-index, so a normal
+  // in-place dropdown gets visually cut off/overlapped for any row near the
+  // table's horizontal scroll edge. Closing on scroll (rather than trying
+  // to keep the menu repositioned live) is the standard, simplest correct
+  // behavior for a menu anchored to a scrolling row.
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
+    function handleScroll() { setOpen(false); }
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
   }, [open]);
 
   function copyId() {
@@ -803,12 +838,12 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   }
 
   return (
-    <div ref={ref} className="relative inline-block text-left" onClick={e => e.stopPropagation()}>
-      <button onClick={() => setOpen(v => !v)} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
+    <div className="inline-block text-left" onClick={e => e.stopPropagation()}>
+      <button ref={buttonRef} onClick={() => (open ? setOpen(false) : openMenu())} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
         ⋯
       </button>
-      {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
+      {open && pos && createPortal(
+        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right, width: MENU_WIDTH }} className="z-50 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
           <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources for this account right now">
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
@@ -834,7 +869,8 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
           <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
           <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources and history">Delete Permanently</button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

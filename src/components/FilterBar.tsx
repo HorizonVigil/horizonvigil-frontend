@@ -25,12 +25,14 @@ const RANGE_LABELS: Record<DateRangePreset, string> = {
  * this app has; there's no separate all-AWS/all-GCP toggle, only
  * all-accounts or one specific one.
  *
- * `showAccountFilter` defaults to true; pass false on pages whose data has
- * no per-account dimension (Reports has no connection_id column at all) —
- * otherwise the control renders but silently does nothing when changed,
- * which is worse than not having it.
+ * `showAccountFilter`/`showRegionFilter`/`showDateFilter` each default to
+ * true; pass false on a page whose data has no matching dimension (Reports
+ * has no connection_id column at all; an account/connection LIST — as
+ * opposed to resource- or cost-level data — has no meaningful "date range"
+ * to filter by) — otherwise the control renders but silently does nothing
+ * when changed, which is worse than not having it.
  */
-export function FilterBar({ title, breadcrumb, showAccountFilter = true }: { title: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean }) {
+export function FilterBar({ title, breadcrumb, showAccountFilter = true, showRegionFilter = true, showDateFilter = true }: { title: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean; showRegionFilter?: boolean; showDateFilter?: boolean }) {
   const { region, setRegion, account, setAccount, connections, dateRange, setDateRange, refresh } = useFilters();
 
   return (
@@ -49,18 +51,22 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true }: { tit
             </select>
           </label>
         )}
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Region</span>
-          <select value={region} onChange={e => setRegion(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${region !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-            {REGIONS.map(r => <option key={r} value={r}>{r === 'all' ? 'All Regions' : r}</option>)}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400">Date Range</span>
-          <select value={dateRange} onChange={e => setDateRange(e.target.value as DateRangePreset)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5">
-            {(Object.keys(RANGE_LABELS) as DateRangePreset[]).filter(k => k !== 'custom').map(k => <option key={k} value={k}>{RANGE_LABELS[k]}</option>)}
-          </select>
-        </label>
+        {showRegionFilter && (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400">Region</span>
+            <select value={region} onChange={e => setRegion(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${region !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+              {REGIONS.map(r => <option key={r} value={r}>{r === 'all' ? 'All Regions' : r}</option>)}
+            </select>
+          </label>
+        )}
+        {showDateFilter && (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400">Date Range</span>
+            <select value={dateRange} onChange={e => setDateRange(e.target.value as DateRangePreset)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5">
+              {(Object.keys(RANGE_LABELS) as DateRangePreset[]).filter(k => k !== 'custom').map(k => <option key={k} value={k}>{RANGE_LABELS[k]}</option>)}
+            </select>
+          </label>
+        )}
         <button onClick={refresh} title="Refresh" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
           ↻ Refresh
         </button>
