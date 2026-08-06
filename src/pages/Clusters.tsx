@@ -13,11 +13,14 @@ import { api, type CloudResource } from '../lib/api';
 // AWS EKS and GCP GKE data into a single provider-aware table rather than
 // splitting per-provider — both now have real Kubernetes-API-backed scanners
 // (see eksWorkloads.ts / gkeWorkloads.ts), so there's real data to merge.
-const TABS = [
-  'ECS Clusters', 'ECS Services', 'ECS Tasks', 'EKS Clusters', 'Nodes',
-  'Cloud Run', 'Artifact Registry', 'GKE Clusters',
-  'Deployments', 'Pods', 'Namespaces', 'Helm Releases',
-] as const;
+const AWS_ONLY_TABS = ['ECS Clusters', 'ECS Services', 'ECS Tasks', 'EKS Clusters', 'Nodes'] as const;
+const GCP_ONLY_TABS = ['Cloud Run', 'Artifact Registry', 'GKE Clusters'] as const;
+// Deployments/Pods/Namespaces/Helm Releases already merge both providers'
+// data (or honestly report "not built" for both) — no provider-specific
+// version of these exists, so they stay visible regardless of which
+// provider's account is selected.
+const SHARED_TABS = ['Deployments', 'Pods', 'Namespaces', 'Helm Releases'] as const;
+const TABS = [...AWS_ONLY_TABS, ...GCP_ONLY_TABS, ...SHARED_TABS] as const;
 type Tab = typeof TABS[number];
 
 function costCell(c: CloudResource) {
@@ -37,8 +40,24 @@ function providerBadge(c: CloudResource) {
 }
 
 export function Clusters() {
-  const { account, refreshToken } = useFilters();
+  const { account, connections, refreshToken } = useFilters();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'ECS Clusters');
+
+  // 'all' shows every tab (resources from either provider could exist);
+  // a specific account narrows to that account's own provider — no point
+  // showing ECS/EKS tabs while a GCP project is selected, or vice versa.
+  // Azure isn't a supported provider in this codebase yet (no connector,
+  // no resource types), so this can only ever resolve to 'aws' | 'gcp' | 'all'.
+  const selectedProvider = account === 'all' ? null : connections.find(c => c.id === account)?.provider ?? null;
+  const visibleTabs: readonly Tab[] =
+    selectedProvider === 'aws' ? [...AWS_ONLY_TABS, ...SHARED_TABS]
+    : selectedProvider === 'gcp' ? [...GCP_ONLY_TABS, ...SHARED_TABS]
+    : TABS;
+
+  useEffect(() => {
+    if (!visibleTabs.includes(tab)) setTab(visibleTabs[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProvider]);
   const [ecsClusters, setEcsClusters] = useState<CloudResource[]>([]);
   const [eksClusters, setEksClusters] = useState<CloudResource[]>([]);
   // The containers domain exposes individual EKS nodes (not aggregated node
@@ -203,16 +222,16 @@ export function Clusters() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-5">
         <StatCard label="Total Clusters" value={String(totalClusters)} />
-        <StatCard label="ECS Clusters" value={String(ecsClusters.length)} />
-        <StatCard label="EKS Clusters" value={String(eksClusters.length)} />
-        <StatCard label="GKE Clusters" value={String(gkeClusters.length)} />
-        <StatCard label="Cloud Run Services" value={String(cloudRun.length)} />
-        <StatCard label="Container Images" value={String(artifactImages.length)} />
-        <StatCard label="Nodes" value={String(eksNodes.length)} />
+        {selectedProvider !== 'gcp' && <StatCard label="ECS Clusters" value={String(ecsClusters.length)} />}
+        {selectedProvider !== 'gcp' && <StatCard label="EKS Clusters" value={String(eksClusters.length)} />}
+        {selectedProvider !== 'aws' && <StatCard label="GKE Clusters" value={String(gkeClusters.length)} />}
+        {selectedProvider !== 'aws' && <StatCard label="Cloud Run Services" value={String(cloudRun.length)} />}
+        {selectedProvider !== 'aws' && <StatCard label="Container Images" value={String(artifactImages.length)} />}
+        {selectedProvider !== 'gcp' && <StatCard label="Nodes" value={String(eksNodes.length)} />}
       </div>
 
       <div className="flex gap-1 text-sm flex-wrap mb-4">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
             {t}
           </button>
