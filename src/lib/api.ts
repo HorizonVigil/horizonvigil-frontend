@@ -306,9 +306,16 @@ class ApiClient {
   getEksClusters(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/clusters${qs(params)}`); }
   getEksNodes(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/nodes${qs(params)}`); }
   getEksNamespaces() { return this.get<NotIntegrated>('containers', '/api/containers/eks/namespaces'); }
-  getEksDeployments() { return this.get<NotIntegrated>('containers', '/api/containers/eks/deployments'); }
-  getEksPods() { return this.get<NotIntegrated>('containers', '/api/containers/eks/pods'); }
+  getEksDeployments(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/deployments${qs(params)}`); }
+  getEksPods(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/pods${qs(params)}`); }
   getEksHelmReleases() { return this.get<NotIntegrated>('containers', '/api/containers/eks/helm-releases'); }
+
+  getGcpCloudRun(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/cloud-run${qs(params)}`); }
+  getGcpArtifactRegistryRepos(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/artifact-registry/repositories${qs(params)}`); }
+  getGcpArtifactRegistryImages(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/artifact-registry/images${qs(params)}`); }
+  getGkeClusters(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/gke/clusters${qs(params)}`); }
+  getGkePods(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/gke/pods${qs(params)}`); }
+  getGkeDeployments(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/gke/deployments${qs(params)}`); }
 
   // ── monitoring-api ───────────────────────────────────────────────────────
 

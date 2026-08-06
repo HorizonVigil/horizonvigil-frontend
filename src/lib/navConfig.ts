@@ -204,14 +204,17 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'ECS Tasks', to: tabLink(CLUSTERS, 'ECS Tasks'), real: true },
       { label: 'EKS Clusters', to: tabLink(CLUSTERS, 'EKS Clusters'), real: true },
       { label: 'Nodes', to: tabLink(CLUSTERS, 'Nodes'), real: true },
-      // Namespaces/Deployments/Pods/Helm Releases aren't gated behind a tab —
-      // they're not buildable in this pass (no Kubernetes API access to any
-      // cluster), so they show as an always-visible honest "not integrated"
-      // panel under every tab rather than their own empty section.
-      { label: 'Namespaces', to: CLUSTERS, real: true },
-      { label: 'Deployments', to: CLUSTERS, real: true },
-      { label: 'Pods', to: CLUSTERS, real: true },
-      { label: 'Helm Releases', to: CLUSTERS, real: true },
+      { label: 'Cloud Run', to: tabLink(CLUSTERS, 'Cloud Run'), real: true },
+      { label: 'Artifact Registry', to: tabLink(CLUSTERS, 'Artifact Registry'), real: true },
+      { label: 'GKE Clusters', to: tabLink(CLUSTERS, 'GKE Clusters'), real: true },
+      // Deployments/Pods merge AWS EKS + GCP GKE data (both have real
+      // Kubernetes-API-backed scanners now). Namespaces/Helm Releases still
+      // have no scanner for either provider, so those tabs show an honest
+      // "not integrated" panel instead of a table.
+      { label: 'Deployments', to: tabLink(CLUSTERS, 'Deployments'), real: true },
+      { label: 'Pods', to: tabLink(CLUSTERS, 'Pods'), real: true },
+      { label: 'Namespaces', to: tabLink(CLUSTERS, 'Namespaces'), real: true },
+      { label: 'Helm Releases', to: tabLink(CLUSTERS, 'Helm Releases'), real: true },
     ],
   },
   {
