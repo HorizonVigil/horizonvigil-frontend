@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
@@ -32,11 +33,17 @@ import { Automation } from './pages/Automation';
 import { Subscription } from './pages/Subscription';
 import { BillingSuccess } from './pages/BillingSuccess';
 import { BillingCanceled } from './pages/BillingCanceled';
+import { isBillingEnabled } from './lib/api';
 
 /** Preserves :id across a route rename — /aws-accounts/:id and /gcp-projects/:id both used to be real routes (bookmarks, stored Favorites) before Cloud Accounts and GCP Projects merged into one unified list+detail. */
 function RedirectToAccountDetail() {
   const { id } = useParams<{ id: string }>();
   return <Navigate to={id ? `/cloud-accounts/${id}` : '/cloud-accounts'} replace />;
+}
+
+/** Nav hides billing when VITE_BILLING_API_URL is unset (prod), but a direct URL visit would still hit the route -- this closes that gap rather than rendering a page whose API calls have nowhere to go. */
+function RequireBilling({ children }: { children: ReactNode }) {
+  return isBillingEnabled() ? <>{children}</> : <Navigate to="/overview" replace />;
 }
 
 export default function App() {
@@ -83,9 +90,9 @@ export default function App() {
                           <Route path="/settings" element={<Settings />} />
                           <Route path="/custom-dashboards" element={<CustomDashboards />} />
                           <Route path="/automation" element={<Automation />} />
-                          <Route path="/subscription" element={<Subscription />} />
-                          <Route path="/billing/success" element={<BillingSuccess />} />
-                          <Route path="/billing/canceled" element={<BillingCanceled />} />
+                          <Route path="/subscription" element={<RequireBilling><Subscription /></RequireBilling>} />
+                          <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />
+                          <Route path="/billing/canceled" element={<RequireBilling><BillingCanceled /></RequireBilling>} />
                         </Route>
                       </Route>
                     </Route>
