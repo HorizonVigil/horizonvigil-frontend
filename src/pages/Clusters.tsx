@@ -13,13 +13,16 @@ import { api, type CloudResource } from '../lib/api';
 // AWS EKS and GCP GKE data into a single provider-aware table rather than
 // splitting per-provider — both now have real Kubernetes-API-backed scanners
 // (see eksWorkloads.ts / gkeWorkloads.ts), so there's real data to merge.
-const AWS_ONLY_TABS = ['ECS Clusters', 'ECS Services', 'ECS Tasks', 'EKS Clusters', 'Nodes'] as const;
+// Namespaces is AWS-only (EKS scanner only, GKE's own isn't built yet — see
+// gkeWorkloads.ts), same shape as Nodes, so it lives here rather than in
+// SHARED_TABS to avoid showing an always-empty table under a GCP-only view.
+const AWS_ONLY_TABS = ['ECS Clusters', 'ECS Services', 'ECS Tasks', 'EKS Clusters', 'Nodes', 'Namespaces'] as const;
 const GCP_ONLY_TABS = ['Cloud Run', 'Artifact Registry', 'GKE Clusters'] as const;
-// Deployments/Pods/Namespaces/Helm Releases already merge both providers'
-// data (or honestly report "not built" for both) — no provider-specific
-// version of these exists, so they stay visible regardless of which
-// provider's account is selected.
-const SHARED_TABS = ['Deployments', 'Pods', 'Namespaces', 'Helm Releases'] as const;
+// Deployments/Pods already merge both providers' real data; Helm Releases
+// honestly reports "not built" for both — no provider-specific version of
+// either exists, so they stay visible regardless of which provider's
+// account is selected.
+const SHARED_TABS = ['Deployments', 'Pods', 'Helm Releases'] as const;
 const TABS = [...AWS_ONLY_TABS, ...GCP_ONLY_TABS, ...SHARED_TABS] as const;
 type Tab = typeof TABS[number];
 
@@ -67,6 +70,7 @@ export function Clusters() {
   const [ecsTasks, setEcsTasks] = useState<CloudResource[]>([]);
   const [eksDeployments, setEksDeployments] = useState<CloudResource[]>([]);
   const [eksPods, setEksPods] = useState<CloudResource[]>([]);
+  const [eksNamespaces, setEksNamespaces] = useState<CloudResource[]>([]);
   const [cloudRun, setCloudRun] = useState<CloudResource[]>([]);
   const [artifactRepos, setArtifactRepos] = useState<CloudResource[]>([]);
   const [artifactImages, setArtifactImages] = useState<CloudResource[]>([]);
@@ -97,7 +101,7 @@ export function Clusters() {
       api.getGkeClusters({ connectionId, limit: 200 }),
       api.getGkeDeployments({ connectionId, limit: 500 }),
       api.getGkePods({ connectionId, limit: 500 }),
-      api.getEksNamespaces(),
+      api.getEksNamespaces({ connectionId, limit: 500 }),
       api.getEksHelmReleases(),
     ]);
     setEksClusters(eksRes.items);
@@ -113,10 +117,11 @@ export function Clusters() {
     setGkeClusters(gkeClusterRes.items);
     setGkeDeployments(gkeDeployRes.items);
     setGkePods(gkePodRes.items);
-    // Namespaces / Helm releases have no scanner for either provider — shown
-    // honestly rather than as a silent empty table with no explanation.
+    // Namespaces now has a real EKS scanner (GKE's own is still not built —
+    // see gkeWorkloads.ts). Helm releases still has no scanner for either
+    // provider — shown honestly rather than as a silent empty table.
+    setEksNamespaces(namespaces.items);
     setNotBuilt([
-      { label: 'Namespaces', reason: namespaces.reason },
       { label: 'Helm Releases', reason: helmReleases.reason },
     ]);
   }, [account]);
@@ -214,6 +219,16 @@ export function Clusters() {
     { key: 'status', header: 'Status', render: p => <Badge>{p.state ?? p.status}</Badge>, sortValue: p => p.state ?? p.status },
   ];
 
+  // AWS-only for now (GKE has no namespace scanner yet — gkeWorkloads.ts
+  // still only covers pods/deployments), unlike Deployments/Pods which
+  // already merge both providers. No providerBadge column for that reason.
+  const namespaceColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Namespace', render: n => n.resource_name ?? n.resource_id, sortValue: n => n.resource_name ?? '' },
+    { key: 'cluster', header: 'Cluster', render: n => (n.relationships?.clusterName as string) ?? '—', sortValue: n => (n.relationships?.clusterName as string) ?? '' },
+    { key: 'region', header: 'Region', render: n => n.region ?? '—', sortValue: n => n.region ?? '' },
+    { key: 'status', header: 'Status', render: n => <Badge>{n.state ?? n.status}</Badge>, sortValue: n => n.state ?? n.status },
+  ];
+
   const totalClusters = ecsClusters.length + eksClusters.length + gkeClusters.length;
 
   return (
@@ -284,7 +299,13 @@ export function Clusters() {
       {tab === 'Pods' && (
         <DataTable columns={podColumns} rows={pods} rowKey={p => p.id} onRowClick={setSelected} emptyMessage="No pods discovered yet." />
       )}
-      {(tab === 'Namespaces' || tab === 'Helm Releases') && (
+      {tab === 'Namespaces' && (
+        <>
+          <p className="text-xs text-slate-400 mb-3">AWS EKS only for now — GKE namespace scanning isn't built yet. A cluster only appears here if its connection's identity has been granted Kubernetes RBAC access (same requirement as Deployments/Pods above).</p>
+          <DataTable columns={namespaceColumns} rows={eksNamespaces} rowKey={n => n.id} onRowClick={setSelected} emptyMessage="No namespaces discovered yet." />
+        </>
+      )}
+      {tab === 'Helm Releases' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <p className="text-xs text-slate-400">
             {notBuilt.find(w => w.label === tab)?.reason ?? 'Not built in this pass.'}

@@ -11,6 +11,7 @@ import { ConnectGcpProjectWizard } from '../components/ConnectGcpProjectWizard';
 import { AddAccountChooser } from '../components/AddAccountChooser';
 import { useConfirm } from '../components/ConfirmDialog';
 import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
+import { EmptyState } from '../components/EmptyState';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
@@ -61,7 +62,7 @@ function money(n: number): string {
 
 export function CloudAccounts() {
   const { projects } = useOrg();
-  const { refreshToken, region } = useFilters();
+  const { refreshToken, region, refresh } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
@@ -121,10 +122,13 @@ export function CloudAccounts() {
 
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [gcpProjectCount, setGcpProjectCount] = useState<number | null>(null);
   const [awsOrgs, setAwsOrgs] = useState<{ awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[]>([]);
+  const [awsOrgsError, setAwsOrgsError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<AccountSummary[]>([]);
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
+  const [regionsError, setRegionsError] = useState<string | null>(null);
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
   const [syncCenterLoaded, setSyncCenterLoaded] = useState(false);
   const [expandedSyncRow, setExpandedSyncRow] = useState<string | null>(null);
@@ -154,14 +158,24 @@ export function CloudAccounts() {
   useSyncCompletion([...awsConnections.map(c => c.id), ...gcpConnections.map(c => c.id)], loadInventory);
 
   // Each secondary tab's data is only fetched once you actually open it, and
-  // re-fetched on refreshToken while that tab is active.
+  // re-fetched on refreshToken while that tab is active. Each of these three
+  // failed silently before — dashboard/awsOrgs/regions stayed at their
+  // initial empty value forever on any error (a Cloud Run cold start, a
+  // dropped connection, a real backend 500), which the JSX below read as
+  // "still loading" and rendered skeletons for indefinitely with no way to
+  // tell the two states apart or retry.
   useEffect(() => {
     if (tab === 'Dashboard') {
-      void api.getAwsAccountsDashboard().then(setDashboard);
-      void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total));
-    } else if (tab === 'Organizations') void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts));
-    else if (tab === 'Regions') void api.getAwsAccountsRegions().then(r => setRegions(r.regions));
-    else if (tab === 'Sync Center') {
+      setDashboardError(null);
+      void api.getAwsAccountsDashboard().then(setDashboard).catch(err => setDashboardError((err as Error).message || 'Could not load the dashboard.'));
+      void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total)).catch(() => {});
+    } else if (tab === 'Organizations') {
+      setAwsOrgsError(null);
+      void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts)).catch(err => setAwsOrgsError((err as Error).message || 'Could not load organizations.'));
+    } else if (tab === 'Regions') {
+      setRegionsError(null);
+      void api.getAwsAccountsRegions().then(r => setRegions(r.regions)).catch(err => setRegionsError((err as Error).message || 'Could not load regions.'));
+    } else if (tab === 'Sync Center') {
       setSyncCenterLoaded(false);
       void Promise.all([
         api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts)),
@@ -382,7 +396,9 @@ export function CloudAccounts() {
       </div>
 
       {tab === 'Dashboard' && (
-        !dashboard ? (
+        dashboardError ? (
+          <EmptyState icon="⚠" title="Could not load the dashboard" description={dashboardError} action={{ label: 'Retry', onClick: refresh }} />
+        ) : !dashboard ? (
           <div className="flex flex-col gap-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
@@ -618,6 +634,9 @@ export function CloudAccounts() {
       )}
 
       {tab === 'Organizations' && (
+        awsOrgsError ? (
+          <EmptyState icon="⚠" title="Could not load organizations" description={awsOrgsError} action={{ label: 'Retry', onClick: refresh }} />
+        ) : (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-slate-400">AWS only — connected accounts grouped by their 12-digit AWS account id. This is a grouping of this org's own connections, not a live read of AWS Organizations (that needs organizations:List* calls against a payer account, not built in this pass). GCP has no equivalent concept in Phase 1.</p>
           {awsOrgs.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No AWS accounts connected yet.</p>}
@@ -638,9 +657,13 @@ export function CloudAccounts() {
             </div>
           ))}
         </div>
+        )
       )}
 
       {tab === 'Regions' && (
+        regionsError ? (
+          <EmptyState icon="⚠" title="Could not load regions" description={regionsError} action={{ label: 'Retry', onClick: refresh }} />
+        ) : (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           <p className="text-xs text-slate-400 px-3 pt-3">AWS only — GCP's Phase 1 scanners are all project-wide (no per-region fan-out), so there's no regional breakdown to show for GCP projects.</p>
           <table className="w-full text-sm">
@@ -665,6 +688,7 @@ export function CloudAccounts() {
             </tbody>
           </table>
         </div>
+        )
       )}
 
       {tab === 'Sync Center' && (
