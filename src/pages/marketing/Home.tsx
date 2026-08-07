@@ -35,6 +35,12 @@ const AI_FEATURES = [
   { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline, one click from being applied.' },
 ];
 
+const COMPLIANCE_BENCHMARKS = [
+  { name: 'CIS AWS Foundations', desc: 'Automated checks against the CIS benchmark, scored per account with a live pass rate.' },
+  { name: 'PCI DSS', desc: 'Continuous evaluation against PCI DSS controls — not a once-a-year manual questionnaire.' },
+  { name: 'ISO 27001', desc: 'ISO 27001 control checks run on the same schedule as everything else, no separate audit tool required.' },
+];
+
 const SECURITY_FEATURES = [
   { title: 'Credentials encrypted at rest', desc: 'AWS keys and GCP service-account keys are AES-GCM encrypted before they ever touch storage, with a fresh IV per record.' },
   { title: 'Org-scoped RBAC', desc: 'Every role grant is scoped to an organization and, where it matters, to a single cloud account — not a blanket admin toggle.' },
@@ -73,6 +79,7 @@ export function MarketingHome() {
       <ArchitectureOverview />
       <AICapabilities />
       <SecurityCompliance />
+      <ComplianceBenchmarks />
       <ProductPreview />
       <PricingTeaser />
       <CustomerBenefits />
@@ -256,6 +263,33 @@ function SecurityCompliance() {
             </div>
           ))}
         </div>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Distinct from SecurityCompliance above: that section covers plan-gated
+ * compliance *mappings* (SOC 2, HIPAA-ready posture). This is the live,
+ * automated benchmark scanning every connected account gets — real API
+ * (getComplianceBenchmarks), real frameworks (see the ComplianceBenchmark
+ * type in lib/api.ts), not the same claim restated.
+ */
+function ComplianceBenchmarks() {
+  return (
+    <Section>
+      <div className="text-center max-w-2xl mx-auto mb-14">
+        <Eyebrow>Compliance</Eyebrow>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Live benchmark scoring, not a once-a-year checklist.</h2>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">Every connected account is checked against real compliance frameworks on an ongoing basis, with a pass rate you can see at any time — under Vulnerability Management › Compliance.</p>
+      </div>
+      <div className="grid sm:grid-cols-3 gap-5">
+        {COMPLIANCE_BENCHMARKS.map(b => (
+          <div key={b.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+            <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{b.name}</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{b.desc}</div>
+          </div>
+        ))}
       </div>
     </Section>
   );
