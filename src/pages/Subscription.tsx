@@ -214,7 +214,7 @@ export function Subscription() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
             <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Your referral code</div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-              Share this code — when another organization redeems it, you're credited ${(referralCreditCents / 100).toFixed(0)}.
+              Share this code — when another organization redeems it, you're credited ${(referralCreditCents / 100).toFixed(0)} and a new code is generated for your next referral. Each code works once.
             </p>
             <div className="flex items-center gap-2">
               <code className="text-lg font-mono font-semibold px-3 py-2 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white">{referralCode ?? '—'}</code>
