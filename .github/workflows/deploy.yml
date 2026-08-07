@@ -2,7 +2,7 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [main]
+    branches: [main, test]
   pull_request:
 
 env:
@@ -115,7 +115,7 @@ jobs:
   # collision risk since prod lives in a different project entirely.
   deploy-test:
     needs: build-and-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/test' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
