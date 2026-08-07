@@ -400,6 +400,121 @@ function bytesFromK8sQuantity(q?: string): string {
   return `${(Number(m[1]) / (1024 * 1024)).toFixed(1)} GiB`;
 }
 
+function formatAge(iso?: string): string {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+// A K8s "condition" is good/bad depending on its type — Ready=True is
+// healthy, but so is MemoryPressure=False; there's no single "True is good"
+// rule across condition types, so this maps each type's healthy polarity.
+const NEGATIVE_CONDITION_TYPES = new Set(['MemoryPressure', 'DiskPressure', 'PIDPressure', 'NetworkUnavailable']);
+function conditionTone(type: string, status: string): 'good' | 'warning' | 'critical' | 'neutral' {
+  const healthy = NEGATIVE_CONDITION_TYPES.has(type) ? status === 'False' : status === 'True';
+  if (healthy) return 'good';
+  return status === 'Unknown' ? 'neutral' : 'critical';
+}
+
+function podHealthTone(p: CloudResource): 'good' | 'warning' | 'critical' | 'neutral' {
+  const phase = p.state ?? p.status;
+  if (phase === 'Running' || phase === 'Succeeded') return 'good';
+  if (phase === 'Pending') return 'warning';
+  if (phase === 'Failed') return 'critical';
+  return 'neutral';
+}
+
+interface K8sContainerState {
+  running?: { startedAt?: string };
+  waiting?: { reason?: string; message?: string };
+  terminated?: { reason?: string; exitCode?: number; message?: string; startedAt?: string; finishedAt?: string };
+}
+interface K8sContainerStatusUI { name: string; image: string; ready: boolean; restartCount: number; state?: K8sContainerState; lastState?: K8sContainerState }
+
+const CRASH_REASONS = new Set(['CrashLoopBackOff', 'ImagePullBackOff', 'ErrImagePull', 'OOMKilled', 'Error']);
+function containerStateSummary(state?: K8sContainerState): { label: string; tone: 'good' | 'warning' | 'critical' | 'neutral'; detail?: string } {
+  if (!state) return { label: 'Unknown', tone: 'neutral' };
+  if (state.running) return { label: 'Running', tone: 'good' };
+  if (state.waiting) {
+    const reason = state.waiting.reason ?? 'Waiting';
+    return { label: reason, tone: CRASH_REASONS.has(reason) ? 'critical' : 'warning', detail: state.waiting.message };
+  }
+  if (state.terminated) {
+    const reason = state.terminated.reason ?? 'Terminated';
+    const detail = state.terminated.message ?? (state.terminated.exitCode != null ? `exit code ${state.terminated.exitCode}` : undefined);
+    return { label: reason, tone: state.terminated.exitCode === 0 ? 'neutral' : (CRASH_REASONS.has(reason) ? 'critical' : 'warning'), detail };
+  }
+  return { label: 'Unknown', tone: 'neutral' };
+}
+
+interface K8sProbeUI {
+  httpGet?: { path?: string; port?: number | string; scheme?: string };
+  tcpSocket?: { port?: number | string };
+  exec?: { command?: string[] };
+  initialDelaySeconds?: number; periodSeconds?: number; timeoutSeconds?: number; failureThreshold?: number;
+}
+function describeProbe(p?: K8sProbeUI): string | undefined {
+  if (!p) return undefined;
+  const target = p.httpGet ? `HTTP GET ${p.httpGet.path ?? '/'}:${p.httpGet.port ?? ''}` : p.tcpSocket ? `TCP :${p.tcpSocket.port ?? ''}` : p.exec ? `exec [${(p.exec.command ?? []).join(' ')}]` : undefined;
+  if (!target) return undefined;
+  return `${target} — every ${p.periodSeconds ?? '?'}s, ${p.failureThreshold ?? '?'} failures to trip`;
+}
+
+interface K8sEnvVarUI {
+  name: string; value?: string;
+  valueFrom?: { secretKeyRef?: { name: string; key: string }; configMapKeyRef?: { name: string; key: string }; fieldRef?: { fieldPath: string } };
+}
+function describeEnvVar(e: K8sEnvVarUI): string {
+  if (e.value !== undefined) return e.value;
+  if (e.valueFrom?.secretKeyRef) return `from secret ${e.valueFrom.secretKeyRef.name}.${e.valueFrom.secretKeyRef.key}`;
+  if (e.valueFrom?.configMapKeyRef) return `from configmap ${e.valueFrom.configMapKeyRef.name}.${e.valueFrom.configMapKeyRef.key}`;
+  if (e.valueFrom?.fieldRef) return `from ${e.valueFrom.fieldRef.fieldPath}`;
+  return '—';
+}
+
+interface K8sContainerSpecUI {
+  name: string; image: string; imagePullPolicy?: string;
+  command?: string[]; args?: string[];
+  ports?: { containerPort: number; protocol?: string; name?: string }[];
+  env?: K8sEnvVarUI[];
+  resources?: { requests?: { cpu?: string; memory?: string }; limits?: { cpu?: string; memory?: string } };
+  volumeMounts?: { name: string; mountPath: string; readOnly?: boolean }[];
+  readinessProbe?: K8sProbeUI; livenessProbe?: K8sProbeUI; startupProbe?: K8sProbeUI;
+}
+
+function ContainerSpecPanel({ container: c }: { container: K8sContainerSpecUI }) {
+  const readiness = describeProbe(c.readinessProbe);
+  const liveness = describeProbe(c.livenessProbe);
+  return (
+    <DetailSection title={`Container: ${c.name}`}>
+      <DetailField label="Image" value={<span className="font-mono text-[11px]">{c.image}</span>} />
+      <DetailField label="Pull Policy" value={c.imagePullPolicy} />
+      {c.command && c.command.length > 0 && <DetailField label="Command" value={<span className="font-mono text-[11px]">{c.command.join(' ')}</span>} />}
+      {c.args && c.args.length > 0 && <DetailField label="Args" value={<span className="font-mono text-[11px]">{c.args.join(' ')}</span>} />}
+      {c.ports && c.ports.length > 0 && <DetailField label="Ports" value={c.ports.map(p => `${p.containerPort}/${p.protocol ?? 'TCP'}${p.name ? ` (${p.name})` : ''}`).join(', ')} />}
+      <DetailField label="CPU (request / limit)" value={`${c.resources?.requests?.cpu ?? '—'} / ${c.resources?.limits?.cpu ?? '—'}`} />
+      <DetailField label="Memory (request / limit)" value={`${c.resources?.requests?.memory ?? '—'} / ${c.resources?.limits?.memory ?? '—'}`} />
+      {readiness && <DetailField label="Readiness Probe" value={readiness} />}
+      {liveness && <DetailField label="Liveness Probe" value={liveness} />}
+      {c.volumeMounts && c.volumeMounts.length > 0 && (
+        <DetailField label="Volume Mounts" value={c.volumeMounts.map(v => `${v.name} → ${v.mountPath}${v.readOnly ? ' (ro)' : ''}`).join(', ')} />
+      )}
+      {c.env && c.env.length > 0 && (
+        <div className="pt-1.5">
+          <div className="text-[11px] text-slate-400 mb-1">Environment</div>
+          {c.env.map(e => <DetailField key={e.name} label={e.name} value={<span className="font-mono text-[11px]">{describeEnvVar(e)}</span>} />)}
+        </div>
+      )}
+    </DetailSection>
+  );
+}
+
 interface ResourceDetailProps {
   resource: CloudResource;
   onNavigate: (r: CloudResource) => void;
@@ -450,6 +565,9 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
 
   if (r.resource_type_key === 'eks_node') {
     const podsHere = eksPods.filter(p => p.metadata?.nodeName === r.resource_name);
+    const taints = (m.taints as { key: string; value?: string; effect: string }[] | undefined) ?? [];
+    const conditions = (m.conditions as { type: string; status: string; reason?: string; message?: string }[] | undefined) ?? [];
+    const labels = r.tags ?? {};
     return (
       <div className="flex flex-col gap-4 text-sm">
         <DetailSection title="Overview">
@@ -460,6 +578,8 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <DetailField label="Capacity Type" value={m.capacityType as string} />
           <DetailField label="Internal IP" value={m.internalIp as string} />
           <DetailField label="External IP" value={m.externalIp as string} />
+          <DetailField label="Age" value={formatAge(m.createdAt as string)} />
+          <DetailField label="Schedulable" value={m.unschedulable ? <Badge tone="warning">Cordoned</Badge> : 'Yes'} />
         </DetailSection>
         <DetailSection title="System">
           <DetailField label="OS" value={m.osImage as string} />
@@ -473,8 +593,30 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <DetailField label="Memory (allocatable / capacity)" value={`${bytesFromK8sQuantity(m.allocatableMemory as string)} / ${bytesFromK8sQuantity(m.capacityMemory as string)}`} />
           <DetailField label="Pods (allocatable / capacity)" value={`${m.allocatablePods ?? '—'} / ${m.capacityPods ?? '—'}`} />
         </DetailSection>
+        {conditions.length > 0 && (
+          <DetailSection title="Conditions">
+            {conditions.map(c => (
+              <DetailField key={c.type} label={c.type} value={
+                <span className="inline-flex items-center gap-1.5">
+                  <Badge tone={conditionTone(c.type, c.status)}>{c.status}</Badge>
+                  {c.reason && <span className="text-slate-400">{c.reason}</span>}
+                </span>
+              } />
+            ))}
+          </DetailSection>
+        )}
+        {taints.length > 0 && (
+          <DetailSection title="Taints">
+            {taints.map((t, i) => <DetailField key={i} label={t.key} value={<span className="font-mono text-[11px]">{t.value ? `${t.value}:` : ''}{t.effect}</span>} />)}
+          </DetailSection>
+        )}
+        {Object.keys(labels).length > 0 && (
+          <DetailSection title="Labels">
+            {Object.entries(labels).map(([k, v]) => <DetailField key={k} label={k} value={<span className="font-mono text-[11px]">{v}</span>} />)}
+          </DetailSection>
+        )}
         <RelatedList title="Pods on this node" items={podsHere} empty="No pods scheduled here." render={p => (
-          <RelatedRow key={p.id} resource={p} onClick={() => onNavigate(p)} right={<Badge>{p.state ?? p.status}</Badge>} />
+          <RelatedRow key={p.id} resource={p} onClick={() => onNavigate(p)} right={<Badge tone={podHealthTone(p)}>{p.state ?? p.status}</Badge>} />
         )} />
       </div>
     );
@@ -508,22 +650,42 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
       (p.resource_name ?? '').startsWith(`${r.resource_name}-`),
     );
     const namespaceObj = eksNamespaces.find(n => n.resource_name === namespace && n.relationships?.clusterName === clusterName);
+    const containers = (m.containers as K8sContainerSpecUI[] | undefined) ?? [];
+    const strategy = m.strategy as { type?: string; rollingUpdate?: { maxSurge?: string | number; maxUnavailable?: string | number } } | undefined;
+    const conditions = (m.conditions as { type: string; status: string; reason?: string; message?: string }[] | undefined) ?? [];
+    const unavailable = (m.unavailableReplicas as number) ?? 0;
     return (
       <div className="flex flex-col gap-4 text-sm">
         <DetailSection title="Overview">
           {clusterLink}
           <DetailField label="Namespace" value={namespaceObj ? <button onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
-          <DetailField label="Replicas (ready / desired)" value={`${(m.readyReplicas as number) ?? 0} / ${(m.replicas as number) ?? 0}`} />
-          <DetailField label="Available" value={m.availableReplicas as number} />
+          <DetailField label="Replicas (ready / desired)" value={
+            <span className="inline-flex items-center gap-1.5">
+              {`${(m.readyReplicas as number) ?? 0} / ${(m.replicas as number) ?? 0}`}
+              {unavailable > 0 && <Badge tone="critical">{unavailable} unavailable</Badge>}
+            </span>
+          } />
+          <DetailField label="Updated / Available" value={`${(m.updatedReplicas as number) ?? 0} / ${(m.availableReplicas as number) ?? 0}`} />
+          <DetailField label="Strategy" value={strategy?.type} />
+          {strategy?.rollingUpdate && <DetailField label="Rolling Update" value={`maxSurge ${strategy.rollingUpdate.maxSurge ?? '—'}, maxUnavailable ${strategy.rollingUpdate.maxUnavailable ?? '—'}`} />}
+          <DetailField label="Service Account" value={m.serviceAccountName as string} />
           <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
         </DetailSection>
-        {Array.isArray(m.images) && (m.images as string[]).length > 0 && (
-          <DetailSection title="Images">
-            {(m.images as string[]).map((img, i) => <DetailField key={i} label={`Container ${i + 1}`} value={<span className="font-mono text-[11px]">{img}</span>} />)}
+        {conditions.length > 0 && (
+          <DetailSection title="Conditions">
+            {conditions.map(c => (
+              <DetailField key={c.type} label={c.type} value={
+                <span className="inline-flex items-center gap-1.5">
+                  <Badge tone={conditionTone(c.type, c.status)}>{c.status}</Badge>
+                  {c.reason && <span className="text-slate-400">{c.reason}</span>}
+                </span>
+              } />
+            ))}
           </DetailSection>
         )}
+        {containers.map((c, i) => <ContainerSpecPanel key={i} container={c} />)}
         <RelatedList title="Pods" items={podsHere} empty="No pods matched by name — this is a name-prefix heuristic (no ReplicaSet scanner yet), so a pod from a very old rollout may not match." render={p => (
-          <RelatedRow key={p.id} resource={p} onClick={() => onNavigate(p)} right={<Badge>{p.state ?? p.status}</Badge>} />
+          <RelatedRow key={p.id} resource={p} onClick={() => onNavigate(p)} right={<Badge tone={podHealthTone(p)}>{p.state ?? p.status}</Badge>} />
         )} />
       </div>
     );
@@ -533,18 +695,61 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
     const namespace = m.namespace as string | undefined;
     const node = eksNodes.find(n => n.resource_name === m.nodeName && n.relationships?.clusterName === clusterName);
     const namespaceObj = eksNamespaces.find(n => n.resource_name === namespace && n.relationships?.clusterName === clusterName);
+    const containerStatuses = (m.containerStatuses as K8sContainerStatusUI[] | undefined) ?? [];
+    const conditions = (m.conditions as { type: string; status: string; reason?: string; message?: string }[] | undefined) ?? [];
+    const failing = containerStatuses.filter(cs => containerStateSummary(cs.state).tone === 'critical');
     return (
       <div className="flex flex-col gap-4 text-sm">
+        {(m.podReason || failing.length > 0) && (
+          <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-xs text-red-800 dark:text-red-300 flex flex-col gap-1">
+            {Boolean(m.podReason) && <div>⚠ Pod: {m.podReason as string}{m.podMessage ? ` — ${m.podMessage}` : ''}</div>}
+            {failing.map(cs => {
+              const s = containerStateSummary(cs.state);
+              return <div key={cs.name}>⚠ Container "{cs.name}": {s.label}{s.detail ? ` — ${s.detail}` : ''} ({cs.restartCount} restart{cs.restartCount === 1 ? '' : 's'})</div>;
+            })}
+          </div>
+        )}
         <DetailSection title="Overview">
-          <DetailField label="Status" value={<Badge>{r.state ?? r.status}</Badge>} />
+          <DetailField label="Status" value={<Badge tone={podHealthTone(r)}>{r.state ?? r.status}</Badge>} />
           {clusterLink}
           <DetailField label="Namespace" value={namespaceObj ? <button onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
           <DetailField label="Node" value={node ? <button onClick={() => onNavigate(node)} className="text-brand-600 dark:text-brand-400 hover:underline">{m.nodeName as string}</button> : (m.nodeName as string)} />
-          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+          <DetailField label="QoS Class" value={m.qosClass as string} />
+          <DetailField label="Pod IP" value={m.podIP as string} />
+          <DetailField label="Host IP" value={m.hostIP as string} />
+          <DetailField label="Restarts" value={m.restartCount as number} />
+          <DetailField label="Age" value={formatAge(m.createdAt as string)} />
         </DetailSection>
-        {Array.isArray(m.images) && (m.images as string[]).length > 0 && (
+        {containerStatuses.length > 0 && (
           <DetailSection title="Containers">
-            {(m.images as string[]).map((img, i) => <DetailField key={i} label={`Container ${i + 1}`} value={<span className="font-mono text-[11px]">{img}</span>} />)}
+            {containerStatuses.map(cs => {
+              const s = containerStateSummary(cs.state);
+              return (
+                <DetailField key={cs.name} label={cs.name} value={
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge tone={s.tone}>{s.label}</Badge>
+                    {cs.restartCount > 0 && <span className="text-slate-400">{cs.restartCount}× restart</span>}
+                  </span>
+                } />
+              );
+            })}
+          </DetailSection>
+        )}
+        {conditions.length > 0 && (
+          <DetailSection title="Conditions">
+            {conditions.map(c => (
+              <DetailField key={c.type} label={c.type} value={
+                <span className="inline-flex items-center gap-1.5">
+                  <Badge tone={conditionTone(c.type, c.status)}>{c.status}</Badge>
+                  {c.reason && <span className="text-slate-400">{c.reason}</span>}
+                </span>
+              } />
+            ))}
+          </DetailSection>
+        )}
+        {Array.isArray(m.images) && (m.images as string[]).length > 0 && (
+          <DetailSection title="Images">
+            {(m.images as string[]).map((img, i) => <DetailField key={i} label={containerStatuses[i]?.name ?? `Container ${i + 1}`} value={<span className="font-mono text-[11px]">{img}</span>} />)}
           </DetailSection>
         )}
         {r.tags && Object.keys(r.tags).length > 0 && (
