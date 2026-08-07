@@ -234,6 +234,9 @@ class ApiClient {
 
   getAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${id}/activity${qs(params)}`); }
   getAwsAccountsActivity(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/activity${qs(params)}`); }
+  getAccountCloudTrailEvents(id: string, params: { region?: string; attributeKey?: string; attributeValue?: string; from?: string; to?: string; nextToken?: string } = {}) {
+    return this.get<{ events: CloudTrailEvent[]; nextToken: string | null; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cloudtrail-events${qs(params)}`);
+  }
 
   async downloadAwsAccountsReport(kind: 'account-summary' | 'health' | 'permissions' | 'sync' | 'cost') {
     return this.downloadRaw('awsAccounts', `/api/aws-accounts/reports/${kind}`, `aws-accounts-${kind}.csv`);
@@ -707,6 +710,14 @@ export interface OverviewDashboard {
 }
 
 export interface ActivityEntry { id: string; action: string; targetType: string | null; targetId: string | null; metadata: Record<string, unknown>; occurredAt: string; actor: { email: string; name: string | null } | null }
+export interface CloudTrailEvent {
+  eventId: string; eventName: string; eventTime: string; eventSource: string;
+  username: string | null; userIdentityType: string | null; userIdentityArn: string | null;
+  sourceIpAddress: string | null; userAgent: string | null; awsRegion: string | null; readOnly: boolean | null;
+  errorCode: string | null; errorMessage: string | null;
+  resources: { resourceType?: string; resourceName?: string }[];
+  requestParameters: unknown; responseElements: unknown;
+}
 export interface Favorite { id: string; type: string; label: string; path: string; addedAt: string }
 export interface QuickAction { key: string; label: string; description: string; module: string; path: string; minRole: Role }
 
