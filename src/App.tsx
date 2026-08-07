@@ -59,6 +59,14 @@ function RequireBilling({ children }: { children: ReactNode }) {
   return isBillingEnabled() ? <>{children}</> : <Navigate to="/overview" replace />;
 }
 
+/** An already-signed-in user landing on /login, /signup, or /forgot-password (a stale bookmark, browser back button) goes straight into the app instead of being shown a form for a session they already have. */
+function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated) return <Navigate to="/overview" replace />;
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -74,9 +82,9 @@ export default function App() {
                     <Route path="/docs" element={<Docs />} />
                     <Route path="/privacy" element={<PrivacyPolicy />} />
                     <Route path="/terms" element={<TermsOfService />} />
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/signup" element={<Signup />} />
-                    <Route path="/forgot-password" element={<ForgotPassword />} />
+                    <Route path="/login" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
+                    <Route path="/signup" element={<RedirectIfAuthenticated><Signup /></RedirectIfAuthenticated>} />
+                    <Route path="/forgot-password" element={<RedirectIfAuthenticated><ForgotPassword /></RedirectIfAuthenticated>} />
 
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>
