@@ -1,0 +1,30 @@
+# Public marketing pages are open to crawl; everything past login is a
+# real product with per-user data, not content search engines should index.
+User-agent: *
+Allow: /$
+Allow: /pricing
+Allow: /docs
+Allow: /privacy
+Allow: /terms
+Allow: /login
+Allow: /signup
+Disallow: /overview
+Disallow: /cloud-accounts
+Disallow: /resources
+Disallow: /cost-management
+Disallow: /cost-optimization
+Disallow: /vulnerability-management
+Disallow: /clusters
+Disallow: /monitoring
+Disallow: /alerts
+Disallow: /issues
+Disallow: /reports
+Disallow: /users-groups
+Disallow: /organization
+Disallow: /settings
+Disallow: /custom-dashboards
+Disallow: /automation
+Disallow: /subscription
+Disallow: /billing
+
+Sitemap: https://frontend-7yo5yw7xca-uc.a.run.app/sitemap.xml

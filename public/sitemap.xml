@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Base URL is the current Cloud Run URL, not a final domain -- the domain
+  is still being finalized (see cloudops-frontend README). At cutover this
+  file only needs its <loc> hostnames swapped, same as robots.txt's Sitemap
+  line; nothing about the route list changes.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/pricing</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/docs</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/signup</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/login</loc><changefreq>monthly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/privacy</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+  <url><loc>https://frontend-7yo5yw7xca-uc.a.run.app/terms</loc><changefreq>yearly</changefreq><priority>0.2</priority></url>
+</urlset>
