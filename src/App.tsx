@@ -21,7 +21,9 @@ import { ResourcesCategory } from './pages/resources/ResourcesCategory';
 import { CostManagement } from './pages/CostManagement';
 import { CostOptimization } from './pages/CostOptimization';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
-import { Clusters } from './pages/Clusters';
+import { EksConsole } from './pages/EksConsole';
+import { GkeConsole } from './pages/GkeConsole';
+import { AksConsole } from './pages/AksConsole';
 import { Monitoring } from './pages/Monitoring';
 import { Alerts } from './pages/Alerts';
 import { Issues } from './pages/Issues';
@@ -111,7 +113,11 @@ export default function App() {
                           <Route path="/cost-management" element={<CostManagement />} />
                           <Route path="/cost-optimization" element={<CostOptimization />} />
                           <Route path="/vulnerability-management" element={<VulnerabilityManagement />} />
-                          <Route path="/clusters" element={<Clusters />} />
+                          {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. */}
+                          <Route path="/clusters" element={<Navigate to="/clusters/aws" replace />} />
+                          <Route path="/clusters/aws" element={<EksConsole />} />
+                          <Route path="/clusters/gcp" element={<GkeConsole />} />
+                          <Route path="/clusters/azure" element={<AksConsole />} />
                           <Route path="/monitoring" element={<Monitoring />} />
                           <Route path="/alerts" element={<Alerts />} />
                           <Route path="/issues" element={<Issues />} />

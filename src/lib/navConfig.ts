@@ -49,7 +49,9 @@ const RESOURCES = '/resources';
 const COST = '/cost-management';
 const OPT = '/cost-optimization';
 const VULN = '/vulnerability-management';
-const CLUSTERS = '/clusters';
+const EKS_CONSOLE = '/clusters/aws';
+const GKE_CONSOLE = '/clusters/gcp';
+const AKS_CONSOLE = '/clusters/azure';
 const MON = '/monitoring';
 const ALERTS = '/alerts';
 const ISSUES = '/issues';
@@ -197,28 +199,54 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
     ],
   },
+  // Kubernetes is three independent provider consoles, not one page with
+  // provider-filtered tabs — each cloud's Kubernetes offering has its own
+  // capabilities (EKS's IAM/nodegroups vs. GKE's Autopilot/release channels
+  // vs. AKS's Azure AD integration), and a real enterprise multi-cloud tool
+  // presents them separately rather than merged behind one generic view.
+  // See EksConsole.tsx/GkeConsole.tsx/AksConsole.tsx.
   {
-    label: 'Containers',
+    label: 'AWS EKS',
     icon: '⬡',
-    to: CLUSTERS,
+    to: EKS_CONSOLE,
     children: [
-      { label: 'ECS Clusters', to: CLUSTERS, real: true },
-      { label: 'ECS Services', to: tabLink(CLUSTERS, 'ECS Services'), real: true },
-      { label: 'ECS Tasks', to: tabLink(CLUSTERS, 'ECS Tasks'), real: true },
-      { label: 'EKS Clusters', to: tabLink(CLUSTERS, 'EKS Clusters'), real: true },
-      { label: 'Nodes', to: tabLink(CLUSTERS, 'Nodes'), real: true },
-      { label: 'Cloud Run', to: tabLink(CLUSTERS, 'Cloud Run'), real: true },
-      { label: 'Artifact Registry', to: tabLink(CLUSTERS, 'Artifact Registry'), real: true },
-      { label: 'GKE Clusters', to: tabLink(CLUSTERS, 'GKE Clusters'), real: true },
-      // Deployments/Pods merge AWS EKS + GCP GKE data (both have real
-      // Kubernetes-API-backed scanners now). Namespaces/Helm Releases still
-      // have no scanner for either provider, so those tabs show an honest
-      // "not integrated" panel instead of a table.
-      { label: 'Deployments', to: tabLink(CLUSTERS, 'Deployments'), real: true },
-      { label: 'Pods', to: tabLink(CLUSTERS, 'Pods'), real: true },
-      { label: 'Namespaces', to: tabLink(CLUSTERS, 'Namespaces'), real: true },
-      { label: 'Helm Releases', to: tabLink(CLUSTERS, 'Helm Releases'), real: true },
+      { label: 'EKS Clusters', to: EKS_CONSOLE, real: true },
+      { label: 'Nodes', to: tabLink(EKS_CONSOLE, 'Nodes'), real: true },
+      { label: 'Namespaces', to: tabLink(EKS_CONSOLE, 'Namespaces'), real: true },
+      { label: 'Deployments', to: tabLink(EKS_CONSOLE, 'Deployments'), real: true },
+      { label: 'Pods', to: tabLink(EKS_CONSOLE, 'Pods'), real: true },
+      { label: 'Helm Releases', to: tabLink(EKS_CONSOLE, 'Helm Releases'), real: true },
+      { label: 'ECS Clusters', to: tabLink(EKS_CONSOLE, 'ECS Clusters'), real: true },
+      { label: 'ECS Services', to: tabLink(EKS_CONSOLE, 'ECS Services'), real: true },
+      { label: 'ECS Tasks', to: tabLink(EKS_CONSOLE, 'ECS Tasks'), real: true },
     ],
+  },
+  {
+    label: 'GCP GKE',
+    icon: '⬢',
+    to: GKE_CONSOLE,
+    children: [
+      { label: 'GKE Clusters', to: GKE_CONSOLE, real: true },
+      // Deployments/Pods have a real GKE scanner, but it's shallower than
+      // EKS's and self-documented as unverified against a live cluster —
+      // see the Phase 1 note in GkeConsole.tsx. No namespace/node scanner
+      // for GKE yet, so those tabs don't exist here (unlike the EKS console).
+      { label: 'Deployments', to: tabLink(GKE_CONSOLE, 'Deployments'), real: true },
+      { label: 'Pods', to: tabLink(GKE_CONSOLE, 'Pods'), real: true },
+      { label: 'Helm Releases', to: tabLink(GKE_CONSOLE, 'Helm Releases'), real: true },
+      { label: 'Cloud Run', to: tabLink(GKE_CONSOLE, 'Cloud Run'), real: true },
+      { label: 'Artifact Registry', to: tabLink(GKE_CONSOLE, 'Artifact Registry'), real: true },
+    ],
+  },
+  {
+    label: 'Azure AKS',
+    icon: '◈',
+    to: AKS_CONSOLE,
+    // No Azure connector, schema support, or scanner exists yet — every
+    // child here would be a fake link, so there are no children at all
+    // rather than a list of `real: false` placeholders. The console page
+    // itself explains the roadmap status.
+    children: [],
   },
   {
     label: 'Monitoring',
