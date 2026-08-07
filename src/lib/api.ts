@@ -100,7 +100,13 @@ class ApiClient {
   }
 
   private get<T>(service: Service, path: string) { return this.request<T>(service, path, { method: 'GET' }); }
-  private post<T>(service: Service, path: string, body?: unknown) { return this.request<T>(service, path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }); }
+  private post<T>(service: Service, path: string, body?: unknown, headers?: Record<string, string>) {
+    return this.request<T>(service, path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined, headers });
+  }
+  /** Generates a fresh Idempotency-Key per call — pass the SAME key across a retry (e.g. store it in component state across a failed attempt) if you want the backend to actually dedupe; a brand new key every call defeats the point. */
+  private postIdempotent<T>(service: Service, path: string, body: unknown, idempotencyKey: string) {
+    return this.post<T>(service, path, body, { 'Idempotency-Key': idempotencyKey });
+  }
   private put<T>(service: Service, path: string, body?: unknown) { return this.request<T>(service, path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined }); }
   private patch<T>(service: Service, path: string, body?: unknown) { return this.request<T>(service, path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined }); }
   private delete<T>(service: Service, path: string) { return this.request<T>(service, path, { method: 'DELETE' }); }
@@ -616,12 +622,13 @@ class ApiClient {
   getBillingPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/plans'); }
   getBillingAddons() { return this.get<{ items: BillingAddon[] }>('billing', '/api/billing/addons'); }
   getCurrentSubscription() { return this.get<{ subscription: BillingSubscription | null; plan: BillingPlan | null }>('billing', '/api/billing/subscriptions/current'); }
-  createSubscription(data: { planKey: string; billingInterval: 'monthly' | 'annual'; successPath?: string; cancelPath?: string }) {
-    return this.post<{ subscription: BillingSubscription | null; checkoutUrl: string | null }>('billing', '/api/billing/subscriptions', data);
+  /** idempotencyKey: pass the same value across a retry of the *same* attempt (network error, timeout) so the backend replays its original result instead of risking a second checkout session; omit it and a fresh one is generated, appropriate for a genuinely new attempt. */
+  createSubscription(data: { planKey: string; billingInterval: 'monthly' | 'annual'; successPath?: string; cancelPath?: string }, idempotencyKey = crypto.randomUUID()) {
+    return this.postIdempotent<{ subscription: BillingSubscription | null; checkoutUrl: string | null }>('billing', '/api/billing/subscriptions', data, idempotencyKey);
   }
   getBillingPortalUrl(returnPath?: string) { return this.post<{ portalUrl: string }>('billing', '/api/billing/subscriptions/portal', { returnPath }); }
-  mockCompleteCheckout(data: { planKey: string; billingInterval: 'monthly' | 'annual'; outcome: 'success' | 'failure' }) {
-    return this.post<{ subscription: BillingSubscription | null; activated: boolean }>('billing', '/api/billing/subscriptions/mock-complete', data);
+  mockCompleteCheckout(data: { planKey: string; billingInterval: 'monthly' | 'annual'; outcome: 'success' | 'failure' }, idempotencyKey = crypto.randomUUID()) {
+    return this.postIdempotent<{ subscription: BillingSubscription | null; activated: boolean }>('billing', '/api/billing/subscriptions/mock-complete', data, idempotencyKey);
   }
   getBillingInvoices(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<BillingInvoice>>('billing', `/api/billing/invoices${qs(params)}`); }
   getBillingUsage() { return this.get<{ metrics: Record<string, BillingUsageMetric>; planKey: string | null }>('billing', '/api/billing/usage'); }
