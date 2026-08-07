@@ -841,7 +841,10 @@ export interface VulnerabilityFinding {
   compliance_frameworks: string[]; status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null; resource_arn: string | null;
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
 }
-export interface ComplianceBenchmark { id: string; connection_id: string; framework: 'cis_aws_foundations' | 'pci_dss' | 'iso_27001'; passed_checks: number; total_checks: number; last_evaluated_at: string; passRate: number }
+// passRate is a 0-1 fraction (not a percentage) and null when total_checks
+// is 0 (nothing evaluated yet, not the same as a 0% pass rate) - multiply by
+// 100 and null-check at render time, never call .toFixed() on it directly.
+export interface ComplianceBenchmark { id: string; connection_id: string; framework: 'cis_aws_foundations' | 'pci_dss' | 'iso_27001'; passed_checks: number; total_checks: number; last_evaluated_at: string; passRate: number | null }
 
 export interface AlertRow { id: string; org_id: string; connection_id: string | null; resource_id: string | null; rule_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low'; alert_name: string; status: 'open' | 'acknowledged' | 'in_progress' | 'resolved'; triggered_at: string; acknowledged_at: string | null; resolved_at: string | null; metadata: Record<string, unknown> }
 export interface AlertRule { id: string; org_id: string; name: string; condition: unknown; severity: string; notification_channels: unknown[]; enabled: boolean; created_at: string }
