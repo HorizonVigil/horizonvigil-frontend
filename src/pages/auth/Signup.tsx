@@ -1,16 +1,29 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../lib/auth';
+import { useAuth, type OAuthProvider } from '../../lib/auth';
 import { AuthLayout, FormField } from './AuthLayout';
+import { OAuthButtons } from './OAuthButtons';
 
 export function Signup() {
-  const { signUp } = useAuth();
+  const { signUp, signInWithOAuth } = useAuth();
   const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
+
+  async function handleOAuth(provider: OAuthProvider) {
+    setError(null);
+    setOauthLoading(provider);
+    try {
+      await signInWithOAuth(provider);
+    } catch (err) {
+      setError((err as Error).message || `Could not sign up with ${provider}`);
+      setOauthLoading(null);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +56,7 @@ export function Signup() {
       <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">
         Already have an account? <Link to="/login" className="hover:underline text-brand-600 dark:text-brand-400">Sign in</Link>
       </p>
+      <OAuthButtons loadingProvider={oauthLoading} onSelect={handleOAuth} />
     </AuthLayout>
   );
 }

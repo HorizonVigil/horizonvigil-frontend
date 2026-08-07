@@ -11,6 +11,7 @@ import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
 import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
+import { MfaChallenge } from './pages/auth/MfaChallenge';
 import { Overview } from './pages/Overview';
 import { CloudAccounts } from './pages/CloudAccounts';
 import { CloudAccountDetail } from './pages/CloudAccountDetail';
@@ -87,6 +88,10 @@ export default function App() {
                     <Route path="/login" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
                     <Route path="/signup" element={<RedirectIfAuthenticated><Signup /></RedirectIfAuthenticated>} />
                     <Route path="/forgot-password" element={<RedirectIfAuthenticated><ForgotPassword /></RedirectIfAuthenticated>} />
+                    {/* Not behind RequireAuth/RequireOrg on purpose — reached mid-login,
+                        with a real aal1 session that hasn't reached aal2 yet. Fetching
+                        org-scoped data before that step-up completes isn't appropriate. */}
+                    <Route path="/login/mfa" element={<MfaChallenge />} />
 
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>

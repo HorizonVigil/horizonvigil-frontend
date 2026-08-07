@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Badge } from '../components/Badge';
+import { MfaSettings } from '../components/MfaSettings';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { useOrg } from '../lib/orgContext';
@@ -296,6 +297,8 @@ export function Settings() {
                 <button onClick={toggleTheme} className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300">{theme === 'dark' ? 'Dark' : 'Light'} — switch</button>
               </div>
             </div>
+
+            <MfaSettings />
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Session</h3>

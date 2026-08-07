@@ -2,6 +2,22 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
+export type OAuthProvider = 'google' | 'azure' | 'github';
+
+/**
+ * signIn resolves as soon as the password itself is correct, even for a
+ * user enrolled in MFA -- Supabase issues a real session at 'aal1'
+ * (password-only) and expects the caller to separately check whether
+ * stepping up to 'aal2' (password + TOTP) is required before treating the
+ * user as fully signed in. Login.tsx checks this and routes to the MFA
+ * challenge screen instead of the app when it's true.
+ */
+export async function mfaStepUpRequired(): Promise<boolean> {
+  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (error) throw error;
+  return data.nextLevel === 'aal2' && data.nextLevel !== data.currentLevel;
+}
+
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
@@ -10,6 +26,15 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  /**
+   * Calls Supabase's real OAuth flow -- this redirects to the provider and
+   * back, it isn't simulated. It only succeeds end-to-end once the
+   * corresponding provider is turned on with real client credentials under
+   * Authentication > Providers in the Supabase dashboard; until then,
+   * Supabase itself returns a real "provider is not enabled" error rather
+   * than this silently pretending to work.
+   */
+  signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -69,8 +94,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: `${window.location.origin}/overview` },
+    });
+    if (error) throw error;
+    // On success the browser navigates away to the provider immediately --
+    // there's no local state to set here, execution doesn't continue.
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword, signInWithOAuth }}>
       {children}
     </AuthContext.Provider>
   );
