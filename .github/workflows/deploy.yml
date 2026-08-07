@@ -89,6 +89,7 @@ jobs:
             --build-arg VITE_REPORTS_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
             --build-arg VITE_CUSTOM_DASHBOARDS_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
             --build-arg VITE_OVERVIEW_API_URL="https://reports-7yo5yw7xca-uc.a.run.app" \
+            --build-arg VITE_BILLING_API_URL="https://billing-7yo5yw7xca-uc.a.run.app" \
             -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
