@@ -127,10 +127,10 @@ class ApiClient {
   // ── overview-api ─────────────────────────────────────────────────────────
 
   getOverviewDashboard() { return this.get<OverviewDashboard>('overview', '/api/overview/dashboard'); }
-  getOverviewResources() { return this.get<{ total: number; byCategory: Record<string, number> }>('overview', '/api/overview/resources'); }
-  getOverviewCost() { return this.get<{ monthToDate: number; currency: string }>('overview', '/api/overview/cost'); }
-  getOverviewSecurity() { return this.get<{ openFindings: number; bySeverity: Record<string, number> }>('overview', '/api/overview/security'); }
-  getOverviewMonitoring() { return this.get<{ totalAlarms: number; inAlarm: number }>('overview', '/api/overview/monitoring'); }
+  getOverviewResources(connectionIds?: string[]) { return this.get<{ total: number; byCategory: Record<string, number> }>('overview', `/api/overview/resources${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  getOverviewCost(connectionIds?: string[]) { return this.get<{ monthToDate: number; currency: string }>('overview', `/api/overview/cost${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  getOverviewSecurity(connectionIds?: string[]) { return this.get<{ openFindings: number; bySeverity: Record<string, number> }>('overview', `/api/overview/security${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  getOverviewMonitoring(connectionIds?: string[]) { return this.get<{ totalAlarms: number; inAlarm: number }>('overview', `/api/overview/monitoring${qs({ connection_ids: connectionIds?.join(',') })}`); }
   getRecentActivity(page = 1, limit = 8) { return this.get<Paginated<ActivityEntry>>('overview', `/api/overview/activity${qs({ page, limit })}`); }
   getFavorites() { return this.get<{ favorites: Favorite[] }>('overview', '/api/overview/favorites'); }
   addFavorite(data: { type: string; label: string; path: string }) { return this.post<{ favorite: Favorite }>('overview', '/api/overview/favorites', data); }
@@ -355,8 +355,8 @@ class ApiClient {
   getCostAllocation(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation>('costManagement', `/api/cost-management/allocation${qs(params)}`); }
   getChargeback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { currency: string; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/chargeback${qs(params)}`); }
   getShowback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { billable: false; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/showback${qs(params)}`); }
-  getCostAnalytics(params: { from?: string; to?: string } = {}) {
-    return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs(params)}`);
+  getCostAnalytics(params: { from?: string; to?: string; connectionIds?: string[] } = {}) {
+    return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`);
   }
   getBudgets(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<Budget>>('costManagement', `/api/cost-management/budgets${qs(params)}`); }
   createBudget(data: { scopeType: BudgetScopeType; scopeId: string; name: string; monthlyLimit: number; alertThresholds?: number[] }) {
@@ -559,6 +559,7 @@ class ApiClient {
   deleteDashboard(id: string) { return this.delete<{ deleted: string }>('customDashboards', `/api/custom-dashboards/dashboards/${id}`); }
   shareDashboard(id: string, share: boolean) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}/share`, { share }); }
   useTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/templates/${id}/use`); }
+  saveAsTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}/save-as-template`); }
   getWidgetLibrary(category?: string) { return this.get<{ widgets: DashboardWidgetCatalogEntry[] }>('customDashboards', `/api/custom-dashboards/widget-library${qs({ category })}`); }
 
   // ── automation-api ───────────────────────────────────────────────────────
