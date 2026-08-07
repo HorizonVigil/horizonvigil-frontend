@@ -624,6 +624,8 @@ class ApiClient {
   getBillingUsage() { return this.get<{ metrics: Record<string, BillingUsageMetric>; planKey: string | null }>('billing', '/api/billing/usage'); }
   validateCoupon(code: string, planKey?: string) { return this.post<{ valid: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/validate', { code, planKey }); }
   redeemCoupon(code: string, planKey?: string) { return this.post<{ redeemed: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/redeem', { code, planKey }); }
+  getReferrals() { return this.get<{ code: string; redemptions: BillingReferral[]; totalCreditedCents: number; creditPerReferralCents: number }>('billing', '/api/billing/referrals'); }
+  redeemReferral(code: string) { return this.post<{ redeemed: true; creditedCents: number }>('billing', '/api/billing/referrals/redeem', { code }); }
 
   // ── billing admin console (platform staff only — PLATFORM_ADMIN_EMAILS allowlist, enforced server-side) ──
   getAdminPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/admin/plans'); }
@@ -670,6 +672,7 @@ export interface BillingInvoice {
 }
 export interface BillingUsageMetric { used: number | null; included: number | null; tracked: boolean; reason?: string }
 export interface BillingCoupon { id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number }
+export interface BillingReferral { id: string; referred_org_id: string | null; referral_code: string; status: 'pending' | 'credited' | 'expired'; discount_credited_cents: number; created_at: string }
 export interface AdminCoupon {
   id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number; currency: string | null;
   max_redemptions: number | null; times_redeemed: number; valid_from: string; valid_until: string | null; is_active: boolean;
