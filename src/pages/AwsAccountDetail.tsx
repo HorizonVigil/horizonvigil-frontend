@@ -13,7 +13,7 @@ import {
   api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
   type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry, type Favorite,
-  type RemediationActionType,
+  type RemediationActionType, type Member,
 } from '../lib/api';
 
 /** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
@@ -48,7 +48,7 @@ function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Activity'] as const;
+const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Account Audit'] as const;
 type Tab = typeof TABS[number];
 
 type AccountCredentials = {
@@ -81,6 +81,12 @@ export function AwsAccountDetail() {
   const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [auditAction, setAuditAction] = useState('');
+  const [auditActorId, setAuditActorId] = useState('');
+  const [auditFrom, setAuditFrom] = useState('');
+  const [auditTo, setAuditTo] = useState('');
+  const [auditMembers, setAuditMembers] = useState<Member[]>([]);
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
   const [resourceSearch, setResourceSearch] = useState('');
   const [resourceCategory, setResourceCategory] = useState('');
   const [resourceRegion, setResourceRegion] = useState('');
@@ -133,6 +139,17 @@ export function AwsAccountDetail() {
     setPermissionChecks(res.checks);
   }, [id]);
 
+  const loadAudit = useCallback(() => {
+    if (!id) return;
+    void api.getAccountActivity(id, {
+      limit: 100,
+      action: auditAction || undefined,
+      actorId: auditActorId || undefined,
+      from: auditFrom || undefined,
+      to: auditTo || undefined,
+    }).then(r => setActivity(r.items));
+  }, [id, auditAction, auditActorId, auditFrom, auditTo]);
+
   // Each secondary tab's data is only fetched once you actually open it.
   useEffect(() => {
     if (!id) return;
@@ -141,8 +158,14 @@ export function AwsAccountDetail() {
     else if (tab === 'Regions') void api.getAccountRegions(id).then(r => setRegions(r.regions));
     else if (tab === 'Sync History') void api.getAccountSyncHistory(id).then(r => setSyncRuns(r.runs));
     else if (tab === 'Recommendations') void api.getAccountRecommendations(id).then(r => setRecommendations(r.recommendations));
-    else if (tab === 'Activity') void api.getAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
+    else if (tab === 'Account Audit') { loadAudit(); void api.getMembers().then(r => setAuditMembers(r.members)); }
   }, [tab, id, loadPermissions]);
+
+  // Re-query (server-side) whenever a filter changes, while the tab is open.
+  useEffect(() => {
+    if (tab === 'Account Audit') loadAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditAction, auditActorId, auditFrom, auditTo]);
 
   async function syncCost() {
     if (!id) return;
@@ -360,6 +383,9 @@ export function AwsAccountDetail() {
                     ))}
                   </ul>
                   <p className="text-xs text-slate-400">Service/region-level cost from Cost Explorer, not per-resource.</p>
+                  {totalCost === 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">This is real AWS Cost Explorer data — it's genuinely $0 for the period synced. Cost Explorer can lag ~24–48h behind very recent usage, and this is a different figure from Cost Optimization's rightsizing "potential savings" estimate, which is based on list pricing, not your actual bill.</p>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-slate-400">No cost data yet for this account.</p>
@@ -464,6 +490,10 @@ export function AwsAccountDetail() {
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Month to Date</h3>
               <div className="text-2xl font-semibold text-slate-900 dark:text-white tabular-nums">{accountCost ? money(accountCost.monthToDate) : '—'}</div>
+              <p className="text-xs text-slate-400 mt-2">Real AWS Cost Explorer billing data. Different from Cost Optimization's "potential savings" figures, which are list-price estimates, not billed spend.</p>
+              {accountCost && accountCost.monthToDate === 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Synced successfully — genuinely $0 for this period. Cost Explorer can lag ~24–48h behind very recent usage.</p>
+              )}
             </div>
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">By Service</h3>
@@ -585,17 +615,58 @@ export function AwsAccountDetail() {
         </div>
       )}
 
-      {tab === 'Activity' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {activity.map(entry => (
-              <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
-                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-              </li>
-            ))}
-            {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this account yet.</li>}
-          </ul>
+      {tab === 'Account Audit' && (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+            This is CloudOps360's own action log for this account — who ran a sync, connected/updated credentials, generated recommendations, and similar, all through CloudOps360 itself. It does <span className="font-medium">not</span> include actions taken directly in AWS (Console, CLI, SDK) — that would require ingesting AWS CloudTrail, which isn't built yet.
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <input
+              type="text" placeholder="Search action…" value={auditAction} onChange={e => setAuditAction(e.target.value)}
+              className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm w-48"
+            />
+            <select value={auditActorId} onChange={e => setAuditActorId(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm">
+              <option value="">All users</option>
+              {auditMembers.map(m => <option key={m.userId} value={m.userId}>{m.fullName ?? m.email ?? m.userId}</option>)}
+            </select>
+            <input type="date" value={auditFrom} onChange={e => setAuditFrom(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
+            <span className="text-slate-400 text-sm">to</span>
+            <input type="date" value={auditTo} onChange={e => setAuditTo(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
+            {(auditAction || auditActorId || auditFrom || auditTo) && (
+              <button onClick={() => { setAuditAction(''); setAuditActorId(''); setAuditFrom(''); setAuditTo(''); }} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                Clear filters
+              </button>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {activity.map(entry => {
+                const expanded = expandedAuditId === entry.id;
+                const hasDetail = Object.keys(entry.metadata ?? {}).length > 0;
+                return (
+                  <li key={entry.id}>
+                    <button
+                      onClick={() => hasDetail && setExpandedAuditId(expanded ? null : entry.id)}
+                      className={`w-full px-3 py-2.5 flex justify-between items-center gap-3 text-sm text-left ${hasDetail ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60' : 'cursor-default'}`}
+                    >
+                      <span className="text-slate-700 dark:text-slate-200">
+                        {entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span>
+                      </span>
+                      <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                    </button>
+                    {expanded && (
+                      <pre className="text-xs bg-slate-50 dark:bg-slate-800 mx-3 mb-3 rounded p-2 overflow-x-auto">{JSON.stringify(entry.metadata, null, 2)}</pre>
+                    )}
+                  </li>
+                );
+              })}
+              {activity.length === 0 && (
+                <li className="px-3 py-8 text-center text-slate-400 text-sm">
+                  {auditAction || auditActorId || auditFrom || auditTo ? 'No activity matches these filters.' : 'No activity recorded for this account yet.'}
+                </li>
+              )}
+            </ul>
+          </div>
         </div>
       )}
       {confirmDialog}

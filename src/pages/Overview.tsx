@@ -97,7 +97,7 @@ export function Overview() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="AWS Accounts" value={String(dashboard?.connections.total ?? 0)} caption={dashboard?.connections.error ? `${dashboard.connections.error} need attention` : undefined} />
         <StatCard label="Total Resources" value={(dashboard?.resources.total ?? 0).toLocaleString()} />
-        <StatCard label="Cost (MTD)" value={money(dashboard?.cost.monthToDate ?? 0)} />
+        <StatCard label="Cost (MTD)" value={money(dashboard?.cost.monthToDate ?? 0)} caption="real Cost Explorer spend" />
         <StatCard label="Forecasted Cost" value={forecast !== null ? money(forecast) : '—'} caption="linear projection" />
       </div>
 

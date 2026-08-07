@@ -189,11 +189,17 @@ export function CostManagement() {
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} />
+        <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} caption="real AWS Cost Explorer spend" />
         <StatCard label="Forecasted Cost" value={money(forecast?.projectedTotal ?? 0)} caption="Forecast (linear estimate)" />
         <StatCard label="Avg Daily Cost" value={money(avgDailyCost)} caption="selected range" />
         <StatCard label="Active Budgets" value={String(budgets.length)} />
       </div>
+
+      {byServiceEntries.length > 0 && totalCost === 0 && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 mb-4">
+          This is real, synced AWS Cost Explorer data — it's genuinely $0 for the selected range (common for a new or low-usage account; Cost Explorer can also lag ~24–48h behind very recent usage). This is a different metric from Cost Optimization's "potential savings," which are list-price rightsizing estimates, not billed spend — the two can legitimately disagree.
+        </div>
+      )}
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TABS.map(t => (
