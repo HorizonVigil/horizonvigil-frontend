@@ -24,7 +24,7 @@
  * per-module breadcrumb/quick-nav that wants the same list.
  */
 
-import { isBillingEnabled } from './api';
+import { isBillingEnabled } from './featureFlags';
 
 export interface NavChild {
   label: string;

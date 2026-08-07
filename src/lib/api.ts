@@ -9,10 +9,7 @@ type Service =
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
   | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing';
 
-/** Unset in the prod build on purpose — billing is a test-env-only feature for now (see cloudops-billing's README). Nav/routes check this before ever rendering anything that would call it. */
-export function isBillingEnabled(): boolean {
-  return Boolean(import.meta.env.VITE_BILLING_API_URL);
-}
+export { isBillingEnabled } from './featureFlags';
 
 const SERVICE_URLS: Record<Service, string> = {
   overview: import.meta.env.VITE_OVERVIEW_API_URL || `https://cloudops360-1-overview-api.${SUBDOMAIN}`,

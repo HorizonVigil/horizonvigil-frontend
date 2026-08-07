@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { AuthProvider } from './lib/auth';
+import { AuthProvider, useAuth } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import { OrgProvider } from './lib/orgContext';
 import { FilterProvider } from './lib/filterContext';
@@ -33,7 +33,20 @@ import { Automation } from './pages/Automation';
 import { Subscription } from './pages/Subscription';
 import { BillingSuccess } from './pages/BillingSuccess';
 import { BillingCanceled } from './pages/BillingCanceled';
-import { isBillingEnabled } from './lib/api';
+import { isBillingEnabled } from './lib/featureFlags';
+import { MarketingHome } from './pages/marketing/Home';
+import { Pricing } from './pages/marketing/Pricing';
+import { PrivacyPolicy } from './pages/marketing/PrivacyPolicy';
+import { TermsOfService } from './pages/marketing/TermsOfService';
+import { Docs } from './pages/marketing/Docs';
+
+/** "/" is the public marketing homepage for logged-out visitors, and a straight redirect into the app for everyone else — never a login wall. */
+function RootRoute() {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated) return <Navigate to="/overview" replace />;
+  return <MarketingHome />;
+}
 
 /** Preserves :id across a route rename — /aws-accounts/:id and /gcp-projects/:id both used to be real routes (bookmarks, stored Favorites) before Cloud Accounts and GCP Projects merged into one unified list+detail. */
 function RedirectToAccountDetail() {
@@ -56,6 +69,11 @@ export default function App() {
               <SyncProvider>
                 <ToastProvider>
                   <Routes>
+                    <Route path="/" element={<RootRoute />} />
+                    <Route path="/pricing" element={<Pricing />} />
+                    <Route path="/docs" element={<Docs />} />
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/terms" element={<TermsOfService />} />
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
                     <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -63,7 +81,6 @@ export default function App() {
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>
                         <Route element={<Layout />}>
-                          <Route path="/" element={<Navigate to="/overview" replace />} />
                           <Route path="/overview" element={<Overview />} />
                           <Route path="/cloud-accounts" element={<CloudAccounts />} />
                           <Route path="/cloud-accounts/:id" element={<CloudAccountDetail />} />
@@ -97,7 +114,7 @@ export default function App() {
                       </Route>
                     </Route>
 
-                    <Route path="*" element={<Navigate to="/overview" replace />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </ToastProvider>
               </SyncProvider>
