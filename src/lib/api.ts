@@ -624,6 +624,20 @@ class ApiClient {
   getBillingUsage() { return this.get<{ metrics: Record<string, BillingUsageMetric>; planKey: string | null }>('billing', '/api/billing/usage'); }
   validateCoupon(code: string, planKey?: string) { return this.post<{ valid: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/validate', { code, planKey }); }
   redeemCoupon(code: string, planKey?: string) { return this.post<{ redeemed: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/redeem', { code, planKey }); }
+
+  // ── billing admin console (platform staff only — PLATFORM_ADMIN_EMAILS allowlist, enforced server-side) ──
+  getAdminPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/admin/plans'); }
+  updateAdminPlan(id: string, data: Partial<BillingPlan>) { return this.put<BillingPlan>('billing', `/api/billing/admin/plans/${id}`, data); }
+  archiveAdminPlan(id: string) { return this.post<BillingPlan>('billing', `/api/billing/admin/plans/${id}/archive`, {}); }
+  getAdminCoupons() { return this.get<{ items: AdminCoupon[] }>('billing', '/api/billing/admin/coupons'); }
+  createAdminCoupon(data: { code: string; discount_type: 'percent' | 'fixed'; discount_value: number; max_redemptions?: number | null; valid_until?: string | null }) {
+    return this.post<AdminCoupon>('billing', '/api/billing/admin/coupons', data);
+  }
+  getAdminEnterpriseContracts() { return this.get<{ items: EnterpriseContract[] }>('billing', '/api/billing/admin/enterprise-contracts'); }
+  createAdminEnterpriseContract(data: { org_id: string; contract_number: string; annual_value_cents: number; start_date: string; end_date: string }) {
+    return this.post<EnterpriseContract>('billing', '/api/billing/admin/enterprise-contracts', data);
+  }
+  getAdminRevenue() { return this.get<AdminRevenue>('billing', '/api/billing/admin/revenue'); }
 }
 
 export const api = new ApiClient();
@@ -656,6 +670,17 @@ export interface BillingInvoice {
 }
 export interface BillingUsageMetric { used: number | null; included: number | null; tracked: boolean; reason?: string }
 export interface BillingCoupon { id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number }
+export interface AdminCoupon {
+  id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number; currency: string | null;
+  max_redemptions: number | null; times_redeemed: number; valid_from: string; valid_until: string | null; is_active: boolean;
+}
+export interface EnterpriseContract {
+  id: string; org_id: string; contract_number: string; annual_value_cents: number; start_date: string; end_date: string; created_at: string;
+}
+export interface AdminRevenue {
+  mrrCents: number; arrCents: number; activeCustomers: number; trialCustomers: number; paidCustomers: number;
+  conversionRate: number; churnRateLast30d: number; totalSubscriptionsEver: number;
+}
 
 export interface OverviewDashboard {
   connections: { total: number; connected: number; error: number; pending: number; disconnected: number };
