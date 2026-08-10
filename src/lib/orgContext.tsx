@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { api, type OrganizationRow, type FolderRow, type ProjectRow } from './api';
+import { api, type OrganizationRow, type FolderRow, type ProjectRow, type MenuPermissionLevel } from './api';
 import { useAuth } from './auth';
 
 export type ScopeType = 'org' | 'folder' | 'project';
@@ -11,6 +11,8 @@ interface OrgContextType {
   folders: FolderRow[];
   projects: ProjectRow[];
   scope: Scope | null;
+  /** Effective per-menu permission level (explicit override or role-derived default) — see rbac.ts's getEffectiveMenuPermissions. Null while loading; navConfig's canSee treats null as "not yet known" and falls back to role-only, same as before this existed. */
+  menuPermissions: Record<string, MenuPermissionLevel> | null;
   isLoading: boolean;
   setCurrentOrg: (org: OrganizationRow) => void;
   setScope: (scope: Scope | null) => void;
@@ -27,6 +29,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [scope, setScope] = useState<Scope | null>(null);
+  const [menuPermissions, setMenuPermissions] = useState<Record<string, MenuPermissionLevel> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -42,15 +45,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       if (active) {
         api.setCurrentOrgId(active.id);
         setCurrentOrgState(active);
-        const [{ folders: f }, { projects: p }] = await Promise.all([api.getFolders(), api.getProjects()]);
+        const [{ folders: f }, { projects: p }, { permissions }] = await Promise.all([
+          api.getFolders(), api.getProjects(), api.getEffectiveMenuPermissions(),
+        ]);
         setFolders(f);
         setProjects(p);
+        setMenuPermissions(permissions);
         setScope({ type: 'org', id: active.id, name: active.name });
       } else {
         api.setCurrentOrgId(null);
         setCurrentOrgState(null);
         setFolders([]);
         setProjects([]);
+        setMenuPermissions(null);
         setScope(null);
       }
     } finally {
@@ -74,7 +81,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [setCurrentOrg]);
 
   return (
-    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, isLoading, setCurrentOrg, setScope, refresh, createOrg }}>
+    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, menuPermissions, isLoading, setCurrentOrg, setScope, refresh, createOrg }}>
       {children}
     </OrgContext.Provider>
   );

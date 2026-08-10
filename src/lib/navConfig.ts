@@ -49,6 +49,20 @@ const ROLE_RANK: Record<Role, number> = {
   owner: 4,
 };
 
+/**
+ * RBAC Phase 2 — menu-level permissions. `MenuPermissionLevel` and the
+ * per-module effective-permission map (fetched once per org session, see
+ * lib/orgContext.tsx) let an admin grant or restrict one specific module
+ * independent of a user's overall org role — e.g. a viewer with Write on
+ * Cloud Accounts, or an editor with No Access to Vulnerability Management.
+ * A module's `icon` string doubles as its menu_key (see icons.tsx's own
+ * comment: "icon names map 1:1 to navConfig module keys"). When the
+ * permissions map has no entry for a module (the common case — nobody has
+ * an explicit override), visibility falls back to the existing
+ * minRole/roles check below, unchanged from before this existed.
+ */
+export type MenuPermissionLevel = 'none' | 'read' | 'write' | 'admin';
+
 export interface NavChild {
   label: string;
   to?: string;
@@ -351,13 +365,29 @@ export function canSee(item: { minRole?: Role; roles?: Role[] }, role: Role): bo
 }
 
 /**
- * Returns the navigation modules visible to the given role.
- * Filters each module by its own permission, then filters children.
- * A module with no visible children is hidden entirely.
+ * Module-level visibility, permission-aware. An explicit entry in
+ * `permissions` (keyed by the module's `icon`/menu_key) fully determines
+ * visibility for that module — independent of its minRole/roles — since
+ * the whole point of an explicit override is to grant or restrict access
+ * a role-only check couldn't express. No entry (or no permissions map at
+ * all, e.g. still loading) falls back to the plain role check.
  */
-export function getVisibleModules(role: Role): NavModule[] {
+export function canSeeModule(mod: NavModule, role: Role, permissions?: Record<string, MenuPermissionLevel> | null): boolean {
+  const override = permissions?.[mod.icon];
+  if (override) return override !== 'none';
+  return canSee(mod, role);
+}
+
+/**
+ * Returns the navigation modules visible to the given role (and, when
+ * provided, effective menu permissions). Filters each module by its own
+ * permission, then filters children. A module with no visible children is
+ * hidden entirely. Children stay role-only for now — Phase 2's granularity
+ * is per top-level module, matching menu_permissions.menu_key.
+ */
+export function getVisibleModules(role: Role, permissions?: Record<string, MenuPermissionLevel> | null): NavModule[] {
   return NAV_MODULES
-    .filter((mod) => canSee(mod, role))
+    .filter((mod) => canSeeModule(mod, role, permissions))
     .map((mod) => ({
       ...mod,
       children: mod.children.filter((child) => canSee(child, role)),

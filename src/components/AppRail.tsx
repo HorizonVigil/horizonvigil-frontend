@@ -6,9 +6,9 @@ import { Icon, NAV_ICON_MAP } from './icons';
 
 export function AppRail() {
   const [expanded, setExpanded] = useState<boolean>(false);
-  const { currentOrg } = useOrg();
+  const { currentOrg, menuPermissions } = useOrg();
   const role = (currentOrg?.myRole as Role) ?? 'owner';
-  const visibleModules = getVisibleModules(role);
+  const visibleModules = getVisibleModules(role, menuPermissions);
 
   return (
     <>

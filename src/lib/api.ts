@@ -498,6 +498,19 @@ class ApiClient {
   getRoles() { return this.get<{ roles: { role: Role; description: string }[] }>('users', '/api/users/roles'); }
   getMyPermissions() { return this.get<{ role: Role; description: string; effectivePermissions: { role: Role; description: string } }>('users', '/api/users/permissions'); }
 
+  getEffectiveMenuPermissions(userId?: string) {
+    return this.get<{ userId: string; permissions: Record<string, MenuPermissionLevel> }>('users', `/api/users/menu-permissions/effective${qs({ userId })}`);
+  }
+  getMenuPermissionOverrides(params: { userId?: string; groupId?: string }) {
+    return this.get<{ items: MenuPermissionRow[] }>('users', `/api/users/menu-permissions${qs(params)}`);
+  }
+  setMenuPermission(data: { userId: string; menuKey: string; level: MenuPermissionLevel }) {
+    return this.put<MenuPermissionRow>('users', '/api/users/menu-permissions', data);
+  }
+  deleteMenuPermission(id: string) {
+    return this.delete<{ deleted: boolean }>('users', `/api/users/menu-permissions/${id}`);
+  }
+
   getApiKeys() { return this.get<{ apiKeys: ApiKeySummary[] }>('users', '/api/users/api-keys'); }
   createApiKey(name: string) { return this.post<{ apiKey: string; id: string; name: string; keyPrefix: string; note: string }>('users', '/api/users/api-keys', { name }); }
   revokeApiKey(id: string) { return this.delete<ApiKeySummary>('users', `/api/users/api-keys/${id}`); }
@@ -889,6 +902,9 @@ export interface ScheduledJob { id: string; org_id: string; name: string; job_ty
 export interface AutomationExecution { id: string; org_id: string; automation_type: string; automation_id: string | null; status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'; started_at: string | null; finished_at: string | null; triggered_by: string | null; output: unknown; error_message: string | null; created_at: string }
 export interface Webhook { id: string; org_id: string; name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean; last_triggered_at: string | null; created_at: string }
 export interface Integration { id: string; org_id: string; category: string; provider_name: string; status: 'connected' | 'disconnected' | 'error'; connected_on: string | null; last_sync_at: string | null; account_region: string | null; config: unknown; created_at: string }
+
+export type MenuPermissionLevel = 'none' | 'read' | 'write' | 'admin';
+export interface MenuPermissionRow { id: string; user_id: string | null; group_id: string | null; menu_key: string; level: MenuPermissionLevel; created_at: string; updated_at: string }
 
 export interface ChatSource { type: string; summary: string }
 export interface ChatReply { conversationId: string; message: string; sources: ChatSource[] }
