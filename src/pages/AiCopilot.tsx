@@ -140,7 +140,7 @@ export function AiCopilot() {
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 ? (
               <EmptyState
-                icon="✦"
+                icon="sparkles"
                 title="Ask about your cloud infrastructure"
                 description="Cost, security findings, Kubernetes clusters, resources — the Copilot fetches live CloudOps360 data for whatever you ask, scoped to what you're allowed to see."
               />

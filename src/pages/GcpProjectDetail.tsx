@@ -201,7 +201,7 @@ export function GcpProjectDetail() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
             {filteredResources.length === 0 ? (
               <EmptyState
-                icon="◇"
+                icon="box"
                 title={resources.length === 0 ? 'No resources discovered for this project yet' : 'No resources match these filters'}
                 description={resources.length === 0 ? 'Run Discover Resources above to scan this project.' : undefined}
               />

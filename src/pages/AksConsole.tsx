@@ -14,7 +14,7 @@ export function AksConsole() {
     <div>
       <FilterBar title="Azure AKS Console" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} />
       <RoadmapPanel
-        icon="◌"
+        icon="hammer"
         title="Azure AKS support isn't built yet"
         description="Connecting an Azure subscription and discovering AKS clusters is on the roadmap but not implemented — no Azure connector, no cluster or workload scanning exists today. This page will show real cluster/node/pod data once that's built, not before."
       />
