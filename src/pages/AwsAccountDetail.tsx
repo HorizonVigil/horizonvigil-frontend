@@ -9,11 +9,12 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { useConfirm } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
 import {
   api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
   type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry, type Favorite,
-  type RemediationActionType, type Member, type CloudTrailEvent,
+  type RemediationActionType,
 } from '../lib/api';
 
 /** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
@@ -48,7 +49,7 @@ function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Account Audit'] as const;
+const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 type AccountCredentials = {
@@ -81,22 +82,6 @@ export function AwsAccountDetail() {
   const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const [auditAction, setAuditAction] = useState('');
-  const [auditActorId, setAuditActorId] = useState('');
-  const [auditFrom, setAuditFrom] = useState('');
-  const [auditTo, setAuditTo] = useState('');
-  const [auditMembers, setAuditMembers] = useState<Member[]>([]);
-  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
-  const [auditSource, setAuditSource] = useState<'cloudops' | 'aws'>('cloudops');
-  const [awsEvents, setAwsEvents] = useState<CloudTrailEvent[]>([]);
-  const [awsEventsNextToken, setAwsEventsNextToken] = useState<string | null>(null);
-  const [awsEventsLoading, setAwsEventsLoading] = useState(false);
-  const [awsEventsError, setAwsEventsError] = useState<string | null>(null);
-  const [awsAttributeKey, setAwsAttributeKey] = useState('');
-  const [awsAttributeValue, setAwsAttributeValue] = useState('');
-  const [awsFrom, setAwsFrom] = useState('');
-  const [awsTo, setAwsTo] = useState('');
-  const [expandedAwsEventId, setExpandedAwsEventId] = useState<string | null>(null);
   const [resourceSearch, setResourceSearch] = useState('');
   const [resourceCategory, setResourceCategory] = useState('');
   const [resourceRegion, setResourceRegion] = useState('');
@@ -149,17 +134,6 @@ export function AwsAccountDetail() {
     setPermissionChecks(res.checks);
   }, [id]);
 
-  const loadAudit = useCallback(() => {
-    if (!id) return;
-    void api.getAccountActivity(id, {
-      limit: 100,
-      action: auditAction || undefined,
-      actorId: auditActorId || undefined,
-      from: auditFrom || undefined,
-      to: auditTo || undefined,
-    }).then(r => setActivity(r.items));
-  }, [id, auditAction, auditActorId, auditFrom, auditTo]);
-
   // Each secondary tab's data is only fetched once you actually open it.
   useEffect(() => {
     if (!id) return;
@@ -168,39 +142,8 @@ export function AwsAccountDetail() {
     else if (tab === 'Regions') void api.getAccountRegions(id).then(r => setRegions(r.regions));
     else if (tab === 'Sync History') void api.getAccountSyncHistory(id).then(r => setSyncRuns(r.runs));
     else if (tab === 'Recommendations') void api.getAccountRecommendations(id).then(r => setRecommendations(r.recommendations));
-    else if (tab === 'Account Audit') { loadAudit(); void api.getMembers().then(r => setAuditMembers(r.members)); }
+    else if (tab === 'Activity') void api.getAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
   }, [tab, id, loadPermissions]);
-
-  // Re-query (server-side) whenever a filter changes, while the tab is open.
-  useEffect(() => {
-    if (tab === 'Account Audit') loadAudit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditAction, auditActorId, auditFrom, auditTo]);
-
-  const loadAwsEvents = useCallback((append?: string) => {
-    if (!id) return;
-    setAwsEventsLoading(true);
-    setAwsEventsError(null);
-    void api.getAccountCloudTrailEvents(id, {
-      attributeKey: awsAttributeKey || undefined,
-      attributeValue: awsAttributeKey ? awsAttributeValue || undefined : undefined,
-      from: awsFrom || undefined,
-      to: awsTo || undefined,
-      nextToken: append,
-    }).then(r => {
-      setAwsEvents(prev => (append ? [...prev, ...r.events] : r.events));
-      setAwsEventsNextToken(r.nextToken);
-    }).catch(err => {
-      setAwsEvents([]);
-      setAwsEventsNextToken(null);
-      setAwsEventsError(err instanceof ApiError ? err.message : 'Failed to load AWS activity.');
-    }).finally(() => setAwsEventsLoading(false));
-  }, [id, awsAttributeKey, awsAttributeValue, awsFrom, awsTo]);
-
-  useEffect(() => {
-    if (tab === 'Account Audit' && auditSource === 'aws') loadAwsEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, auditSource, awsAttributeKey, awsAttributeValue, awsFrom, awsTo]);
 
   async function syncCost() {
     if (!id) return;
@@ -334,8 +277,8 @@ export function AwsAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.aws_account_id}</span>
         <div className="flex-1" />
-        <button onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-lg leading-none text-amber-400 hover:text-amber-500 px-1">
-          {favorite ? '★' : '☆'}
+        <button onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-amber-400 hover:text-amber-500 px-1">
+          <Icon name={favorite ? 'star-filled' : 'star'} size={18} />
         </button>
         <button onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Test Connection'}
@@ -418,9 +361,6 @@ export function AwsAccountDetail() {
                     ))}
                   </ul>
                   <p className="text-xs text-slate-400">Service/region-level cost from Cost Explorer, not per-resource.</p>
-                  {totalCost === 0 && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">This is real AWS Cost Explorer data — it's genuinely $0 for the period synced. Cost Explorer can lag ~24–48h behind very recent usage, and this is a different figure from Cost Optimization's rightsizing "potential savings" estimate, which is based on list pricing, not your actual bill.</p>
-                  )}
                 </div>
               ) : (
                 <p className="text-xs text-slate-400">No cost data yet for this account.</p>
@@ -525,10 +465,6 @@ export function AwsAccountDetail() {
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Month to Date</h3>
               <div className="text-2xl font-semibold text-slate-900 dark:text-white tabular-nums">{accountCost ? money(accountCost.monthToDate) : '—'}</div>
-              <p className="text-xs text-slate-400 mt-2">Real AWS Cost Explorer billing data. Different from Cost Optimization's "potential savings" figures, which are list-price estimates, not billed spend.</p>
-              {accountCost && accountCost.monthToDate === 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Synced successfully — genuinely $0 for this period. Cost Explorer can lag ~24–48h behind very recent usage.</p>
-              )}
             </div>
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">By Service</h3>
@@ -650,158 +586,17 @@ export function AwsAccountDetail() {
         </div>
       )}
 
-      {tab === 'Account Audit' && (
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-1 text-sm">
-            <button onClick={() => setAuditSource('cloudops')} className={`rounded-md px-3 py-1.5 border ${auditSource === 'cloudops' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
-              CloudOps360 Actions
-            </button>
-            <button onClick={() => setAuditSource('aws')} className={`rounded-md px-3 py-1.5 border ${auditSource === 'aws' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
-              AWS Activity (CloudTrail)
-            </button>
-          </div>
-
-          {auditSource === 'cloudops' ? (
-            <>
-              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
-                CloudOps360's own action log for this account — who ran a sync, connected/updated credentials, generated recommendations, and similar, all through CloudOps360 itself. For real AWS-side activity (who created/changed/deleted a resource directly in AWS), switch to "AWS Activity" above.
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <input
-                  type="text" placeholder="Search action…" value={auditAction} onChange={e => setAuditAction(e.target.value)}
-                  className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm w-48"
-                />
-                <select value={auditActorId} onChange={e => setAuditActorId(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm">
-                  <option value="">All users</option>
-                  {auditMembers.map(m => <option key={m.userId} value={m.userId}>{m.fullName ?? m.email ?? m.userId}</option>)}
-                </select>
-                <input type="date" value={auditFrom} onChange={e => setAuditFrom(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
-                <span className="text-slate-400 text-sm">to</span>
-                <input type="date" value={auditTo} onChange={e => setAuditTo(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
-                {(auditAction || auditActorId || auditFrom || auditTo) && (
-                  <button onClick={() => { setAuditAction(''); setAuditActorId(''); setAuditFrom(''); setAuditTo(''); }} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
-                    Clear filters
-                  </button>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {activity.map(entry => {
-                    const expanded = expandedAuditId === entry.id;
-                    const hasDetail = Object.keys(entry.metadata ?? {}).length > 0;
-                    return (
-                      <li key={entry.id}>
-                        <button
-                          onClick={() => hasDetail && setExpandedAuditId(expanded ? null : entry.id)}
-                          className={`w-full px-3 py-2.5 flex justify-between items-center gap-3 text-sm text-left ${hasDetail ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60' : 'cursor-default'}`}
-                        >
-                          <span className="text-slate-700 dark:text-slate-200">
-                            {entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span>
-                          </span>
-                          <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-                        </button>
-                        {expanded && (
-                          <pre className="text-xs bg-slate-50 dark:bg-slate-800 mx-3 mb-3 rounded p-2 overflow-x-auto">{JSON.stringify(entry.metadata, null, 2)}</pre>
-                        )}
-                      </li>
-                    );
-                  })}
-                  {activity.length === 0 && (
-                    <li className="px-3 py-8 text-center text-slate-400 text-sm">
-                      {auditAction || auditActorId || auditFrom || auditTo ? 'No activity matches these filters.' : 'No activity recorded for this account yet.'}
-                    </li>
-                  )}
-                </ul>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
-                Real AWS CloudTrail activity for this account — fetched live from AWS on every load (not stored by CloudOps360). Shows who did what directly in AWS (Console/CLI/SDK/Terraform), from what IP, with what request. AWS retains 90 days of this by default with no setup needed on your side.
-              </div>
-              <div className="flex flex-wrap gap-2 items-center">
-                <select value={awsAttributeKey} onChange={e => { setAwsAttributeKey(e.target.value); setAwsAttributeValue(''); }} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm">
-                  <option value="">No filter</option>
-                  <option value="Username">User</option>
-                  <option value="EventName">Event name</option>
-                  <option value="ResourceName">Resource name</option>
-                  <option value="ResourceType">Resource type</option>
-                  <option value="EventSource">Service</option>
-                  <option value="AccessKeyId">Access key ID</option>
-                </select>
-                {awsAttributeKey && (
-                  <input
-                    type="text" placeholder="Value…" value={awsAttributeValue} onChange={e => setAwsAttributeValue(e.target.value)}
-                    onBlur={() => loadAwsEvents()} onKeyDown={e => e.key === 'Enter' && loadAwsEvents()}
-                    className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm w-44"
-                  />
-                )}
-                <input type="date" value={awsFrom} onChange={e => setAwsFrom(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
-                <span className="text-slate-400 text-sm">to</span>
-                <input type="date" value={awsTo} onChange={e => setAwsTo(e.target.value)} className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm" />
-                {(awsAttributeKey || awsFrom || awsTo) && (
-                  <button onClick={() => { setAwsAttributeKey(''); setAwsAttributeValue(''); setAwsFrom(''); setAwsTo(''); }} className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
-                    Clear filters
-                  </button>
-                )}
-                <button onClick={() => loadAwsEvents()} disabled={awsEventsLoading} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-                  {awsEventsLoading ? 'Loading…' : 'Refresh'}
-                </button>
-              </div>
-
-              {awsEventsError ? (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                  {awsEventsError}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-                  <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {awsEvents.map(ev => {
-                      const expanded = expandedAwsEventId === ev.eventId;
-                      return (
-                        <li key={ev.eventId}>
-                          <button
-                            onClick={() => setExpandedAwsEventId(expanded ? null : ev.eventId)}
-                            className="w-full px-3 py-2.5 flex flex-col gap-1 text-sm text-left cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                          >
-                            <div className="flex justify-between items-center gap-3">
-                              <span className="text-slate-700 dark:text-slate-200 font-medium">
-                                {ev.eventName} <span className="text-slate-400 font-normal">on {ev.eventSource.replace('.amazonaws.com', '')}</span>
-                                {ev.errorCode && <span className="ml-2 text-xs rounded px-1.5 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">{ev.errorCode}</span>}
-                              </span>
-                              <span className="text-xs text-slate-400 shrink-0">{new Date(ev.eventTime).toLocaleString()}</span>
-                            </div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-3">
-                              <span>by {ev.username ?? ev.userIdentityArn ?? ev.userIdentityType ?? 'unknown identity'}</span>
-                              {ev.sourceIpAddress && <span>from {ev.sourceIpAddress}</span>}
-                              {ev.awsRegion && <span>{ev.awsRegion}</span>}
-                              {ev.resources.length > 0 && <span>{ev.resources.map(r => r.resourceName).filter(Boolean).join(', ')}</span>}
-                            </div>
-                          </button>
-                          {expanded && (
-                            <div className="mx-3 mb-3 text-xs">
-                              {ev.errorMessage && <p className="text-red-600 dark:text-red-400 mb-2">{ev.errorMessage}</p>}
-                              <pre className="bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify({ userIdentity: { type: ev.userIdentityType, arn: ev.userIdentityArn }, userAgent: ev.userAgent, resources: ev.resources, requestParameters: ev.requestParameters, responseElements: ev.responseElements }, null, 2)}</pre>
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                    {awsEvents.length === 0 && !awsEventsLoading && (
-                      <li className="px-3 py-8 text-center text-slate-400 text-sm">No AWS activity found for these filters in the retained history (default 90 days).</li>
-                    )}
-                  </ul>
-                  {awsEventsNextToken && (
-                    <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
-                      <button onClick={() => loadAwsEvents(awsEventsNextToken)} disabled={awsEventsLoading} className="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
-                        {awsEventsLoading ? 'Loading…' : 'Load more'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
+      {tab === 'Activity' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {activity.map(entry => (
+              <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
+                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+              </li>
+            ))}
+            {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this account yet.</li>}
+          </ul>
         </div>
       )}
       {confirmDialog}

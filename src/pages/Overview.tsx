@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -8,7 +8,7 @@ import { EmptyState } from '../components/EmptyState';
 import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { BarChart } from '../components/charts/BarChart';
-import { useNavigate } from 'react-router-dom';
+import { Icon } from '../components/icons';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { api, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
@@ -83,34 +83,91 @@ export function Overview() {
     );
   }
 
+  const totalResources = dashboard?.resources.total ?? 0;
+  const totalConnections = dashboard?.connections.total ?? 0;
+  const errorConnections = dashboard?.connections.error ?? 0;
+  const monthToDate = dashboard?.cost.monthToDate ?? 0;
+  const healthScore = totalConnections > 0 ? Math.round(((totalConnections - errorConnections) / totalConnections) * 100) : 100;
+
   return (
     <div>
       <FilterBar title="Overview" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
+      {/* Executive Summary */}
       {dashboard?.executiveSummary && (
-        <div className="rounded-xl border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-950/30 px-4 py-3 mb-5 text-sm text-slate-700 dark:text-slate-200">
-          <span className="text-[10px] uppercase tracking-wide text-brand-600 dark:text-brand-400 font-medium block mb-1">Executive Summary</span>
-          {dashboard.executiveSummary}
+        <div className="ai-insight-panel mb-5">
+          <span className="ai-insight-title">
+            <Icon name="sparkles" size={14} />
+            AI Executive Summary
+          </span>
+          <p className="mt-2 text-sm text-slate-700 dark:text-slate-200 leading-relaxed">{dashboard.executiveSummary}</p>
         </div>
       )}
 
+      {/* Executive KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="AWS Accounts" value={String(dashboard?.connections.total ?? 0)} caption={dashboard?.connections.error ? `${dashboard.connections.error} need attention` : undefined} />
-        <StatCard label="Total Resources" value={(dashboard?.resources.total ?? 0).toLocaleString()} />
-        <StatCard label="Cost (MTD)" value={money(dashboard?.cost.monthToDate ?? 0)} caption="real Cost Explorer spend" />
-        <StatCard label="Forecasted Cost" value={forecast !== null ? money(forecast) : '—'} caption="linear projection" />
+        <div className="exec-kpi-card">
+          <span className="exec-kpi-label flex items-center gap-1.5">
+            <Icon name="cloud" size={14} className="text-brand-500" />
+            Cloud Accounts
+          </span>
+          <span className="exec-kpi-value">{totalConnections}</span>
+          <span className="text-xs text-slate-400">
+            {errorConnections > 0 ? (
+              <span className="text-amber-600 dark:text-amber-400 font-medium">{errorConnections} need attention</span>
+            ) : (
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">All connected</span>
+            )}
+          </span>
+        </div>
+        <div className="exec-kpi-card">
+          <span className="exec-kpi-label flex items-center gap-1.5">
+            <Icon name="resources" size={14} className="text-brand-500" />
+            Total Resources
+          </span>
+          <span className="exec-kpi-value">{totalResources.toLocaleString()}</span>
+          <span className="text-xs text-slate-400">Across all accounts</span>
+        </div>
+        <div className="exec-kpi-card">
+          <span className="exec-kpi-label flex items-center gap-1.5">
+            <Icon name="cost" size={14} className="text-brand-500" />
+            Cost (MTD)
+          </span>
+          <span className="exec-kpi-value">{money(monthToDate)}</span>
+          <span className="text-xs text-slate-400">Month to date spend</span>
+        </div>
+        <div className="exec-kpi-card">
+          <span className="exec-kpi-label flex items-center gap-1.5">
+            <Icon name="gauge" size={14} className="text-brand-500" />
+            Health Score
+          </span>
+          <span className="exec-kpi-value">{healthScore}%</span>
+          <span className="text-xs text-slate-400">
+            {healthScore >= 90 ? (
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">Excellent</span>
+            ) : healthScore >= 70 ? (
+              <span className="text-amber-600 dark:text-amber-400 font-medium">Needs attention</span>
+            ) : (
+              <span className="text-red-600 dark:text-red-400 font-medium">Critical</span>
+            )}
+          </span>
+        </div>
       </div>
 
+      {/* Quick Actions */}
       {quickActions.length > 0 && (
         <div className="mb-5">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Quick Actions</h3>
+          <h3 className="section-title mb-2 flex items-center gap-1.5">
+            <Icon name="zap" size={14} className="text-slate-400" />
+            Quick Actions
+          </h3>
           <div className="flex flex-wrap gap-2">
             {quickActions.map(qa => (
               <button
                 key={qa.key}
                 onClick={() => navigate(qa.path)}
                 title={qa.description}
-                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 {qa.label}
               </button>
@@ -119,41 +176,61 @@ export function Overview() {
         </div>
       )}
 
+      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lg:col-span-2">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Trend (30 days)</h3>
+        <div className="chart-card lg:col-span-2">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Resource Trend (30 days)</h3>
+            <span className="text-xs text-slate-400">Created vs Deleted</span>
+          </div>
           {resourceTrend.length > 0
             ? <LineChart series={[{ label: 'Created', points: resourceTrend.map(d => ({ x: d.date, y: d.created })) }, { label: 'Deleted', points: resourceTrend.map(d => ({ x: d.date, y: d.deleted })) }]} />
-            : <EmptyState icon="∿" title="No resource activity yet" description="Created and deleted resources will chart here once discovery has run a few times." />}
+            : <EmptyState icon="chart-line" title="No resource activity yet" description="Created and deleted resources will chart here once discovery has run a few times." />}
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Distribution</h3>
-          <Donut data={Object.entries(dashboard?.resources.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(dashboard?.resources.total ?? 0), caption: 'resources' }} />
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Resource Distribution</h3>
+            <span className="text-xs text-slate-400">By category</span>
+          </div>
+          <Donut data={Object.entries(dashboard?.resources.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(totalResources), caption: 'resources' }} />
         </div>
       </div>
 
+      {/* Cost + Organization Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Services by Cost</h3>
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Top Services by Cost</h3>
+            <span className="text-xs text-slate-400">MTD</span>
+          </div>
           {topServices.length > 0
             ? <BarChart data={topServices.map(([service, cost]) => ({ label: service, value: cost }))} valueFormatter={money} />
-            : <EmptyState icon="$" title="No cost data yet" description="Connect a cloud account and run a sync to see spend broken down by service." />}
+            : <EmptyState icon="cost" title="No cost data yet" description="Connect a cloud account and run a sync to see spend broken down by service." />}
         </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Folders & Projects</h3>
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Folders & Projects</h3>
+            <span className="text-xs text-slate-400">Organization structure</span>
+          </div>
           {folders.length === 0 && projects.length === 0 ? (
-            <EmptyState icon="📁" title="No folders or projects yet" description="Set these up under Organization Management to group accounts by team or environment." />
+            <EmptyState icon="folder" title="No folders or projects yet" description="Set these up under Organization Management to group accounts by team or environment." />
           ) : (
             <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
               {folders.map(f => (
                 <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-slate-700 dark:text-slate-200">📁 {f.name}</span>
+                  <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <Icon name="folder" size={14} className="text-slate-400" />
+                    {f.name}
+                  </span>
                   <span className="text-xs text-slate-400">{projects.filter(p => p.folder_id === f.id).length} projects</span>
                 </li>
               ))}
               {projects.filter(p => !p.folder_id).map(p => (
                 <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{p.name}</span>
+                  <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {p.name}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -161,39 +238,48 @@ export function Overview() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Favorites</h3>
-        {favorites.length === 0 ? (
-          <EmptyState icon="☆" title="No favorites yet" description="Pin accounts, resources, or reports from other pages to find them here quickly." />
-        ) : (
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {favorites.map(f => (
-              <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                <button onClick={() => navigate(f.path)} className="text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400">{f.type}</span> {f.label}
-                </button>
-                <button onClick={() => void removeFavorite(f.id)} className="text-xs text-slate-400 hover:text-red-500">Remove</button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-        <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Activity</h3>
-        {activity.length === 0 ? (
-          <EmptyState icon="▤" title="No activity yet" description="Actions across your organization — connecting accounts, running syncs, editing settings — will show up here." />
-        ) : (
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {activity.map(entry => (
-              <li key={entry.id} className="py-2 text-sm flex justify-between">
-                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Link to="/organization" className="text-xs text-brand-600 dark:text-brand-400 hover:underline mt-2 inline-block">View full audit log →</Link>
+      {/* Favorites + Activity Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Favorites</h3>
+            <span className="text-xs text-slate-400">Pinned resources</span>
+          </div>
+          {favorites.length === 0 ? (
+            <EmptyState icon="star" title="No favorites yet" description="Pin accounts, resources, or reports from other pages to find them here quickly." />
+          ) : (
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+              {favorites.map(f => (
+                <li key={f.id} className="flex items-center justify-between py-2 text-sm">
+                  <button onClick={() => navigate(f.path)} className="text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1.5">
+                    <Icon name="star-filled" size={14} className="text-amber-400" />
+                    <span className="text-xs text-slate-400">{f.type}</span> {f.label}
+                  </button>
+                  <button onClick={() => void removeFavorite(f.id)} className="text-xs text-slate-400 hover:text-red-500">Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="chart-card">
+          <div className="chart-card-header">
+            <h3 className="chart-card-title">Recent Activity</h3>
+            <span className="text-xs text-slate-400">Audit trail</span>
+          </div>
+          {activity.length === 0 ? (
+            <EmptyState icon="activity" title="No activity yet" description="Actions across your organization — connecting accounts, running syncs, editing settings — will show up here." />
+          ) : (
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+              {activity.map(entry => (
+                <li key={entry.id} className="py-2 text-sm flex justify-between">
+                  <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                  <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link to="/organization" className="text-xs text-brand-600 dark:text-brand-400 hover:underline mt-2 inline-block">View full audit log →</Link>
+        </div>
       </div>
     </div>
   );

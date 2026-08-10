@@ -5,6 +5,7 @@ import { useOrg } from '../lib/orgContext';
 import { useTheme } from '../lib/theme';
 import { getEnvironmentLabel } from '../lib/environment';
 import { CommandPalette } from './CommandPalette';
+import { Icon } from './icons';
 
 const ENV_STYLES: Record<string, string> = {
   prod: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800',
@@ -56,9 +57,9 @@ export function TopBar() {
           className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-500 dark:hover:text-slate-400 w-64"
           aria-label="Open command palette"
         >
-          <span aria-hidden="true">⌘</span>
+          <Icon name="search" size={14} className="text-slate-400" />
           <span className="flex-1 text-left">Jump to…</span>
-          <kbd className="text-[10px] rounded border border-slate-200 dark:border-slate-700 px-1 py-0.5">⌘K</kbd>
+          <kbd className="text-[10px] rounded border border-slate-200 dark:border-slate-700 px-1 py-0.5">Ctrl K</kbd>
         </button>
 
         <div className="flex items-center gap-2">
@@ -72,7 +73,7 @@ export function TopBar() {
             aria-label={openAlertCount ? `${openAlertCount} open alerts` : 'Alerts'}
             title={openAlertCount ? `${openAlertCount} open alert${openAlertCount === 1 ? '' : 's'}` : 'No open alerts'}
           >
-            🔔
+            <Icon name="bell" size={16} />
             {!!openAlertCount && (
               <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-rose-600 text-white text-[10px] leading-4 text-center px-1 tabular-nums">
                 {openAlertCount > 99 ? '99+' : openAlertCount}
@@ -84,7 +85,8 @@ export function TopBar() {
             onClick={toggleTheme}
             className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
-            {theme === 'dark' ? '☀ Light' : '☾ Dark'}
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
+            {theme === 'dark' ? 'Light' : 'Dark'}
           </button>
         </div>
       </div>

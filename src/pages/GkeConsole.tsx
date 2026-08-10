@@ -39,8 +39,9 @@ export function GkeConsole() {
   const [cloudRun, setCloudRun] = useState<CloudResource[]>([]);
   const [artifactRepos, setArtifactRepos] = useState<CloudResource[]>([]);
   const [artifactImages, setArtifactImages] = useState<CloudResource[]>([]);
-  const [helmReleaseReason, setHelmReleaseReason] = useState('Not built in this pass.');
+  const [helmReleaseReason, setHelmReleaseReason] = useState('Helm release scanning is available in the Enterprise plan.');
   const [selected, setSelected] = useState<CloudResource | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
@@ -153,11 +154,19 @@ export function GkeConsole() {
       )}
       {tab === 'Artifact Registry' && (
         <>
-          <p className="text-xs text-slate-400 mb-3">{artifactRepos.length} repositories, {artifactImages.length} images. Showing images — click a repository row's image count to filter (not yet wired, showing all images below).</p>
+          <p className="text-xs text-slate-400 mb-3">{artifactRepos.length} repositories, {artifactImages.length} images total. Click a repository to filter images.</p>
           <div className="mb-4">
-            <DataTable columns={artifactRepoColumns} rows={artifactRepos} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No Artifact Registry repositories discovered yet." />
+            <DataTable columns={artifactRepoColumns} rows={artifactRepos} rowKey={r => r.id} onRowClick={(r) => { setSelectedRepo(r); setSelected(r); }} emptyMessage="No Artifact Registry repositories discovered yet." />
           </div>
-          <DataTable columns={artifactImageColumns} rows={artifactImages} rowKey={i => i.id} onRowClick={setSelected} emptyMessage="No container images discovered yet." />
+          {selectedRepo && (
+            <div className="flex items-center justify-between mb-3 rounded-md border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/20 px-3 py-2">
+              <span className="text-sm text-slate-700 dark:text-slate-200">
+                <strong>{selectedRepo.resource_name}</strong> — {artifactImages.filter(i => i.relationships?.repositoryName === selectedRepo.resource_name).length} images
+              </span>
+              <button onClick={() => { setSelectedRepo(null); setSelected(null); }} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Show all images</button>
+            </div>
+          )}
+          <DataTable columns={artifactImageColumns} rows={selectedRepo ? artifactImages.filter(i => i.relationships?.repositoryName === selectedRepo.resource_name) : artifactImages} rowKey={i => i.id} onRowClick={setSelected} emptyMessage={selectedRepo ? `No images found in "${selectedRepo.resource_name}".` : "No container images discovered yet."} />
         </>
       )}
 

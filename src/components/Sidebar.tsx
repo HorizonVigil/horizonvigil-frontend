@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
-import { findActiveModule, isChildActive } from '../lib/navConfig';
+import { findActiveModule, isChildActive, canSee, type Role } from '../lib/navConfig';
+import { Icon, NAV_ICON_MAP } from './icons';
 
 /**
  * This domain's OWN sidebar — scoped to whichever module AppRail says is
@@ -19,7 +20,12 @@ export function Sidebar() {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
+  const role = (currentOrg?.myRole as Role) ?? 'owner';
   const activeModule = useMemo(() => findActiveModule(location.pathname), [location.pathname]);
+  const filteredChildren = useMemo(() => {
+    if (!activeModule) return [];
+    return activeModule.children.filter(child => canSee(child, role));
+  }, [activeModule, role]);
 
   const projectCountByFolder = useMemo(() => {
     const counts = new Map<string, number>();
@@ -49,8 +55,13 @@ export function Sidebar() {
     return (
       <li key={folder.id}>
         <div className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-sm cursor-pointer ${isActive ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-          <button onClick={() => toggleFolder(folder.id)} className="w-4 text-slate-400 dark:text-slate-500">{isCollapsed ? '▸' : '▾'}</button>
-          <span className="truncate flex-1" onClick={() => setScope({ type: 'folder', id: folder.id, name: folder.name })}>📁 {folder.name}</span>
+          <button onClick={() => toggleFolder(folder.id)} className="w-4 text-slate-400 dark:text-slate-500 flex justify-center">
+            <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+          </button>
+          <span className="truncate flex-1 flex items-center gap-1.5" onClick={() => setScope({ type: 'folder', id: folder.id, name: folder.name })}>
+            <Icon name="folder" size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
+            {folder.name}
+          </span>
           <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">{projectCountByFolder.get(folder.id) ?? 0}</span>
         </div>
         {!isCollapsed && (childFolders.length > 0 || childProjects.length > 0) && (
@@ -80,8 +91,11 @@ export function Sidebar() {
       <div className="px-4 py-4 border-b border-slate-200 dark:border-slate-800">
         <div className="relative">
           <button onClick={() => setOrgMenuOpen(v => !v)} className="w-full flex items-center justify-between text-sm rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-            <span className="truncate">{currentOrg?.name ?? 'Select organization'}</span>
-            <span className="text-slate-400">▾</span>
+            <span className="truncate flex items-center gap-1.5">
+              <Icon name="building" size={14} className="text-slate-400 shrink-0" />
+              {currentOrg?.name ?? 'Select organization'}
+            </span>
+            <Icon name="chevron-down" size={14} className="text-slate-400" />
           </button>
           {orgMenuOpen && (
             <ul className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
@@ -100,12 +114,14 @@ export function Sidebar() {
       {/* This module's own header — the "you are inside a separate app now" cue.
           Switching to a different app happens in AppRail, not here. */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-        <span className="text-lg" aria-hidden="true">{activeModule.icon}</span>
+        <span className="text-slate-500 dark:text-slate-400" aria-hidden="true">
+          <Icon name={NAV_ICON_MAP[activeModule.label] ?? 'overview'} size={16} />
+        </span>
         <span className="font-semibold text-slate-900 dark:text-white truncate">{activeModule.label}</span>
       </div>
 
       <nav className="px-2 py-2 flex flex-col gap-0.5 border-b border-slate-200 dark:border-slate-800 max-h-[38vh] overflow-y-auto">
-        {activeModule.children.map(child => (
+        {filteredChildren.map(child => (
           <div key={child.label}>
             {child.action === 'open-chat' ? (
               <button
@@ -117,18 +133,14 @@ export function Sidebar() {
             ) : child.real && child.to ? (
               <NavLink
                 to={child.to}
-                // NavLink's own isActive only looks at pathname — most siblings
-                // in a module now share one pathname with different ?tab=
-                // values, so highlighting is computed manually via isChildActive
-                // (pathname + tab query param) instead of the isActive callback.
                 className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 {child.label}
               </NavLink>
             ) : (
-              <div className="flex items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-sm cursor-default" title="Not built yet">
+              <div className="flex items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-sm cursor-default" title="Planned capability">
                 <span className="truncate text-slate-400 dark:text-slate-600">{child.label}</span>
-                <span className="shrink-0 text-[9px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-600">Soon</span>
+                <span className="shrink-0 text-[9px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-600">Planned</span>
               </div>
             )}
           </div>
@@ -136,19 +148,23 @@ export function Sidebar() {
       </nav>
 
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search folders & projects…"
-          className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
-        />
+        <div className="relative">
+          <Icon name="search" size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search folders & projects…"
+            className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-7 pr-2 py-1.5 text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
+          />
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         <ul className="flex flex-col gap-0.5">
           {currentOrg && (
             <li>
               <button onClick={() => setScope({ type: 'org', id: currentOrg.id, name: currentOrg.name })} className={`flex items-center gap-1.5 w-full rounded-md px-1.5 py-1 text-sm ${scope?.type === 'org' ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                🏢 <span className="truncate">{currentOrg.name}</span>
+                <Icon name="building" size={14} className="text-slate-400 shrink-0" />
+                <span className="truncate">{currentOrg.name}</span>
               </button>
             </li>
           )}
@@ -159,7 +175,10 @@ export function Sidebar() {
 
       <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800 text-xs">
         <div className="truncate text-slate-500 dark:text-slate-400">{user?.email}</div>
-        <button onClick={() => void signOut()} className="text-brand-600 dark:text-brand-400 hover:underline mt-1">Sign out</button>
+        <button onClick={() => void signOut()} className="text-brand-600 dark:text-brand-400 hover:underline mt-1 flex items-center gap-1">
+          <Icon name="log-out" size={12} />
+          Sign out
+        </button>
       </div>
     </aside>
   );

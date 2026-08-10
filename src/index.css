@@ -2,56 +2,223 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
+@layer base {
+  :root {
+    --brand-50: #eef4ff;
+    --brand-100: #dce7fd;
+    --brand-200: #c0d4fa;
+    --brand-300: #94b8f6;
+    --brand-400: #6294f0;
+    --brand-500: #3d73e8;
+    --brand-600: #2a58d4;
+    --brand-700: #2347b3;
+    --brand-800: #213d91;
+    --brand-900: #1f3773;
+    --brand-950: #162347;
+    --surface-light: #f8fafc;
+    --surface-dark: #0f172a;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Focus ring for keyboard navigation — consistent across the entire app */
+  :focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Reduce motion for accessibility */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+@layer components {
+  /* ── Enterprise Card ─────────────────────────────────────────────── */
+  .enterprise-card {
+    @apply rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm;
+  }
+
+  .enterprise-card-hover {
+    @apply transition-all hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md;
+  }
+
+  /* ── Page header ─────────────────────────────────────────────────── */
+  .page-header {
+    @apply mb-5;
+  }
+
+  .page-title {
+    @apply text-xl font-semibold tracking-tight text-slate-900 dark:text-white mt-0.5;
+  }
+
+  .page-subtitle {
+    @apply text-xs text-slate-400 dark:text-slate-500;
+  }
+
+  /* ── Section title ───────────────────────────────────────────────── */
+  .section-title {
+    @apply text-sm font-medium text-slate-600 dark:text-slate-300;
+  }
+
+  /* ── Enterprise Button variants ──────────────────────────────────── */
+  .btn-primary {
+    @apply inline-flex items-center gap-1.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3.5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-sm font-medium px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center gap-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-3.5 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors;
+  }
+
+  /* ── Enterprise Form Controls ────────────────────────────────────── */
+  .form-label {
+    @apply text-[11px] uppercase tracking-wide text-slate-400 font-medium;
+  }
+
+  .form-input {
+    @apply text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-200 dark:focus:ring-brand-800 outline-none transition-shadow;
+  }
+
+  .form-select {
+    @apply text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200 focus:border-brand-400 dark:focus:border-brand-500 focus:ring-1 focus:ring-brand-200 dark:focus:ring-brand-800 outline-none transition-shadow;
+  }
+
+  /* ── Enterprise Table ────────────────────────────────────────────── */
+  .table-header {
+    @apply text-left font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap;
+  }
+
+  .table-cell {
+    @apply whitespace-nowrap text-slate-700 dark:text-slate-200;
+  }
+
+  /* ── Status pill ─────────────────────────────────────────────────── */
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300;
+  }
+
+  /* ── KPI Value ───────────────────────────────────────────────────── */
+  .kpi-value {
+    @apply text-2xl font-semibold tabular-nums text-slate-900 dark:text-white;
+  }
+
+  .kpi-label {
+    @apply text-xs font-medium text-slate-500 dark:text-slate-400;
+  }
+
+  /* ── Executive KPI Card ──────────────────────────────────────────── */
+  .exec-kpi-card {
+    @apply rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-1.5 transition-all hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md;
+  }
+
+  .exec-kpi-value {
+    @apply text-3xl font-bold tabular-nums tracking-tight text-slate-900 dark:text-white;
+  }
+
+  .exec-kpi-label {
+    @apply text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide;
+  }
+
+  /* ── AI Insight Panel ────────────────────────────────────────────── */
+  .ai-insight-panel {
+    @apply rounded-xl border border-brand-200 dark:border-brand-900/60 bg-gradient-to-br from-brand-50/80 to-white dark:from-brand-950/40 dark:to-slate-900 p-4;
+  }
+
+  .ai-insight-title {
+    @apply text-[10px] uppercase tracking-wide text-brand-600 dark:text-brand-400 font-semibold flex items-center gap-1.5;
+  }
+
+  /* ── Chart Card ──────────────────────────────────────────────────── */
+  .chart-card {
+    @apply rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4;
+  }
+
+  .chart-card-header {
+    @apply flex items-center justify-between mb-3;
+  }
+
+  .chart-card-title {
+    @apply text-sm font-semibold text-slate-700 dark:text-slate-200;
+  }
+
+  /* ── Scrollbar (enterprise polish) ───────────────────────────────── */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-slate-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400 dark:bg-slate-600;
+  }
+
+  /* ── Animations ──────────────────────────────────────────────────── */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -468px 0; }
+    100% { background-position: 468px 0; }
+  }
+
+  .animate-fade-in { animation: fadeIn 0.15s ease-out; }
+  .animate-slide-up { animation: slideUp 0.2s ease-out; }
+  .animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, rgba(226,232,240,0.4) 25%, rgba(226,232,240,0.8) 37%, rgba(226,232,240,0.4) 63%);
+    background-size: 400px 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
+  .dark .skeleton-shimmer {
+    background: linear-gradient(90deg, rgba(30,41,59,0.4) 25%, rgba(30,41,59,0.8) 37%, rgba(30,41,59,0.4) 63%);
+    background-size: 400px 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
 }
 
-
-/* Global scrollbar (keep as is if you want) */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-300 dark:bg-slate-700 rounded-full;
-}
-
-.apprail-scroll::-webkit-scrollbar {
-  width: 3px;
-}
-
-.apprail-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.apprail-scroll::-webkit-scrollbar-thumb {
-  background: transparent; /* Hidden by default */
-  border-radius: 9999px;
-}
-
-.apprail-scroll:hover::-webkit-scrollbar-thumb {
-  @apply bg-gray-300;
-}
-
-.apprail-scroll:hover::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400;
-}
-
-/* Firefox */
-.apprail-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-.apprail-scroll:hover {
-  scrollbar-color: #d1d5db transparent;
+/* Util: subtle divider, truncated text */
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -35,6 +35,12 @@ const SyncContext = createContext<SyncContextType | null>(null);
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const runningIds = useRef<Set<string>>(new Set());
+  const [autoSyncStatus, setAutoSyncStatus] = useState<'idle' | 'checking' | 'syncing' | 'done' | 'error'>('idle');
+  const [autoSyncMessage, setAutoSyncMessage] = useState<string>('');
+  const [lastAutoSyncAt, setLastAutoSyncAt] = useState<string | null>(null);
+  const autoSyncInitRef = useRef(false);
+  const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncingRef = useRef(false);
 
   const startSync = useCallback((connectionId: string, service: CloudAccountService = 'awsAccounts') => {
     if (runningIds.current.has(connectionId)) return;
@@ -99,6 +105,96 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, []);
+
+  // ── Auto-sync every 24 hours for all connected cloud accounts ──────────
+  // Runs once on mount, then every 24 hours. For each connected AWS account
+  // and GCP project, checks if it needs a sync (lastSync is null or older
+  // than 24 hours) and triggers discovery for stale ones.
+  const runAutoSync = useCallback(async () => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    setAutoSyncStatus('checking');
+    setAutoSyncMessage('Checking for accounts that need syncing…');
+    try {
+      // Fetch all connected accounts (AWS + GCP)
+      const [awsRes, gcpRes] = await Promise.allSettled([
+        api.getAccounts({ limit: 200 }),
+        api.getGcpAccounts({ limit: 200 }),
+      ]);
+      const accounts: { id: string; lastSync: string | null; provider: 'aws' | 'gcp'; name: string }[] = [];
+      if (awsRes.status === 'fulfilled') {
+        for (const a of awsRes.value.items) {
+          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'aws', name: a.connection_name ?? a.aws_account_id });
+        }
+      }
+      if (gcpRes.status === 'fulfilled') {
+        for (const a of gcpRes.value.items) {
+          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'gcp', name: a.connection_name ?? a.gcp_project_id });
+        }
+      }
+
+      const now = Date.now();
+      const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+      const staleAccounts = accounts.filter(a => {
+        if (runningIds.current.has(a.id)) return false;
+        if (!a.lastSync) return true; // Never synced
+        return now - new Date(a.lastSync).getTime() >= STALE_THRESHOLD_MS;
+      });
+
+      if (staleAccounts.length === 0) {
+        setAutoSyncStatus('done');
+        setAutoSyncMessage(`All ${accounts.length} account${accounts.length === 1 ? '' : 's'} are up to date.`);
+        setLastAutoSyncAt(new Date().toISOString());
+        syncingRef.current = false;
+        return;
+      }
+
+      setAutoSyncStatus('syncing');
+      setAutoSyncMessage(`Auto-syncing ${staleAccounts.length} account${staleAccounts.length === 1 ? '' : 's'}: ${staleAccounts.map(a => a.name).join(', ')}`);
+      setLastAutoSyncAt(new Date().toISOString());
+
+      // Trigger discovery for each stale account sequentially (not all at once
+      // to avoid overwhelming Cloudflare's free-tier CPU budget)
+      let synced = 0;
+      for (const account of staleAccounts) {
+        try {
+          startDiscovery(account.id, account.provider === 'gcp' ? 'gcpAccounts' : 'awsAccounts');
+          synced++;
+        } catch (err) {
+          // Continue with other accounts even if one fails
+        }
+      }
+
+      setAutoSyncStatus('done');
+      setAutoSyncMessage(`Auto-sync triggered for ${synced} of ${staleAccounts.length} stale account${staleAccounts.length === 1 ? '' : 's'}. Resources will update as scans complete.`);
+    } catch (err) {
+      setAutoSyncStatus('error');
+      setAutoSyncMessage(err instanceof Error ? err.message : 'Auto-sync failed.');
+    } finally {
+      syncingRef.current = false;
+    }
+  }, [startDiscovery]);
+
+  // Initialize auto-sync on mount and schedule every 24 hours
+  useEffect(() => {
+    if (autoSyncInitRef.current) return;
+    autoSyncInitRef.current = true;
+
+    // Run once on mount (checks if any account needs syncing now)
+    const initialDelay = setTimeout(() => {
+      void runAutoSync();
+    }, 3000); // Wait 3 seconds for the app to load
+
+    // Schedule every 24 hours
+    autoSyncTimerRef.current = setInterval(() => {
+      void runAutoSync();
+    }, 24 * 60 * 60 * 1000);
+
+    return () => {
+      clearTimeout(initialDelay);
+      if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
+    };
+  }, [runAutoSync]);
 
   return <SyncContext.Provider value={{ syncStates, startSync, startDiscovery }}>{children}</SyncContext.Provider>;
 }

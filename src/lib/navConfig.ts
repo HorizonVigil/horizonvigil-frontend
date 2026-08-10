@@ -22,9 +22,32 @@
  * Re-classify an item by flipping `real` once its feature ships — this file
  * is the single source of truth for both the sidebar and (eventually) any
  * per-module breadcrumb/quick-nav that wants the same list.
+ *
+ * ── Dynamic menu permissions ─────────────────────────────────────────────
+ * Each module and child can carry a `minRole` (or `roles`) field. When set,
+ * the module/child is only visible to users whose org role meets the
+ * threshold. `getVisibleModules(role)` returns the filtered list — the
+ * navigation layer (AppRail, Sidebar, CommandPalette) calls this instead of
+ * importing NAV_MODULES directly.
+ *
+ * Role hierarchy (higher = more access):
+ *   viewer < editor < billing_admin < admin < owner
+ *
+ * `roles` = explicit allow-list (e.g. ['admin','owner'])
+ * `minRole` = minimum role required (e.g. 'editor' means editor+)
  */
 
 import { isBillingEnabled } from './featureFlags';
+
+export type Role = 'viewer' | 'editor' | 'billing_admin' | 'admin' | 'owner';
+
+const ROLE_RANK: Record<Role, number> = {
+  viewer: 0,
+  editor: 1,
+  billing_admin: 2,
+  admin: 3,
+  owner: 4,
+};
 
 export interface NavChild {
   label: string;
@@ -34,6 +57,10 @@ export interface NavChild {
    * in your own data, see ChatWidget.tsx) rather than a separate page per module. */
   action?: 'open-chat';
   real: boolean;
+  /** Minimum role required to see this item. */
+  minRole?: Role;
+  /** Explicit list of roles allowed to see this item. */
+  roles?: Role[];
 }
 
 export interface NavModule {
@@ -41,6 +68,10 @@ export interface NavModule {
   icon: string;
   to?: string; // present when the module itself has a real landing page
   children: NavChild[];
+  /** Minimum role required to see this module. */
+  minRole?: Role;
+  /** Explicit list of roles allowed to see this module. */
+  roles?: Role[];
 }
 
 const OVERVIEW = '/overview';
@@ -62,6 +93,7 @@ const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
 const SUBSCRIPTION = '/subscription';
+const AI_COPILOT = '/ai-copilot';
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -70,8 +102,14 @@ function tabLink(base: string, tab: string): string {
 
 export const NAV_MODULES: NavModule[] = [
   {
+    label: 'AI Copilot',
+    icon: 'ai',
+    to: AI_COPILOT,
+    children: [],
+  },
+  {
     label: 'Overview',
-    icon: '◈',
+    icon: 'overview',
     to: OVERVIEW,
     children: [
       { label: 'Executive Dashboard', to: OVERVIEW, real: true },
@@ -81,69 +119,38 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    // Fully merged multi-cloud module — was briefly two separate modules
-    // ("Cloud Accounts" for AWS, "GCP Projects" for GCP) after the AWS ->
-    // Cloud Accounts rename, but two entries for what's conceptually one
-    // "your connected cloud accounts" concern was confusing (worse, they
-    // shared one icon in the collapsed-by-default rail, so the second
-    // module was easy to miss entirely). CloudAccounts.tsx's Inventory tab
-    // now lists AWS accounts and GCP projects in one merged table, and
-    // CloudAccountDetail.tsx routes a single /cloud-accounts/:id to
-    // whichever provider's detail view actually applies.
     label: 'Cloud Accounts',
-    icon: '☁',
+    icon: 'cloud',
     to: ACCOUNTS,
-    // Consolidated from an earlier, larger list that had Account Explorer,
-    // Connection Validation, Cross-Account Roles, Credentials, Sync Status,
-    // Health, Permission Validation, and several purely-aliased items
-    // (Discovery Status, Cost Summary, Recommendations, Audit Logs) each as
-    // their own sidebar entry — most pointed at a tab that just re-showed
-    // Dashboard or Inventory under a different label, which is exactly the
-    // "duplicate page, different name" problem this list is meant to avoid.
-    // Dashboard/Organizations/Regions/Sync Center/Reports stay AWS-only in
-    // their data (see the TABS comment in CloudAccounts.tsx) — GCP has no
-    // backend endpoints for those yet, so they're not padded with numbers
-    // that would be fake for GCP projects. Inventory and Onboarding are the
-    // two genuinely multi-cloud tabs.
     children: [
-      // Dashboard is the default tab (see CloudAccounts.tsx useTabParam), so
-      // its link is bare (no ?tab=) to match what useTabParam itself omits —
-      // see isChildActive's exact-match comparison below.
       { label: 'Dashboard', to: ACCOUNTS, real: true },
       { label: 'Account Inventory', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
-      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Onboarding'), real: true },
+      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Onboarding'), real: true, minRole: 'editor' },
       { label: 'Organizations', to: tabLink(ACCOUNTS, 'Organizations'), real: true },
       { label: 'Regions', to: tabLink(ACCOUNTS, 'Regions'), real: true },
-      { label: 'Sync Center', to: tabLink(ACCOUNTS, 'Sync Center'), real: true },
+      { label: 'Sync Center', to: tabLink(ACCOUNTS, 'Sync Center'), real: true, minRole: 'editor' },
       { label: 'Reports', to: tabLink(ACCOUNTS, 'Reports'), real: true },
-      // Per-domain settings (distinct from the global Settings module, which
-      // already covers AWS credentials/integrations org-wide) isn't built.
-      { label: 'Settings', real: false },
+      { label: 'Settings', real: false, minRole: 'admin' },
     ],
   },
   {
     label: 'Resources',
-    icon: '▦',
+    icon: 'resources',
     to: RESOURCES,
     children: [
       { label: 'Resource Inventory', to: RESOURCES, real: true },
       { label: 'Resource Explorer', to: RESOURCES, real: true },
       { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
-      // Dependency Graph is opened per-resource from the Drawer (see
-      // Resources.tsx), not a standalone browsable view — lands on the
-      // default All Resources tab, same bare URL as Bulk Operations below.
       { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
       { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
       { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
       { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
-      // Bulk Operations is a mode toggle over the All Resources table, not a
-      // separate tab — same bare URL as Dependency Graph above.
-      { label: 'Bulk Operations', to: `${RESOURCES}/all`, real: true },
+      { label: 'Bulk Operations', to: `${RESOURCES}/all`, real: true, minRole: 'editor' },
     ],
   },
   {
     label: 'Custom Dashboards',
-    icon: '▧',
+    icon: 'dashboard',
     to: DASHBOARDS,
     children: [
       { label: 'My Dashboards', to: DASHBOARDS, real: true },
@@ -154,16 +161,13 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Cost Management',
-    icon: '$',
+    icon: 'cost',
     to: COST,
     children: [
-      // Cost Explorer is the default tab (see CostManagement.tsx's
-      // useTabParam), so its link is bare (no ?tab=) to match what
-      // useTabParam itself omits — see isChildActive's exact-match comparison.
       { label: 'Cost Explorer', to: COST, real: true },
       { label: 'Cost Analytics', to: tabLink(COST, 'Cost Analytics'), real: true },
       { label: 'Forecast', to: tabLink(COST, 'Forecast'), real: true },
-      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true },
+      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true, minRole: 'editor' },
       { label: 'Cost Allocation', to: tabLink(COST, 'Cost Allocation'), real: true },
       { label: 'Chargeback', to: tabLink(COST, 'Chargeback'), real: true },
       { label: 'Showback', to: tabLink(COST, 'Showback'), real: true },
@@ -172,7 +176,7 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Cost Optimization',
-    icon: '↓$',
+    icon: 'optimization',
     to: OPT,
     children: [
       { label: 'Savings Opportunities', to: tabLink(OPT, 'Recommendations'), real: true },
@@ -186,7 +190,7 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Vulnerability Management',
-    icon: '⚠',
+    icon: 'security',
     to: VULN,
     children: [
       { label: 'Security Hub', to: VULN, real: true },
@@ -199,18 +203,9 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
     ],
   },
-  // One top-level Clusters module — its children switch between three
-  // independent provider consoles (not a merged, provider-filtered view;
-  // each cloud's Kubernetes offering has its own capabilities: EKS's IAM/
-  // nodegroups vs. GKE's Autopilot/release channels vs. AKS's Azure AD
-  // integration). Each console page has its own in-page tab strip for that
-  // provider's resource types (clusters/nodes/namespaces/deployments/pods/
-  // etc.) — see EksConsole.tsx/GkeConsole.tsx/AksConsole.tsx — so the
-  // sidebar only needs to offer the provider switch, not every resource
-  // type for every provider.
   {
     label: 'Clusters',
-    icon: '⬡',
+    icon: 'containers',
     to: EKS_CONSOLE,
     children: [
       { label: 'AWS EKS', to: EKS_CONSOLE, real: true },
@@ -220,12 +215,9 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Monitoring',
-    icon: '∿',
+    icon: 'monitoring',
     to: MON,
     children: [
-      // CloudWatch is the default tab (see Monitoring.tsx's useTabParam), so
-      // its link is bare (no ?tab=) to match what useTabParam itself omits —
-      // see isChildActive's exact-match comparison above.
       { label: 'CloudWatch', to: MON, real: true },
       { label: 'Metrics', to: tabLink(MON, 'Metrics'), real: true },
       { label: 'Logs', to: tabLink(MON, 'Logs'), real: true },
@@ -238,24 +230,20 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Alerts',
-    icon: '🔔',
+    icon: 'alerts',
     to: ALERTS,
     children: [
       { label: 'Active Alerts', to: ALERTS, real: true },
-      { label: 'Alert Rules', to: tabLink(ALERTS, 'rules'), real: true },
-      { label: 'Notification Channels', to: tabLink(ALERTS, 'channels'), real: true },
-      { label: 'Escalation Policies', to: tabLink(ALERTS, 'escalations'), real: true },
+      { label: 'Alert Rules', to: tabLink(ALERTS, 'rules'), real: true, minRole: 'editor' },
+      { label: 'Notification Channels', to: tabLink(ALERTS, 'channels'), real: true, minRole: 'editor' },
+      { label: 'Escalation Policies', to: tabLink(ALERTS, 'escalations'), real: true, minRole: 'editor' },
       { label: 'Alert History', to: tabLink(ALERTS, 'history'), real: true },
-      { label: 'Maintenance Windows', to: tabLink(ALERTS, 'maintenance'), real: true },
+      { label: 'Maintenance Windows', to: tabLink(ALERTS, 'maintenance'), real: true, minRole: 'editor' },
     ],
   },
   {
-    // Cross-cutting triage view — merges cost recommendations, security
-    // findings, and alerts client-side (see Issues.tsx's doc comment for
-    // why that's a client-side merge of three already-real feeds, not a
-    // new backend service). One page, so it has no sub-tabs of its own.
     label: 'Issues',
-    icon: '⚠',
+    icon: 'issues',
     to: ISSUES,
     children: [
       { label: 'All Issues', to: ISSUES, real: true },
@@ -263,97 +251,85 @@ export const NAV_MODULES: NavModule[] = [
   },
   {
     label: 'Reports',
-    icon: '▤',
+    icon: 'reports',
     to: REPORTS,
     children: [
-      // Executive Reports is the default tab (see Reports.tsx's useTabParam),
-      // so its link is bare (no ?tab=) — see isChildActive's exact-match comparison.
       { label: 'Executive Reports', to: REPORTS, real: true },
       { label: 'Cost Reports', to: tabLink(REPORTS, 'Cost Reports'), real: true },
       { label: 'Security Reports', to: tabLink(REPORTS, 'Security Reports'), real: true },
       { label: 'Compliance Reports', to: tabLink(REPORTS, 'Compliance Reports'), real: true },
       { label: 'Inventory Reports', to: tabLink(REPORTS, 'Inventory Reports'), real: true },
-      // Not one of the original 7 — added because reports-api genuinely
-      // supports a 'savings' category (the rule-based Savings Opportunities
-      // report) with no other reachable destination in the sidebar otherwise.
       { label: 'Savings Reports', to: tabLink(REPORTS, 'Savings Reports'), real: true },
-      { label: 'Scheduled Reports', to: tabLink(REPORTS, 'Scheduled Reports'), real: true },
+      { label: 'Scheduled Reports', to: tabLink(REPORTS, 'Scheduled Reports'), real: true, minRole: 'editor' },
       { label: 'Export Center', to: tabLink(REPORTS, 'Export Center'), real: true },
     ],
   },
   {
     label: 'Users & Groups',
-    icon: '◔',
+    icon: 'users',
     to: USERS,
+    minRole: 'admin',
     children: [
-      // Users is the default tab (see UsersGroups.tsx's useTabParam), so its
-      // link is bare (no ?tab=) — see isChildActive's exact-match comparison.
       { label: 'Users', to: USERS, real: true },
       { label: 'Groups', to: tabLink(USERS, 'Groups'), real: true },
       { label: 'Roles', to: tabLink(USERS, 'Roles'), real: true },
       { label: 'Permissions', to: tabLink(USERS, 'Permissions'), real: true },
-      { label: 'API Keys', to: tabLink(USERS, 'API Keys'), real: true },
+      { label: 'API Keys', to: tabLink(USERS, 'API Keys'), real: true, minRole: 'admin' },
       { label: 'Audit Logs', to: tabLink(USERS, 'Audit Logs'), real: true },
     ],
   },
   {
     label: 'Organization Management',
-    icon: '⚙',
+    icon: 'organization',
     to: ORG,
+    minRole: 'admin',
     children: [
-      // Organizations is the default tab (see OrganizationManagement.tsx's
-      // useTabParam), so its link is bare (no ?tab=) — see isChildActive's
-      // exact-match comparison.
       { label: 'Organizations', to: ORG, real: true },
-      { label: 'Folders', to: tabLink(ORG, 'Folders'), real: true },
-      { label: 'Projects', to: tabLink(ORG, 'Projects'), real: true },
+      { label: 'Folders', to: tabLink(ORG, 'Folders'), real: true, minRole: 'editor' },
+      { label: 'Projects', to: tabLink(ORG, 'Projects'), real: true, minRole: 'editor' },
       { label: 'Environments', to: tabLink(ORG, 'Environments'), real: true },
-      { label: 'Business Units', to: tabLink(ORG, 'Business Units'), real: true },
-      { label: 'Cost Centers', to: tabLink(ORG, 'Cost Centers'), real: true },
+      { label: 'Business Units', to: tabLink(ORG, 'Business Units'), real: true, minRole: 'editor' },
+      { label: 'Cost Centers', to: tabLink(ORG, 'Cost Centers'), real: true, minRole: 'editor' },
       { label: 'Tags', to: tabLink(ORG, 'Tags'), real: true },
       { label: 'Ownership', to: tabLink(ORG, 'Ownership'), real: true },
     ],
   },
   {
     label: 'Automation',
-    icon: '⚡',
+    icon: 'automation',
     to: AUTOMATION,
+    minRole: 'editor',
     children: [
       { label: 'Runbooks', to: AUTOMATION, real: true },
       { label: 'Workflows', to: tabLink(AUTOMATION, 'workflows'), real: true },
       { label: 'Scheduled Jobs', to: tabLink(AUTOMATION, 'scheduled'), real: true },
-      { label: 'Remediation', to: tabLink(AUTOMATION, 'remediation'), real: true },
+      { label: 'Remediation', to: tabLink(AUTOMATION, 'remediation'), real: true, minRole: 'editor' },
       { label: 'Webhooks', to: tabLink(AUTOMATION, 'webhooks'), real: true },
       { label: 'Integrations', to: tabLink(AUTOMATION, 'integrations'), real: true },
     ],
   },
   {
     label: 'Settings',
-    icon: '●',
+    icon: 'settings',
     to: SETTINGS,
+    minRole: 'editor',
     children: [
-      // Profile isn't one of the original 8 — Settings.tsx's default tab
-      // (bare, no ?tab=) groups the per-you settings (profile, theme,
-      // sign-out) that don't belong under any of the 8 per-org sections.
       { label: 'Profile', to: SETTINGS, real: true },
-      { label: 'AWS Integrations', to: tabLink(SETTINGS, 'AWS Integrations'), real: true },
-      { label: 'Billing', to: tabLink(SETTINGS, 'Billing'), real: true },
+      { label: 'AWS Integrations', to: tabLink(SETTINGS, 'AWS Integrations'), real: true, minRole: 'editor' },
+      { label: 'Billing', to: tabLink(SETTINGS, 'Billing'), real: true, roles: ['billing_admin', 'admin', 'owner'] },
       { label: 'Notifications', to: tabLink(SETTINGS, 'Notifications'), real: true },
-      { label: 'Credentials', to: tabLink(SETTINGS, 'Credentials'), real: true },
-      { label: 'RBAC', to: tabLink(SETTINGS, 'RBAC'), real: true },
-      { label: 'System Settings', to: tabLink(SETTINGS, 'System Settings'), real: true },
-      { label: 'Branding', to: tabLink(SETTINGS, 'Branding'), real: true },
-      { label: 'License', to: tabLink(SETTINGS, 'License'), real: true },
+      { label: 'Credentials', to: tabLink(SETTINGS, 'Credentials'), real: true, minRole: 'admin' },
+      { label: 'RBAC', to: tabLink(SETTINGS, 'RBAC'), real: true, minRole: 'admin' },
+      { label: 'System Settings', to: tabLink(SETTINGS, 'System Settings'), real: true, minRole: 'admin' },
+      { label: 'Branding', to: tabLink(SETTINGS, 'Branding'), real: true, minRole: 'admin' },
+      { label: 'License', to: tabLink(SETTINGS, 'License'), real: true, roles: ['billing_admin', 'admin', 'owner'] },
     ],
   },
-  // Test-env only (VITE_BILLING_API_URL unset in the prod build) — see
-  // isBillingEnabled()'s doc comment in api.ts. Kept entirely separate from
-  // the pre-existing Settings > Billing stub tab rather than replacing it,
-  // so prod's Settings page is untouched either way.
   ...(isBillingEnabled() ? [{
     label: 'Subscription',
-    icon: '$',
+    icon: 'credit-card',
     to: SUBSCRIPTION,
+    roles: ['billing_admin', 'admin', 'owner'] as Role[],
     children: [
       { label: 'Plans', to: SUBSCRIPTION, real: true },
       { label: 'Usage', to: tabLink(SUBSCRIPTION, 'Usage'), real: true },
@@ -361,6 +337,33 @@ export const NAV_MODULES: NavModule[] = [
     ],
   }] : []),
 ];
+
+/**
+ * Checks whether a role meets a module/child's permission requirement.
+ * - If neither `minRole` nor `roles` is set, item is visible to all.
+ * - `minRole` = minimum role threshold (e.g. 'editor' means editor+).
+ * - `roles` = explicit allow-list.
+ */
+export function canSee(item: { minRole?: Role; roles?: Role[] }, role: Role): boolean {
+  if (item.roles) return item.roles.includes(role);
+  if (item.minRole) return ROLE_RANK[role] >= ROLE_RANK[item.minRole];
+  return true;
+}
+
+/**
+ * Returns the navigation modules visible to the given role.
+ * Filters each module by its own permission, then filters children.
+ * A module with no visible children is hidden entirely.
+ */
+export function getVisibleModules(role: Role): NavModule[] {
+  return NAV_MODULES
+    .filter((mod) => canSee(mod, role))
+    .map((mod) => ({
+      ...mod,
+      children: mod.children.filter((child) => canSee(child, role)),
+    }))
+    .filter((mod) => mod.children.length > 0 || mod.to);
+}
 
 function pathOnly(to: string): string {
   const i = to.indexOf('?');
@@ -391,13 +394,7 @@ export function findActiveModule(pathname: string): NavModule {
  * up every sibling sharing one URL at once now that most of them carry
  * distinct `?tab=` values.
  *
- * `siblings` is the module's full children list. A handful of modules
- * deliberately point several children at the exact same `to` (see the file
- * header — they're real facets of one page, not separate views yet). None
- * of those siblings is more "current" than another, so highlighting all of
- * them at once looked like every entry in the menu was identical/active —
- * this only highlights a child whose destination is unique among its
- * siblings, leaving shared-destination groups unhighlighted instead.
+ * `siblings` is the module's full children list.
  */
 export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string): boolean {
   if (!child.to) return false;

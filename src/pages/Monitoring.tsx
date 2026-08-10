@@ -6,6 +6,7 @@ import { Donut } from '../components/charts/Donut';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { RoadmapPanel } from '../components/EmptyState';
+import type { IconName } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { api, type MonitoringAlarm, type ResourceMetric } from '../lib/api';
@@ -36,14 +37,14 @@ interface NotIntegratedSection { key: string; label: string; reason: string }
 const TABS = ['CloudWatch', 'Metrics', 'Logs', 'Traces', 'Dashboards', 'Health', 'Service Map', 'Performance'] as const;
 type Tab = typeof TABS[number];
 
-const NOT_INTEGRATED_ICON: Record<string, string> = { Logs: '▤', Traces: '↝', Dashboards: '▦', 'Service Map': '⬡', Performance: '∿' };
+const NOT_INTEGRATED_ICON: Record<string, IconName> = { Logs: 'file', Traces: 'activity', Dashboards: 'dashboard', 'Service Map': 'network', Performance: 'gauge' };
 
 function NotIntegratedPanel({ tab, section }: { tab: string; section: NotIntegratedSection | undefined }) {
   return (
     <RoadmapPanel
-      icon={NOT_INTEGRATED_ICON[tab] ?? '◌'}
-      title={`${section?.label ?? tab} — on the roadmap, not yet built`}
-      description={section?.reason ?? 'This capability is planned but not pulled into the current build.'}
+      icon={NOT_INTEGRATED_ICON[tab] ?? 'layers'}
+      title={`${section?.label ?? tab} — planned capability`}
+      description={section?.reason ?? 'This capability is part of the product roadmap and will be available in a future release.'}
     />
   );
 }

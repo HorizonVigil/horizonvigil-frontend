@@ -7,7 +7,7 @@ const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.work
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
-  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing';
+  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing' | 'aiCopilot';
 
 export { isBillingEnabled } from './featureFlags';
 
@@ -29,6 +29,7 @@ const SERVICE_URLS: Record<Service, string> = {
   automation: import.meta.env.VITE_AUTOMATION_API_URL || `https://cloudops360-1-automation-api.${SUBDOMAIN}`,
   settings: import.meta.env.VITE_SETTINGS_API_URL || `https://cloudops360-1-settings-api.${SUBDOMAIN}`,
   billing: import.meta.env.VITE_BILLING_API_URL || '',
+  aiCopilot: import.meta.env.VITE_AI_COPILOT_API_URL || '',
 };
 
 /** The two services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
@@ -655,6 +656,15 @@ class ApiClient {
     return this.post<EnterpriseContract>('billing', '/api/billing/admin/enterprise-contracts', data);
   }
   getAdminRevenue() { return this.get<AdminRevenue>('billing', '/api/billing/admin/revenue'); }
+
+  // ── ai-copilot ────────────────────────────────────────────────────────────
+
+  sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
+  getConversations() { return this.get<{ items: ConversationSummary[] }>('aiCopilot', '/api/ai-copilot/conversations'); }
+  getConversationMessages(id: string) { return this.get<{ items: ChatMessage[] }>('aiCopilot', `/api/ai-copilot/conversations/${id}/messages`); }
+  renameConversation(id: string, title: string) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { title }); }
+  pinConversation(id: string, pinned: boolean) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { pinned }); }
+  deleteConversation(id: string) { return this.delete<{ deleted: boolean }>('aiCopilot', `/api/ai-copilot/conversations/${id}`); }
 }
 
 export const api = new ApiClient();
@@ -879,3 +889,8 @@ export interface ScheduledJob { id: string; org_id: string; name: string; job_ty
 export interface AutomationExecution { id: string; org_id: string; automation_type: string; automation_id: string | null; status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled'; started_at: string | null; finished_at: string | null; triggered_by: string | null; output: unknown; error_message: string | null; created_at: string }
 export interface Webhook { id: string; org_id: string; name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean; last_triggered_at: string | null; created_at: string }
 export interface Integration { id: string; org_id: string; category: string; provider_name: string; status: 'connected' | 'disconnected' | 'error'; connected_on: string | null; last_sync_at: string | null; account_region: string | null; config: unknown; created_at: string }
+
+export interface ChatSource { type: string; summary: string }
+export interface ChatReply { conversationId: string; message: string; sources: ChatSource[] }
+export interface ConversationSummary { id: string; title: string; pinned: boolean; created_at: string; updated_at: string }
+export interface ChatMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; sources: ChatSource[]; created_at: string }

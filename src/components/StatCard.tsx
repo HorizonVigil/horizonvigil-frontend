@@ -1,5 +1,6 @@
 import { useTheme } from '../lib/theme';
 import { STATUS, pick } from './charts/palette';
+import { Icon } from './icons';
 
 export interface StatCardProps {
   label: string;
@@ -20,7 +21,7 @@ export function StatCard({ label, value, delta, sparkline, caption }: StatCardPr
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-1.5">
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-1.5 transition-all hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md">
       <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
       <div className="flex items-end justify-between gap-2">
         <span className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">{value}</span>
@@ -29,7 +30,11 @@ export function StatCard({ label, value, delta, sparkline, caption }: StatCardPr
       <div className="flex items-center gap-1.5 text-xs">
         {delta && (
           <span style={{ color: deltaColor }} className="font-medium flex items-center gap-0.5">
-            {delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : '→'} {delta.value}
+            <Icon
+              name={delta.direction === 'up' ? 'trending-up' : delta.direction === 'down' ? 'trending-down' : 'arrow-right'}
+              size={12}
+            />
+            {delta.value}
           </span>
         )}
         {caption && <span className="text-slate-400 dark:text-slate-500">{caption}</span>}

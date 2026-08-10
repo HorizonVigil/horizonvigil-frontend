@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
+import { Icon } from '../components/icons';
 import { useOrg } from '../lib/orgContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
@@ -199,7 +200,10 @@ export function OrganizationManagement() {
   function renderHierarchyFolder(f: HierarchyFolder) {
     return (
       <li key={f.id} className="py-1">
-        <div className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-200">📁 {f.name}</div>
+        <div className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-200">
+          <Icon name="folder" size={14} className="text-slate-400" />
+          {f.name}
+        </div>
         <ul className="pl-5 border-l border-slate-200 dark:border-slate-800 ml-1.5">
           {f.projects.map(p => (
             <li key={p.id} className="py-1 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
@@ -262,7 +266,10 @@ export function OrganizationManagement() {
             <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-3">
               {folders.map(f => (
                 <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-slate-700 dark:text-slate-200">📁 {f.name}</span>
+                  <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <Icon name="folder" size={14} className="text-slate-400" />
+                    {f.name}
+                  </span>
                   <button onClick={() => void handleDeleteFolder(f.id)} className="text-xs text-red-500 hover:underline">Delete</button>
                 </li>
               ))}

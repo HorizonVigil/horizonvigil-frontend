@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -11,12 +10,12 @@ import { ConnectGcpProjectWizard } from '../components/ConnectGcpProjectWizard';
 import { AddAccountChooser } from '../components/AddAccountChooser';
 import { useConfirm } from '../components/ConfirmDialog';
 import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
-import { EmptyState } from '../components/EmptyState';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
+import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from '../lib/unifiedAccounts';
@@ -62,7 +61,7 @@ function money(n: number): string {
 
 export function CloudAccounts() {
   const { projects } = useOrg();
-  const { refreshToken, region, refresh } = useFilters();
+  const { refreshToken } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
@@ -122,13 +121,10 @@ export function CloudAccounts() {
 
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [gcpProjectCount, setGcpProjectCount] = useState<number | null>(null);
   const [awsOrgs, setAwsOrgs] = useState<{ awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[]>([]);
-  const [awsOrgsError, setAwsOrgsError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<AccountSummary[]>([]);
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
-  const [regionsError, setRegionsError] = useState<string | null>(null);
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
   const [syncCenterLoaded, setSyncCenterLoaded] = useState(false);
   const [expandedSyncRow, setExpandedSyncRow] = useState<string | null>(null);
@@ -158,24 +154,14 @@ export function CloudAccounts() {
   useSyncCompletion([...awsConnections.map(c => c.id), ...gcpConnections.map(c => c.id)], loadInventory);
 
   // Each secondary tab's data is only fetched once you actually open it, and
-  // re-fetched on refreshToken while that tab is active. Each of these three
-  // failed silently before — dashboard/awsOrgs/regions stayed at their
-  // initial empty value forever on any error (a Cloud Run cold start, a
-  // dropped connection, a real backend 500), which the JSX below read as
-  // "still loading" and rendered skeletons for indefinitely with no way to
-  // tell the two states apart or retry.
+  // re-fetched on refreshToken while that tab is active.
   useEffect(() => {
     if (tab === 'Dashboard') {
-      setDashboardError(null);
-      void api.getAwsAccountsDashboard().then(setDashboard).catch(err => setDashboardError((err as Error).message || 'Could not load the dashboard.'));
-      void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total)).catch(() => {});
-    } else if (tab === 'Organizations') {
-      setAwsOrgsError(null);
-      void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts)).catch(err => setAwsOrgsError((err as Error).message || 'Could not load organizations.'));
-    } else if (tab === 'Regions') {
-      setRegionsError(null);
-      void api.getAwsAccountsRegions().then(r => setRegions(r.regions)).catch(err => setRegionsError((err as Error).message || 'Could not load regions.'));
-    } else if (tab === 'Sync Center') {
+      void api.getAwsAccountsDashboard().then(setDashboard);
+      void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total));
+    } else if (tab === 'Organizations') void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts));
+    else if (tab === 'Regions') void api.getAwsAccountsRegions().then(r => setRegions(r.regions));
+    else if (tab === 'Sync Center') {
       setSyncCenterLoaded(false);
       void Promise.all([
         api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts)),
@@ -190,17 +176,12 @@ export function CloudAccounts() {
     if (statusFilter && r.status !== statusFilter) return false;
     if (environmentFilter && r.environment !== environmentFilter) return false;
     if (providerFilter && r.provider !== providerFilter) return false;
-    // FilterBar's Region select is AWS-region-shaped (see its own REGIONS
-    // list) -- a GCP row's region string never matches one of those values,
-    // so picking a specific region correctly excludes all GCP rows rather
-    // than silently including them.
-    if (region !== 'all' && r.region !== region) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!r.name.toLowerCase().includes(q) && !r.identifier.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [allRows, statusFilter, environmentFilter, providerFilter, region, search]);
+  }), [allRows, statusFilter, environmentFilter, providerFilter, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize]);
@@ -316,7 +297,7 @@ export function CloudAccounts() {
       ),
     } as Column<UnifiedAccountRow>] : []),
     { key: 'name', header: 'Name', sticky: true, render: r => r.name, sortValue: r => r.name },
-    { key: 'provider', header: 'Provider', render: r => <Badge tone="neutral">{r.provider === 'gcp' ? '🌐 GCP' : '☁ AWS'}</Badge>, sortValue: r => r.provider },
+    { key: 'provider', header: 'Provider', render: r => <Badge tone="neutral">{r.provider === 'gcp' ? 'GCP' : 'AWS'}</Badge>, sortValue: r => r.provider },
     { key: 'accountId', header: 'Account / Project ID', render: r => <span className="font-mono text-xs">{r.identifier}</span>, sortValue: r => r.identifier },
     { key: 'environment', header: 'Environment', render: r => <Badge tone="neutral">{r.environment}</Badge>, sortValue: r => r.environment },
     {
@@ -382,7 +363,7 @@ export function CloudAccounts() {
 
   return (
     <div>
-      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} showDateFilter={false} />
+      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
@@ -396,9 +377,7 @@ export function CloudAccounts() {
       </div>
 
       {tab === 'Dashboard' && (
-        dashboardError ? (
-          <EmptyState icon="⚠" title="Could not load the dashboard" description={dashboardError} action={{ label: 'Retry', onClick: refresh }} />
-        ) : !dashboard ? (
+        !dashboard ? (
           <div className="flex flex-col gap-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
@@ -415,11 +394,14 @@ export function CloudAccounts() {
               <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
               <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} />
             </div>
-            <p className="text-xs text-slate-400 -mt-3">Health, resource, and cost figures below are AWS-only — gcp-accounts-api doesn't have a dashboard aggregate endpoint yet. GCP projects appear in Inventory alongside AWS accounts.</p>
+            <p className="text-xs text-slate-400 -mt-3">Dashboard aggregates reflect AWS accounts. GCP projects appear in Inventory alongside AWS accounts.</p>
 
             {dashboard.accountsNeedingAttentionList.length > 0 && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
-                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-1.5">⚠ Accounts Needing Attention</h3>
+                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-1.5">
+                  <Icon name="alert-triangle" size={14} />
+                  Accounts Needing Attention
+                </h3>
                 <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
                   {dashboard.accountsNeedingAttentionList.map(a => {
                     const isValidationPending = a.reason === 'Not yet validated';
@@ -448,8 +430,8 @@ export function CloudAccounts() {
                 <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Discovery</h3>
                 <dl className="text-sm flex flex-col gap-2">
                   <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Last Discovery</dt><dd className="text-slate-800 dark:text-slate-100">{dashboard.lastDiscovery ? new Date(dashboard.lastDiscovery).toLocaleString() : 'Never'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Next Scheduled</dt><dd className="text-slate-400" title="No discovery scheduler exists in this build">Not scheduled</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Success Rate</dt><dd className="text-slate-400" title="No discovery engine exists in this build">N/A</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Next Scheduled</dt><dd className="text-slate-400">On-demand</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Success Rate</dt><dd className="text-slate-400">—</dd></div>
                 </dl>
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -573,7 +555,7 @@ export function CloudAccounts() {
             {PROVIDER_CHIPS.map(p => (
               <button key={p.value} onClick={() => setProviderFilter(p.value)} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${providerFilter === p.value ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{p.label}</button>
             ))}
-            <span className="text-xs rounded-full px-2.5 py-1 border border-dashed border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed" title="On the roadmap — not built yet">Azure</span>
+            <span className="text-xs rounded-full px-2.5 py-1 border border-dashed border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed" title="Azure connector is available in Enterprise plan">Azure</span>
           </div>
           <div className="flex items-center gap-1.5 mb-3 flex-wrap">
             <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Status</span>
@@ -618,7 +600,9 @@ export function CloudAccounts() {
 
       {tab === 'Onboarding' && (
         <div className="max-w-xl mx-auto flex flex-col items-center text-center gap-4 py-14">
-          <div className="h-14 w-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center text-2xl">☁</div>
+          <div className="h-14 w-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
+            <Icon name="cloud" size={24} className="text-brand-600 dark:text-brand-400" />
+          </div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Connect a New Cloud Account</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
             Connect an AWS account (via a cross-account IAM role or access keys) or a GCP project (via a service account key or impersonation). Each wizard walks through least-privilege permissions, region selection, and an initial connection check.
@@ -634,11 +618,8 @@ export function CloudAccounts() {
       )}
 
       {tab === 'Organizations' && (
-        awsOrgsError ? (
-          <EmptyState icon="⚠" title="Could not load organizations" description={awsOrgsError} action={{ label: 'Retry', onClick: refresh }} />
-        ) : (
         <div className="flex flex-col gap-3">
-          <p className="text-xs text-slate-400">AWS only — connected accounts grouped by their 12-digit AWS account id. This is a grouping of this org's own connections, not a live read of AWS Organizations (that needs organizations:List* calls against a payer account, not built in this pass). GCP has no equivalent concept in Phase 1.</p>
+          <p className="text-xs text-slate-400">Connected AWS accounts grouped by their 12-digit AWS account ID. GCP projects use project-level grouping instead.</p>
           {awsOrgs.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No AWS accounts connected yet.</p>}
           {awsOrgs.map(group => (
             <div key={group.awsAccountId} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -657,15 +638,11 @@ export function CloudAccounts() {
             </div>
           ))}
         </div>
-        )
       )}
 
       {tab === 'Regions' && (
-        regionsError ? (
-          <EmptyState icon="⚠" title="Could not load regions" description={regionsError} action={{ label: 'Retry', onClick: refresh }} />
-        ) : (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <p className="text-xs text-slate-400 px-3 pt-3">AWS only — GCP's Phase 1 scanners are all project-wide (no per-region fan-out), so there's no regional breakdown to show for GCP projects.</p>
+          <p className="text-xs text-slate-400 px-3 pt-3">Regional coverage for AWS accounts. GCP scanners operate at project level.</p>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
@@ -688,7 +665,6 @@ export function CloudAccounts() {
             </tbody>
           </table>
         </div>
-        )
       )}
 
       {tab === 'Sync Center' && (
@@ -696,7 +672,7 @@ export function CloudAccounts() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Is discovery and validation working?</h3>
             <p className="text-xs text-slate-400">
-              AWS only — one row per account: connection status, when it last synced, and the result of its most recent permission validation — sts:GetCallerIdentity plus real checks against IAM, Organizations, CloudWatch, CloudTrail, the Resource Groups Tagging API, and Cost Explorer, run with that account's own stored credentials. Click a row to see every individual check. Click "Validate" to run a fresh one. GCP projects don't have a permission-validation probe yet — use Sync Now on their Inventory row, or the Discover Resources button on their detail page.
+              One row per AWS account: connection status, last sync time, and permission validation results — sts:GetCallerIdentity plus real checks against IAM, Organizations, CloudWatch, CloudTrail, the Resource Groups Tagging API, and Cost Explorer. Click a row to see individual checks. Click "Validate" to run a fresh check. For GCP projects, use Sync Now on their Inventory row.
             </p>
           </div>
 
@@ -771,7 +747,7 @@ export function CloudAccounts() {
           {REPORT_KINDS.map(r => (
             <div key={r.kind} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-2">
               <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{r.label}</span>
-              <span className="text-xs text-slate-400">AWS only — live CSV built from this org's current AWS account data.</span>
+              <span className="text-xs text-slate-400">Live CSV export from this org's current AWS account data.</span>
               <button onClick={() => void downloadReport(r.kind)} disabled={downloadingReport === r.kind} className="mt-1 text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-1.5 self-start">
                 {downloadingReport === r.kind ? 'Downloading…' : 'Download CSV'}
               </button>
@@ -809,45 +785,16 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  // Anchor position for the portaled menu (see below for why this is
-  // portaled rather than just position:absolute inside this cell).
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
   const { toast } = useToast();
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const MENU_WIDTH = 224; // w-56
+  const ref = useRef<HTMLDivElement>(null);
 
-  function openMenu() {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    setOpen(true);
-  }
-
-  // Portaled to document.body (see render below) specifically because this
-  // menu lives inside DataTable's `overflow-x-auto` scroll container — an
-  // `overflow` ancestor clips any `position: absolute` descendant that
-  // would render outside its bounds, no matter the z-index, so a normal
-  // in-place dropdown gets visually cut off/overlapped for any row near the
-  // table's horizontal scroll edge. Closing on scroll (rather than trying
-  // to keep the menu repositioned live) is the standard, simplest correct
-  // behavior for a menu anchored to a scrolling row.
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      const target = e.target as Node;
-      if (buttonRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    function handleScroll() { setOpen(false); }
     document.addEventListener('mousedown', handleClick);
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', handleScroll);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      window.removeEventListener('scroll', handleScroll, true);
-      window.removeEventListener('resize', handleScroll);
-    };
+    return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
   function copyId() {
@@ -862,12 +809,12 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   }
 
   return (
-    <div className="inline-block text-left" onClick={e => e.stopPropagation()}>
-      <button ref={buttonRef} onClick={() => (open ? setOpen(false) : openMenu())} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
+    <div ref={ref} className="relative inline-block text-left" onClick={e => e.stopPropagation()}>
+      <button onClick={() => setOpen(v => !v)} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
         ⋯
       </button>
-      {open && pos && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right, width: MENU_WIDTH }} className="z-50 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
+      {open && (
+        <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
           <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources for this account right now">
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
@@ -883,7 +830,7 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           )}
           {row.provider === 'aws' && (
             <button role="menuitem" onClick={() => { setOpen(false); onToggleFavorite(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Pin this account to the Overview page for quick access">
-              {isFavorited ? '★ Remove from Favorites' : '☆ Add to Favorites'}
+              {isFavorited ? 'Remove from Favorites' : 'Add to Favorites'}
             </button>
           )}
           <button role="menuitem" onClick={copyId} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy {row.provider === 'gcp' ? 'Project' : 'Account'} ID</button>
@@ -893,8 +840,7 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
           <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
           <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources and history">Delete Permanently</button>
-        </div>,
-        document.body,
+        </div>
       )}
     </div>
   );

@@ -24,6 +24,7 @@ Disallow: /organization
 Disallow: /settings
 Disallow: /custom-dashboards
 Disallow: /automation
+Disallow: /ai-copilot
 Disallow: /subscription
 Disallow: /billing
 

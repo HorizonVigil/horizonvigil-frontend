@@ -21,7 +21,7 @@ export function MarketingNav() {
 
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
           {LINKS.map(l => (
-            <a key={l.label} href={l.to} className="hover:text-slate-900 dark:hover:text-white transition-colors">{l.label}</a>
+            <Link key={l.label} to={l.to} className="hover:text-slate-900 dark:hover:text-white transition-colors">{l.label}</Link>
           ))}
         </nav>
 
@@ -55,7 +55,7 @@ export function MarketingNav() {
       {open && (
         <div className="md:hidden border-t border-slate-200 dark:border-slate-800 px-5 py-4 flex flex-col gap-3">
           {LINKS.map(l => (
-            <a key={l.label} href={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-slate-700 dark:text-slate-200">{l.label}</a>
+            <Link key={l.label} to={l.to} onClick={() => setOpen(false)} className="text-sm font-medium text-slate-700 dark:text-slate-200">{l.label}</Link>
           ))}
           <div className="flex gap-2 pt-2">
             <Link to="/login" className="flex-1 text-center text-sm font-medium px-3.5 py-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">Log in</Link>

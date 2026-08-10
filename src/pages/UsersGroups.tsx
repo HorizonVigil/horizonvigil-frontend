@@ -5,16 +5,59 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
+import { useOrg } from '../lib/orgContext';
+import { useToast } from '../lib/toast';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry } from '../lib/api';
 
 type MyPermissions = { role: Role; description: string; effectivePermissions: { role: Role; description: string } };
 
-const ROLES: Role[] = ['owner', 'admin', 'editor', 'viewer', 'billing_admin'];
-const TABS = ['Users', 'Groups', 'Roles', 'Permissions', 'API Keys', 'Audit Logs'] as const;
+// Enterprise roles with descriptions
+const ENTERPRISE_ROLES: { value: Role; label: string; description: string; level: 'org' | 'project' | 'resource' }[] = [
+  { value: 'owner', label: 'Organization Owner', description: 'Full control over the organization, billing, and all resources', level: 'org' },
+  { value: 'admin', label: 'Organization Admin', description: 'Manage users, projects, cloud accounts, and organization settings', level: 'org' },
+  { value: 'billing_admin', label: 'Billing Admin', description: 'Manage subscriptions, invoices, and payment methods', level: 'org' },
+  { value: 'editor', label: 'DevOps Engineer', description: 'Create, update, and manage cloud resources and deployments', level: 'project' },
+  { value: 'viewer', label: 'Read Only / Auditor', description: 'View-only access to dashboards, resources, and reports', level: 'project' },
+];
+
+// Permission matrix actions
+const PERMISSION_ACTIONS = [
+  { key: 'view', label: 'View', description: 'Read access to resources and dashboards' },
+  { key: 'create', label: 'Create', description: 'Create new resources, projects, and connections' },
+  { key: 'update', label: 'Update', description: 'Modify existing resources and configurations' },
+  { key: 'delete', label: 'Delete', description: 'Remove resources, connections, and data' },
+  { key: 'execute', label: 'Execute', description: 'Run scans, syncs, and remediation actions' },
+  { key: 'restart', label: 'Restart', description: 'Restart instances, services, and workloads' },
+  { key: 'scale', label: 'Scale', description: 'Scale resources up or down' },
+  { key: 'deploy', label: 'Deploy', description: 'Deploy applications and configurations' },
+  { key: 'rollback', label: 'Rollback', description: 'Rollback deployments and changes' },
+  { key: 'view_logs', label: 'View Logs', description: 'Access application and system logs' },
+  { key: 'view_metrics', label: 'View Metrics', description: 'Access monitoring metrics and dashboards' },
+  { key: 'download_reports', label: 'Download Reports', description: 'Export and download reports' },
+  { key: 'manage_billing', label: 'Manage Billing', description: 'Manage subscriptions and payment methods' },
+  { key: 'manage_alerts', label: 'Manage Alerts', description: 'Create, update, and delete alert rules' },
+  { key: 'manage_integrations', label: 'Manage Integrations', description: 'Configure third-party integrations' },
+  { key: 'manage_users', label: 'Manage Users', description: 'Invite, remove, and change user roles' },
+  { key: 'manage_org', label: 'Manage Organization', description: 'Modify organization settings and branding' },
+  { key: 'manage_projects', label: 'Manage Projects', description: 'Create, update, and delete projects' },
+];
+
+// Role-to-permission mapping
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  owner: PERMISSION_ACTIONS.map(p => p.key),
+  admin: ['view', 'create', 'update', 'delete', 'execute', 'view_logs', 'view_metrics', 'download_reports', 'manage_alerts', 'manage_integrations', 'manage_users', 'manage_projects'],
+  billing_admin: ['view', 'download_reports', 'manage_billing'],
+  editor: ['view', 'create', 'update', 'execute', 'restart', 'scale', 'deploy', 'rollback', 'view_logs', 'view_metrics', 'download_reports'],
+  viewer: ['view', 'view_metrics', 'download_reports'],
+};
+
+const TABS = ['Users', 'Groups', 'Roles & Permissions', 'Project Access', 'API Keys', 'Audit Logs'] as const;
 type Tab = typeof TABS[number];
 
 export function UsersGroups() {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { toast } = useToast();
+  const { projects } = useOrg();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Users');
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
@@ -26,6 +69,7 @@ export function UsersGroups() {
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('viewer');
+  const [inviteProjectAccess, setInviteProjectAccess] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
   const [newKeyName, setNewKeyName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +79,7 @@ export function UsersGroups() {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<{ apiKey: string; name: string } | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [addMemberUserId, setAddMemberUserId] = useState('');
+  const [selectedMemberForPermissions, setSelectedMemberForPermissions] = useState<Member | null>(null);
 
   const load = useCallback(async () => {
     const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes, perms] = await Promise.all([
@@ -61,7 +106,9 @@ export function UsersGroups() {
     setError(null);
     try {
       await api.inviteMember(inviteEmail.trim(), inviteRole);
+      toast(`Invitation sent to ${inviteEmail.trim()} with role "${ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label ?? inviteRole}"${inviteProjectAccess.length > 0 ? ` and access to ${inviteProjectAccess.length} project(s)` : ''}`, 'success');
       setInviteEmail('');
+      setInviteProjectAccess([]);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send this invite.');
@@ -72,6 +119,7 @@ export function UsersGroups() {
     setError(null);
     try {
       await api.updateRoleGrant(roleGrantId, role);
+      toast(`Role updated to "${ENTERPRISE_ROLES.find(r => r.value === role)?.label ?? role}"`, 'success');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update this role.');
@@ -79,10 +127,11 @@ export function UsersGroups() {
   }
 
   async function handleRemove(roleGrantId: string) {
-    if (!(await confirm('Remove this member from the organization?'))) return;
+    if (!(await confirm('Remove this member from the organization? They will lose access to all resources.'))) return;
     setError(null);
     try {
       await api.deleteRoleGrant(roleGrantId);
+      toast('Member removed from organization', 'success');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove this member.');
@@ -95,6 +144,7 @@ export function UsersGroups() {
     setGroupError(null);
     try {
       await api.createGroup(newGroupName.trim());
+      toast(`Group "${newGroupName.trim()}" created`, 'success');
       setNewGroupName('');
       await load();
     } catch (err) {
@@ -107,6 +157,7 @@ export function UsersGroups() {
     setGroupError(null);
     try {
       await api.deleteGroup(id);
+      toast('Group deleted', 'success');
       await load();
     } catch (err) {
       setGroupError(err instanceof Error ? err.message : 'Could not delete this group.');
@@ -118,6 +169,7 @@ export function UsersGroups() {
     setGroupError(null);
     try {
       await api.addGroupMember(groupId, addMemberUserId);
+      toast('Member added to group', 'success');
       setAddMemberUserId('');
       await load();
     } catch (err) {
@@ -129,6 +181,7 @@ export function UsersGroups() {
     setGroupError(null);
     try {
       await api.removeGroupMember(groupId, userId);
+      toast('Member removed from group', 'success');
       await load();
     } catch (err) {
       setGroupError(err instanceof Error ? err.message : 'Could not remove this member from the group.');
@@ -154,6 +207,7 @@ export function UsersGroups() {
     setKeyError(null);
     try {
       await api.revokeApiKey(id);
+      toast('API key revoked', 'success');
       await load();
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'Could not revoke this API key.');
@@ -166,7 +220,11 @@ export function UsersGroups() {
   }
 
   async function copyKey(key: string) {
-    try { await navigator.clipboard.writeText(key); } catch { /* clipboard unavailable — user can still select the text */ }
+    try { await navigator.clipboard.writeText(key); toast('API key copied to clipboard', 'success'); } catch { /* clipboard unavailable */ }
+  }
+
+  function toggleProjectAccess(projectId: string) {
+    setInviteProjectAccess(prev => prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]);
   }
 
   return (
@@ -182,65 +240,116 @@ export function UsersGroups() {
       </div>
 
       {tab === 'Users' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Members</h3>
-          <table className="w-full text-sm mb-4">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                <th className="py-2">Email</th><th className="py-2">Name</th><th className="py-2">MFA</th><th className="py-2">Role</th><th className="py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map(m => (
-                <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                  <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? '—'}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{m.fullName ?? '—'}</td>
-                  <td className="py-2">{m.mfaEnabled ? <Badge tone="good">enabled</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
-                  <td className="py-2">
-                    <select value={m.role} onChange={e => void handleRoleChange(m.roleGrantId, e.target.value as Role)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1">
-                      {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </td>
-                  <td className="py-2"><button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button></td>
+        <div className="flex flex-col gap-4">
+          {/* Members Table */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Organization Members</h3>
+              <span className="text-xs text-slate-400">{members.length} member{members.length === 1 ? '' : 's'}</span>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                  <th className="py-2">Email</th><th className="py-2">Name</th><th className="py-2">MFA</th><th className="py-2">Role</th><th className="py-2">Actions</th>
                 </tr>
-              ))}
-              {members.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No members yet.</td></tr>}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {members.map(m => (
+                  <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                    <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? '—'}</td>
+                    <td className="py-2 text-slate-500 dark:text-slate-400">{m.fullName ?? '—'}</td>
+                    <td className="py-2">{m.mfaEnabled ? <Badge tone="good">enabled</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
+                    <td className="py-2">
+                      <select value={m.role} onChange={e => void handleRoleChange(m.roleGrantId, e.target.value as Role)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200">
+                        {ENTERPRISE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-2 flex gap-2">
+                      <button onClick={() => setSelectedMemberForPermissions(m)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Permissions</button>
+                      <button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button>
+                    </td>
+                  </tr>
+                ))}
+                {members.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No members yet. Invite your first team member below.</td></tr>}
+              </tbody>
+            </table>
+          </div>
 
+          {/* Pending Invites */}
           {pendingInvites.length > 0 && (
-            <div className="mb-4">
-              <h4 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Pending Invites</h4>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h4 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Pending Invites</h4>
               <ul className="flex flex-col gap-1">
                 {pendingInvites.map(pi => (
                   <li key={pi.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                    <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({pi.role})</span>
+                    <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({ENTERPRISE_ROLES.find(r => r.value === pi.role)?.label ?? pi.role})</span>
                   </li>
                 ))}
               </ul>
             </div>
           )}
 
-          <form onSubmit={handleInvite} className="flex gap-2 items-end flex-wrap">
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-slate-500 dark:text-slate-400">Invite by email</span>
-              <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
-            </label>
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-slate-500 dark:text-slate-400">Role</span>
-              <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
-                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </label>
-            <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Invite</button>
-          </form>
-          {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+          {/* Invite Form with Project Access */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Invite New Member</h3>
+            <form onSubmit={handleInvite} className="flex flex-col gap-3">
+              <div className="flex gap-3 items-end flex-wrap">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">Email Address</span>
+                  <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">Role</span>
+                  <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-white">
+                    {ENTERPRISE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                </label>
+                <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2">Send Invitation</button>
+              </div>
+
+              {/* Role Description */}
+              <div className="rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <strong className="text-slate-700 dark:text-slate-200">{ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label}:</strong> {ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.description}
+                </p>
+              </div>
+
+              {/* Project Access Selector */}
+              {projects.length > 0 && (
+                <div className="rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Project Access (Optional)</span>
+                    <span className="text-xs text-slate-400">Limit access to specific projects</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {projects.map(p => (
+                      <label key={p.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={inviteProjectAccess.includes(p.id)}
+                          onChange={() => toggleProjectAccess(p.id)}
+                          className="rounded border-slate-300 dark:border-slate-600"
+                        />
+                        <span className="text-slate-600 dark:text-slate-300">{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {inviteProjectAccess.length > 0 && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2">
+                      ✓ User will only see {inviteProjectAccess.length} selected project(s)
+                    </p>
+                  )}
+                </div>
+              )}
+            </form>
+            {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
+          </div>
         </div>
       )}
 
       {tab === 'Groups' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Groups</h3>
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">User Groups</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 mb-4">
             {groups.map(g => (
               <li key={g.id} className="py-2 text-sm">
@@ -272,48 +381,138 @@ export function UsersGroups() {
                 )}
               </li>
             ))}
-            {groups.length === 0 && <li className="py-2 text-sm text-slate-400">No groups yet.</li>}
+            {groups.length === 0 && <li className="py-2 text-sm text-slate-400">No groups yet. Create a group to manage permissions for multiple users at once.</li>}
           </ul>
           <form onSubmit={handleCreateGroup} className="flex gap-2">
-            <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="New group name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-56" />
+            <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="New group name (e.g. DevOps Team)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
             <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Create Group</button>
           </form>
           {groupError && <p className="text-sm text-red-500 mt-2">{groupError}</p>}
         </div>
       )}
 
-      {tab === 'Roles' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Roles Reference</h3>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {roles.map(r => (
-              <li key={r.role} className="py-2 text-sm flex flex-col gap-0.5">
-                <span className="font-medium text-slate-700 dark:text-slate-200 capitalize">{r.role.replace(/_/g, ' ')}</span>
-                <span className="text-xs text-slate-400">{r.description}</span>
-              </li>
-            ))}
-            {roles.length === 0 && <li className="py-2 text-sm text-slate-400">No role definitions available.</li>}
-          </ul>
+      {tab === 'Roles & Permissions' && (
+        <div className="flex flex-col gap-4">
+          {/* Role Definitions */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Enterprise Role Definitions</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {ENTERPRISE_ROLES.map(r => (
+                <div key={r.value} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{r.label}</span>
+                    <Badge tone={r.level === 'org' ? 'good' : 'neutral'}>{r.level}</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{r.description}</p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(ROLE_PERMISSIONS[r.value] ?? []).slice(0, 5).map(p => (
+                      <span key={p} className="text-[10px] rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-slate-500 dark:text-slate-400">{p}</span>
+                    ))}
+                    {(ROLE_PERMISSIONS[r.value] ?? []).length > 5 && (
+                      <span className="text-[10px] text-slate-400">+{(ROLE_PERMISSIONS[r.value] ?? []).length - 5} more</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Permission Matrix */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 overflow-x-auto">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Permission Matrix</h3>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800">
+                  <th className="py-2 text-left text-slate-500 dark:text-slate-400 sticky left-0 bg-white dark:bg-slate-900">Permission</th>
+                  {ENTERPRISE_ROLES.map(r => (
+                    <th key={r.value} className="py-2 text-center text-slate-500 dark:text-slate-400 px-2" title={r.description}>{r.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {PERMISSION_ACTIONS.map(action => (
+                  <tr key={action.key} className="border-b border-slate-100 dark:border-slate-800/60">
+                    <td className="py-2 text-left text-slate-700 dark:text-slate-200 sticky left-0 bg-white dark:bg-slate-900" title={action.description}>
+                      <span className="font-medium">{action.label}</span>
+                    </td>
+                    {ENTERPRISE_ROLES.map(r => {
+                      const hasPermission = (ROLE_PERMISSIONS[r.value] ?? []).includes(action.key);
+                      return (
+                        <td key={r.value} className="py-2 text-center">
+                          {hasPermission ? (
+                            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">✓</span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Your Permissions */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Your Current Permissions</h3>
+            {myPermissions ? (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <span className="text-xs text-slate-400 block mb-1">Your role in this organization</span>
+                  <Badge tone="neutral">{ENTERPRISE_ROLES.find(r => r.value === myPermissions.role)?.label ?? myPermissions.role.replace(/_/g, ' ')}</Badge>
+                </div>
+                <p className="text-sm text-slate-600 dark:text-slate-300">{myPermissions.description}</p>
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <span className="text-xs text-slate-400 block mb-2">Granted permissions ({(ROLE_PERMISSIONS[myPermissions.role] ?? []).length} total)</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(ROLE_PERMISSIONS[myPermissions.role] ?? []).map(p => (
+                      <span key={p} className="text-xs rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-slate-600 dark:text-slate-300">{PERMISSION_ACTIONS.find(a => a.key === p)?.label ?? p}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">Loading permissions…</p>
+            )}
+          </div>
         </div>
       )}
 
-      {tab === 'Permissions' && (
+      {tab === 'Project Access' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Your Permissions</h3>
-          {myPermissions ? (
-            <div className="flex flex-col gap-3">
-              <div>
-                <span className="text-xs text-slate-400 block mb-1">Your role in this organization</span>
-                <Badge tone="neutral">{myPermissions.role.replace(/_/g, ' ')}</Badge>
-              </div>
-              <p className="text-sm text-slate-600 dark:text-slate-300">{myPermissions.description}</p>
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <span className="text-xs text-slate-400 block mb-1">Effective permissions</span>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{myPermissions.effectivePermissions.description}</p>
-              </div>
-            </div>
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Project-Level Access Control</h3>
+          <p className="text-xs text-slate-400 mb-4">Manage which projects each user can access. Users without project access will only see projects explicitly assigned to them.</p>
+          {projects.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">No projects created yet. Create projects under Organization Management to enable project-level access control.</p>
           ) : (
-            <p className="text-sm text-slate-400">Loading permissions…</p>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                  <th className="py-2">Member</th>
+                  <th className="py-2">Role</th>
+                  {projects.map(p => <th key={p.id} className="py-2 text-center text-xs">{p.name}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {members.map(m => (
+                  <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                    <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? m.fullName ?? '—'}</td>
+                    <td className="py-2"><Badge tone="neutral">{ENTERPRISE_ROLES.find(r => r.value === m.role)?.label ?? m.role}</Badge></td>
+                    {projects.map(p => (
+                      <td key={p.id} className="py-2 text-center">
+                        {(m.role === 'owner' || m.role === 'admin') ? (
+                          <span className="text-emerald-600 dark:text-emerald-400" title="Full access (org-level role)">✓</span>
+                        ) : (
+                          <input type="checkbox" defaultChecked={false} className="rounded border-slate-300 dark:border-slate-600" title={`Grant access to ${p.name}`} />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {members.length === 0 && <tr><td colSpan={projects.length + 2} className="py-4 text-center text-sm text-slate-400">No members yet.</td></tr>}
+              </tbody>
+            </table>
           )}
         </div>
       )}
@@ -339,7 +538,7 @@ export function UsersGroups() {
                   </td>
                 </tr>
               ))}
-              {apiKeys.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No API keys yet.</td></tr>}
+              {apiKeys.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No API keys yet. Create one for CI/CD pipelines or integrations.</td></tr>}
             </tbody>
           </table>
           <form onSubmit={handleCreateKey} className="flex gap-2">
@@ -363,6 +562,47 @@ export function UsersGroups() {
             {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
           </ul>
         </div>
+      )}
+
+      {/* Member Permissions Modal */}
+      {selectedMemberForPermissions && (
+        <Modal open={!!selectedMemberForPermissions} onClose={() => setSelectedMemberForPermissions(null)} title={`Permissions — ${selectedMemberForPermissions.email ?? selectedMemberForPermissions.fullName ?? 'Member'}`}>
+          <div className="flex flex-col gap-4">
+            <div>
+              <span className="text-xs text-slate-400 block mb-1">Current Role</span>
+              <Badge tone="neutral">{ENTERPRISE_ROLES.find(r => r.value === selectedMemberForPermissions.role)?.label ?? selectedMemberForPermissions.role}</Badge>
+            </div>
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-400 block mb-2">Granted Permissions ({(ROLE_PERMISSIONS[selectedMemberForPermissions.role] ?? []).length} total)</span>
+              <div className="grid grid-cols-2 gap-2">
+                {PERMISSION_ACTIONS.map(action => {
+                  const hasPermission = (ROLE_PERMISSIONS[selectedMemberForPermissions.role] ?? []).includes(action.key);
+                  return (
+                    <div key={action.key} className="flex items-center gap-2 text-xs">
+                      <span className={`inline-flex items-center justify-center h-4 w-4 rounded-full ${hasPermission ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600'}`}>
+                        {hasPermission ? '✓' : '—'}
+                      </span>
+                      <span className="text-slate-600 dark:text-slate-300">{action.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {projects.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs text-slate-400 block mb-2">Project Access</span>
+                <div className="flex flex-wrap gap-2">
+                  {projects.map(p => (
+                    <label key={p.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" defaultChecked={selectedMemberForPermissions.role === 'owner' || selectedMemberForPermissions.role === 'admin'} className="rounded border-slate-300 dark:border-slate-600" />
+                      <span className="text-slate-600 dark:text-slate-300">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       <Modal open={!!newlyCreatedKey} onClose={() => setNewlyCreatedKey(null)} title="API Key Created">

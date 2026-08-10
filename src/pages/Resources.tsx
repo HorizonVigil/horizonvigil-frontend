@@ -173,6 +173,7 @@ export function Resources() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [service, setService] = useState('');
+  const [providerFilter, setProviderFilter] = useState<'all' | 'aws' | 'gcp'>('all');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -404,6 +405,90 @@ export function Resources() {
     return connections.find(c => c.id === connectionId)?.provider ?? null;
   }, [connections]);
 
+  // Provider-filtered resources — when a provider filter is active, only
+  // show resources from connections of that provider. This is the critical
+  // fix for the "GCP filter shows AWS resources" bug.
+  const providerFilteredResources = useMemo(() => {
+    if (providerFilter === 'all') return resources;
+    return resources.filter(r => providerFor(r.connection_id) === providerFilter);
+  }, [resources, providerFilter, providerFor]);
+
+  // Provider-filtered service options — only show services that have
+  // resources for the selected provider.
+  const providerServiceOptions = useMemo(() => {
+    if (providerFilter === 'all') return serviceOptions;
+    // Get the set of services that have resources for this provider
+    const providerServices = new Set<string>();
+    for (const r of resources) {
+      if (providerFor(r.connection_id) === providerFilter) {
+        const cat = catalogByKey.get(r.resource_type_key);
+        if (cat) providerServices.add(cat.service);
+      }
+    }
+    return serviceOptions.filter(s => providerServices.has(s.service));
+  }, [serviceOptions, providerFilter, resources, providerFor, catalogByKey]);
+
+  // Provider-filtered connections — used to pass the right connection IDs
+  // to the API when a provider filter is active.
+  const providerConnectionIds = useMemo(() => {
+    if (providerFilter === 'all') return null;
+    return connections.filter(c => c.provider === providerFilter).map(c => c.id);
+  }, [connections, providerFilter]);
+
+  // Provider-filtered dashboard data — when a provider filter is active,
+  // derive all dashboard aggregates from providerFilteredResources instead
+  // of the org-wide dashboard. This ensures charts, KPIs, and donuts only
+  // show data for the selected provider.
+  const providerDashboardData = useMemo(() => {
+    if (providerFilter === 'all') return null;
+    const byCategory: Record<string, number> = {};
+    const byRegion: Record<string, number> = {};
+    for (const r of providerFilteredResources) {
+      byCategory[r.category] = (byCategory[r.category] ?? 0) + 1;
+      if (r.region) byRegion[r.region] = (byRegion[r.region] ?? 0) + 1;
+    }
+    return { total: providerFilteredResources.length, byCategory, byRegion };
+  }, [providerFilteredResources, providerFilter]);
+
+  // Top services — org-wide from explorerServices, or provider-filtered
+  const topServices = useMemo(() => {
+    if (providerFilter !== 'all') {
+      const counts: Record<string, number> = {};
+      for (const r of providerFilteredResources) {
+        const cat = catalogByKey.get(r.resource_type_key);
+        if (cat) counts[cat.service] = (counts[cat.service] ?? 0) + 1;
+      }
+      return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
+    }
+    return Object.entries(explorerServices).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
+  }, [providerFilteredResources, providerFilter, explorerServices, catalogByKey]);
+
+  // Provider-filtered tag keys — derive from providerFilteredResources
+  // instead of the org-wide getResourceTags() API call.
+  const providerTagKeys = useMemo(() => {
+    if (providerFilter === 'all') return tagKeys;
+    const tagMap: Record<string, { count: number; values: Set<string> }> = {};
+    for (const r of providerFilteredResources) {
+      if (!r.tags) continue;
+      for (const [k, v] of Object.entries(r.tags)) {
+        if (!tagMap[k]) tagMap[k] = { count: 0, values: new Set() };
+        tagMap[k].count++;
+        if (tagMap[k].values.size < 5) tagMap[k].values.add(String(v));
+      }
+    }
+    return Object.entries(tagMap).map(([key, data]) => ({
+      key,
+      resourceCount: data.count,
+      sampleValues: [...data.values],
+    })).sort((a, b) => b.resourceCount - a.resourceCount);
+  }, [providerFilteredResources, providerFilter, tagKeys]);
+
+  // Provider-filtered recent events — filter by provider's connection IDs.
+  const providerRecentEvents = useMemo(() => {
+    if (providerFilter === 'all') return recentEvents;
+    return recentEvents.filter(e => providerFor(e.connection_id) === providerFilter);
+  }, [recentEvents, providerFilter, providerFor]);
+
   // dashboard/explorerServices/recentEvents (below) are org-wide aggregates
   // fetched once, unaffected by the URL's category/service filter — fine for
   // /resources/all, but showing them on a workspace page (e.g. /resources/
@@ -411,34 +496,35 @@ export function Resources() {
   // which one you were on. Everything under isWorkspaceView instead derives
   // from `resources`/`filteredTotal`, the same filtered data the table below
   // already uses.
-  const total = isWorkspaceView ? filteredTotal : (dashboard?.total ?? 0);
-  const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: dashboard?.byCategory[c] ?? 0 }));
-  const othersCount = Math.max(0, (dashboard?.total ?? 0) - coreCounts.reduce((s, c) => s + c.count, 0));
+  const total = isWorkspaceView ? filteredTotal : (providerDashboardData?.total ?? dashboard?.total ?? 0);
+  const activeByCategory = providerDashboardData?.byCategory ?? dashboard?.byCategory ?? {};
+  const activeByRegion = providerDashboardData?.byRegion ?? dashboard?.byRegion ?? {};
+  const coreCounts = CORE_CATEGORIES.map(c => ({ category: c, count: activeByCategory[c] ?? 0 }));
+  const othersCount = Math.max(0, total - coreCounts.reduce((s, c) => s + c.count, 0));
 
   const healthCounts = useMemo(() => {
     const counts = { Healthy: 0, Warning: 0, Critical: 0, Unknown: 0 };
-    for (const r of resources) {
+    for (const r of providerFilteredResources) {
       if (r.status === 'active') counts.Healthy++;
       else if (r.status === 'stopped') counts.Warning++;
       else if (r.status === 'terminated' || r.status === 'deleted') counts.Critical++;
       else counts.Unknown++;
     }
     return counts;
-  }, [resources]);
+  }, [providerFilteredResources]);
   const healthTotal = Object.values(healthCounts).reduce((s, v) => s + v, 0) || 1;
 
-  const topServices = Object.entries(explorerServices).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value }));
   // No org-wide by-resource-type aggregate exists in the new API — derived
   // from the currently loaded (filtered, up to 200) resource rows, same
   // sampling approach already used for Resource Health below.
   const topResourceTypes = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const r of resources) {
+    for (const r of providerFilteredResources) {
       const label = catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key;
       counts[label] = (counts[label] ?? 0) + 1;
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
-  }, [resources, catalogByKey]);
+  }, [providerFilteredResources, catalogByKey]);
 
   // Workspace-view (single category/service) equivalents of the org-wide
   // "Resources by Region" donut and "Recent Resource Changes" list — derived
@@ -529,7 +615,7 @@ export function Resources() {
             {!isWorkspaceView && (
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
                 <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Service Category</h3>
-                <Donut data={Object.entries(dashboard?.byCategory ?? {}).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
+                <Donut data={Object.entries(activeByCategory).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(total), caption: 'resources' }} />
               </div>
             )}
             {!isWorkspaceView && (
@@ -550,7 +636,7 @@ export function Resources() {
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resources by Region</h3>
               <Donut
-                data={Object.entries(isWorkspaceView ? workspaceByRegion : (dashboard?.byRegion ?? {})).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))}
+                data={Object.entries(isWorkspaceView ? workspaceByRegion : activeByRegion).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }))}
                 centerLabel={{ value: String(total), caption: 'resources' }}
               />
             </div>
@@ -577,7 +663,7 @@ export function Resources() {
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent {isWorkspaceView ? serviceLabel(presetService, presetCategory) : ''} Resource Changes</h3>
-            <DataTable columns={eventColumns} rows={workspaceRecentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
+            <DataTable columns={eventColumns} rows={providerRecentEvents} rowKey={e => `${e.aws_resource_id}:${e.event_type}:${e.occurred_at}`} emptyMessage="No resource changes recorded yet." />
             <p className="text-xs text-slate-400 mt-2">Last 20 changes — for the full filterable history, see the Resource Timeline tab.</p>
           </div>
 
@@ -599,6 +685,14 @@ export function Resources() {
           </div>
           <div className="flex flex-wrap items-end gap-3 mb-3">
             <label className="flex flex-col gap-1">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Cloud Provider</span>
+              <select value={providerFilter} onChange={e => setProviderFilter(e.target.value as 'all' | 'aws' | 'gcp')} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${providerFilter !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+                <option value="all">All Providers</option>
+                <option value="aws">AWS</option>
+                <option value="gcp">GCP</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
             </label>
@@ -615,7 +709,7 @@ export function Resources() {
                   <span className="text-[11px] uppercase tracking-wide text-slate-400">Service</span>
                   <select value={service} onChange={e => setService(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${service ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
                     <option value="">All Services</option>
-                    {serviceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
+                    {providerServiceOptions.map(s => <option key={s.service} value={s.service} disabled={!s.live}>{s.service}{!s.live ? ' (coming soon)' : ''}</option>)}
                   </select>
                 </label>
               </>
@@ -627,13 +721,13 @@ export function Resources() {
                 {['active', 'stopped', 'terminated', 'deleted', 'unknown'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
-            {(status || search || (!isWorkspaceView && (category || service))) && (
-              <button onClick={() => { setStatus(''); setSearch(''); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+            {(status || search || providerFilter !== 'all' || (!isWorkspaceView && (category || service))) && (
+              <button onClick={() => { setStatus(''); setSearch(''); setProviderFilter('all'); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
             {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
           </div>
 
-          <DataTable columns={columns} rows={resources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage="No resources discovered yet — connect an AWS account and run a sync from Cloud Accounts." />
+          <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : 'AWS'} resources discovered yet. Connect a ${providerFilter === 'gcp' ? 'GCP' : 'AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS or GCP account and run a sync from Cloud Accounts."} />
         </>
       )}
 
@@ -689,14 +783,14 @@ export function Resources() {
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Tags Explorer</h3>
           {tagsLoading ? <p className="text-sm text-slate-400">Loading…</p> : (
             <div className="flex flex-col gap-2">
-              {tagKeys.map(t => (
+              {providerTagKeys.map(t => (
                 <div key={t.key} className="flex items-center justify-between border-b last:border-0 border-slate-100 dark:border-slate-800/60 py-1.5 text-sm">
                   <span className="text-slate-700 dark:text-slate-200 font-medium">{t.key}</span>
                   <span className="text-xs text-slate-400 truncate max-w-md">{t.sampleValues.slice(0, 4).join(', ')}{t.sampleValues.length > 4 ? '…' : ''}</span>
                   <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">{t.resourceCount} resources</span>
                 </div>
               ))}
-              {tagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
+              {providerTagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
             </div>
           )}
         </div>

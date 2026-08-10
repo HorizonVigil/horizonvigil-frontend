@@ -11,6 +11,7 @@ import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
 import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
+import { ResetPassword } from './pages/auth/ResetPassword';
 import { MfaChallenge } from './pages/auth/MfaChallenge';
 import { Overview } from './pages/Overview';
 import { CloudAccounts } from './pages/CloudAccounts';
@@ -32,6 +33,7 @@ import { UsersGroups } from './pages/UsersGroups';
 import { OrganizationManagement } from './pages/OrganizationManagement';
 import { Settings } from './pages/Settings';
 import { CustomDashboards } from './pages/CustomDashboards';
+import { AiCopilot } from './pages/AiCopilot';
 import { Automation } from './pages/Automation';
 import { Subscription } from './pages/Subscription';
 import { BillingSuccess } from './pages/BillingSuccess';
@@ -90,6 +92,10 @@ export default function App() {
                     <Route path="/login" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
                     <Route path="/signup" element={<RedirectIfAuthenticated><Signup /></RedirectIfAuthenticated>} />
                     <Route path="/forgot-password" element={<RedirectIfAuthenticated><ForgotPassword /></RedirectIfAuthenticated>} />
+                    {/* Not behind RedirectIfAuthenticated on purpose — the reset email
+                        carries a recovery token in the URL hash; an already-signed-in
+                        user who clicks it should still be able to set a new password. */}
+                    <Route path="/login/reset" element={<ResetPassword />} />
                     {/* Not behind RequireAuth/RequireOrg on purpose — reached mid-login,
                         with a real aal1 session that hasn't reached aal2 yet. Fetching
                         org-scoped data before that step-up completes isn't appropriate. */}
@@ -127,6 +133,7 @@ export default function App() {
                           <Route path="/organization" element={<OrganizationManagement />} />
                           <Route path="/settings" element={<Settings />} />
                           <Route path="/custom-dashboards" element={<CustomDashboards />} />
+                          <Route path="/ai-copilot" element={<AiCopilot />} />
                           <Route path="/automation" element={<Automation />} />
                           <Route path="/subscription" element={<RequireBilling><Subscription /></RequireBilling>} />
                           <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />

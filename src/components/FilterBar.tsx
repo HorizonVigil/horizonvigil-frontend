@@ -1,4 +1,5 @@
 import { useFilters, type DateRangePreset } from '../lib/filterContext';
+import { Icon } from './icons';
 
 // Kept in sync with cloud-api's DEFAULT_SCAN_REGIONS (scanners/types.ts) —
 // this previously omitted ap-south-1 and others, so even after a region was
@@ -25,12 +26,10 @@ const RANGE_LABELS: Record<DateRangePreset, string> = {
  * this app has; there's no separate all-AWS/all-GCP toggle, only
  * all-accounts or one specific one.
  *
- * `showAccountFilter`/`showRegionFilter`/`showDateFilter` each default to
- * true; pass false on a page whose data has no matching dimension (Reports
- * has no connection_id column at all; an account/connection LIST — as
- * opposed to resource- or cost-level data — has no meaningful "date range"
- * to filter by) — otherwise the control renders but silently does nothing
- * when changed, which is worse than not having it.
+ * `showAccountFilter` defaults to true; pass false on pages whose data has
+ * no per-account dimension (Reports has no connection_id column at all) —
+ * otherwise the control renders but silently does nothing when changed,
+ * which is worse than not having it.
  */
 export function FilterBar({ title, breadcrumb, showAccountFilter = true, showRegionFilter = true, showDateFilter = true }: { title: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean; showRegionFilter?: boolean; showDateFilter?: boolean }) {
   const { region, setRegion, account, setAccount, connections, dateRange, setDateRange, refresh } = useFilters();
@@ -67,8 +66,9 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true, showReg
             </select>
           </label>
         )}
-        <button onClick={refresh} title="Refresh" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
-          ↻ Refresh
+        <button onClick={refresh} title="Refresh" className="flex items-center gap-1.5 text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+          <Icon name="refresh-cw" size={14} />
+          Refresh
         </button>
       </div>
     </div>
