@@ -7,6 +7,7 @@ import { FilterProvider } from './lib/filterContext';
 import { SyncProvider } from './lib/syncContext';
 import { ToastProvider } from './lib/toast';
 import { Layout } from './components/Layout';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
 import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
@@ -104,38 +105,38 @@ export default function App() {
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>
                         <Route element={<Layout />}>
-                          <Route path="/overview" element={<Overview />} />
-                          <Route path="/cloud-accounts" element={<CloudAccounts />} />
-                          <Route path="/cloud-accounts/:id" element={<CloudAccountDetail />} />
-                          {/* Legacy routes — AWS Accounts and GCP Projects merged into one unified module; these keep old bookmarks/Favorites working. */}
+                          <Route path="/overview" element={<ProtectedRoute module="Overview"><Overview /></ProtectedRoute>} />
+                          <Route path="/cloud-accounts" element={<ProtectedRoute module="Cloud Accounts"><CloudAccounts /></ProtectedRoute>} />
+                          <Route path="/cloud-accounts/:id" element={<ProtectedRoute module="Cloud Accounts"><CloudAccountDetail /></ProtectedRoute>} />
+                          {/* Legacy routes — AWS Accounts and GCP Projects merged into one unified module; these keep old bookmarks/Favorites working. Just redirects, nothing to protect. */}
                           <Route path="/aws-accounts" element={<Navigate to="/cloud-accounts" replace />} />
                           <Route path="/aws-accounts/:id" element={<RedirectToAccountDetail />} />
                           <Route path="/gcp-projects" element={<Navigate to="/cloud-accounts" replace />} />
                           <Route path="/gcp-projects/:id" element={<RedirectToAccountDetail />} />
-                          <Route path="/resources" element={<ResourcesOverview />} />
-                          <Route path="/resources/all" element={<Resources />} />
-                          <Route path="/resources/:category" element={<ResourcesCategory />} />
-                          <Route path="/resources/:category/:service" element={<Resources />} />
-                          <Route path="/cost-management" element={<CostManagement />} />
-                          <Route path="/cost-optimization" element={<CostOptimization />} />
-                          <Route path="/vulnerability-management" element={<VulnerabilityManagement />} />
-                          {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. */}
+                          <Route path="/resources" element={<ProtectedRoute module="Resources"><ResourcesOverview /></ProtectedRoute>} />
+                          <Route path="/resources/all" element={<ProtectedRoute module="Resources"><Resources /></ProtectedRoute>} />
+                          <Route path="/resources/:category" element={<ProtectedRoute module="Resources"><ResourcesCategory /></ProtectedRoute>} />
+                          <Route path="/resources/:category/:service" element={<ProtectedRoute module="Resources"><Resources /></ProtectedRoute>} />
+                          <Route path="/cost-management" element={<ProtectedRoute module="Cost Management"><CostManagement /></ProtectedRoute>} />
+                          <Route path="/cost-optimization" element={<ProtectedRoute module="Cost Optimization"><CostOptimization /></ProtectedRoute>} />
+                          <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
+                          {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. Just a redirect, nothing to protect. */}
                           <Route path="/clusters" element={<Navigate to="/clusters/aws" replace />} />
-                          <Route path="/clusters/aws" element={<EksConsole />} />
-                          <Route path="/clusters/gcp" element={<GkeConsole />} />
-                          <Route path="/clusters/azure" element={<AksConsole />} />
-                          <Route path="/monitoring" element={<Monitoring />} />
-                          <Route path="/alerts" element={<Alerts />} />
-                          <Route path="/issues" element={<Issues />} />
-                          <Route path="/reports" element={<Reports />} />
+                          <Route path="/clusters/aws" element={<ProtectedRoute module="Clusters"><EksConsole /></ProtectedRoute>} />
+                          <Route path="/clusters/gcp" element={<ProtectedRoute module="Clusters"><GkeConsole /></ProtectedRoute>} />
+                          <Route path="/clusters/azure" element={<ProtectedRoute module="Clusters"><AksConsole /></ProtectedRoute>} />
+                          <Route path="/monitoring" element={<ProtectedRoute module="Monitoring"><Monitoring /></ProtectedRoute>} />
+                          <Route path="/alerts" element={<ProtectedRoute module="Alerts"><Alerts /></ProtectedRoute>} />
+                          <Route path="/issues" element={<ProtectedRoute module="Issues"><Issues /></ProtectedRoute>} />
+                          <Route path="/reports" element={<ProtectedRoute module="Reports"><Reports /></ProtectedRoute>} />
                           <Route path="/integrations" element={<Navigate to="/automation" replace />} />
-                          <Route path="/users-groups" element={<UsersGroups />} />
-                          <Route path="/organization" element={<OrganizationManagement />} />
-                          <Route path="/settings" element={<Settings />} />
-                          <Route path="/custom-dashboards" element={<CustomDashboards />} />
-                          <Route path="/ai-copilot" element={<AiCopilot />} />
-                          <Route path="/automation" element={<Automation />} />
-                          <Route path="/subscription" element={<RequireBilling><Subscription /></RequireBilling>} />
+                          <Route path="/users-groups" element={<ProtectedRoute module="Users & Groups" minRole="admin"><UsersGroups /></ProtectedRoute>} />
+                          <Route path="/organization" element={<ProtectedRoute module="Organization Management" minRole="admin"><OrganizationManagement /></ProtectedRoute>} />
+                          <Route path="/settings" element={<ProtectedRoute module="Settings" minRole="editor"><Settings /></ProtectedRoute>} />
+                          <Route path="/custom-dashboards" element={<ProtectedRoute module="Custom Dashboards"><CustomDashboards /></ProtectedRoute>} />
+                          <Route path="/ai-copilot" element={<ProtectedRoute module="AI Copilot"><AiCopilot /></ProtectedRoute>} />
+                          <Route path="/automation" element={<ProtectedRoute module="Automation" minRole="editor"><Automation /></ProtectedRoute>} />
+                          <Route path="/subscription" element={<RequireBilling><ProtectedRoute module="Subscription"><Subscription /></ProtectedRoute></RequireBilling>} />
                           <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />
                           <Route path="/billing/canceled" element={<RequireBilling><BillingCanceled /></RequireBilling>} />
                           <Route path="/billing/mock-checkout" element={<RequireBilling><MockCheckout /></RequireBilling>} />
