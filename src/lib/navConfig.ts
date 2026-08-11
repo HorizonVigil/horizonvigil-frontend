@@ -286,8 +286,8 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: 'Users', to: USERS, real: true },
       { label: 'Groups', to: tabLink(USERS, 'Groups'), real: true },
-      { label: 'Roles', to: tabLink(USERS, 'Roles'), real: true },
-      { label: 'Permissions', to: tabLink(USERS, 'Permissions'), real: true },
+      { label: 'Roles & Permissions', to: tabLink(USERS, 'Roles & Permissions'), real: true },
+      { label: 'Project Access', to: tabLink(USERS, 'Project Access'), real: true },
       { label: 'API Keys', to: tabLink(USERS, 'API Keys'), real: true, minRole: 'admin' },
       { label: 'Audit Logs', to: tabLink(USERS, 'Audit Logs'), real: true },
     ],
@@ -379,18 +379,41 @@ export function canSeeModule(mod: NavModule, role: Role, permissions?: Record<st
 }
 
 /**
+ * RBAC submenu-level permissions. A child's menu_key is derived from its
+ * parent module's icon + a slug of its own label (e.g. 'cost:cost-explorer')
+ * — children have no stable id of their own today, and labels are unique
+ * within a module's children array, so this is deterministic without a
+ * schema change (menu_permissions.menu_key is a free-form text column).
+ */
+export function submenuKey(parentIcon: string, childLabel: string): string {
+  const slug = childLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  return `${parentIcon}:${slug}`;
+}
+
+/**
+ * Child-level visibility, permission-aware — same precedence as
+ * canSeeModule: an explicit submenu override fully determines visibility,
+ * independent of minRole/roles; no override falls back to the role check.
+ */
+export function canSeeChild(child: NavChild, role: Role, parentIcon: string, permissions?: Record<string, MenuPermissionLevel> | null): boolean {
+  const override = permissions?.[submenuKey(parentIcon, child.label)];
+  if (override) return override !== 'none';
+  return canSee(child, role);
+}
+
+/**
  * Returns the navigation modules visible to the given role (and, when
  * provided, effective menu permissions). Filters each module by its own
- * permission, then filters children. A module with no visible children is
- * hidden entirely. Children stay role-only for now — Phase 2's granularity
- * is per top-level module, matching menu_permissions.menu_key.
+ * permission, then filters children by their own submenu-level permission
+ * (falling back to role check when no explicit override exists). A module
+ * with no visible children is hidden entirely.
  */
 export function getVisibleModules(role: Role, permissions?: Record<string, MenuPermissionLevel> | null): NavModule[] {
   return NAV_MODULES
     .filter((mod) => canSeeModule(mod, role, permissions))
     .map((mod) => ({
       ...mod,
-      children: mod.children.filter((child) => canSee(child, role)),
+      children: mod.children.filter((child) => canSeeChild(child, role, mod.icon, permissions)),
     }))
     .filter((mod) => mod.children.length > 0 || mod.to);
 }

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
-import { findActiveModule, isChildActive, canSee, type Role } from '../lib/navConfig';
+import { findActiveModule, isChildActive, canSeeChild, canSeeModule, type Role } from '../lib/navConfig';
 import { Icon, NAV_ICON_MAP } from './icons';
 
 /**
@@ -13,7 +13,7 @@ import { Icon, NAV_ICON_MAP } from './icons';
  * Switching domains happens in AppRail, not here.
  */
 export function Sidebar() {
-  const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope } = useOrg();
+  const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope, menuPermissions } = useOrg();
   const { signOut, user } = useAuth();
   const location = useLocation();
   const [search, setSearch] = useState('');
@@ -24,8 +24,14 @@ export function Sidebar() {
   const activeModule = useMemo(() => findActiveModule(location.pathname), [location.pathname]);
   const filteredChildren = useMemo(() => {
     if (!activeModule) return [];
-    return activeModule.children.filter(child => canSee(child, role));
-  }, [activeModule, role]);
+    // findActiveModule matches on the URL alone, regardless of whether this
+    // user can actually see the module -- landing on a denied route (e.g.
+    // typing /reports directly) must not leak that module's submenu list
+    // into the sidebar even though ProtectedRoute correctly blocks the main
+    // content with AccessDenied.
+    if (!canSeeModule(activeModule, role, menuPermissions)) return [];
+    return activeModule.children.filter(child => canSeeChild(child, role, activeModule.icon, menuPermissions));
+  }, [activeModule, role, menuPermissions]);
 
   const projectCountByFolder = useMemo(() => {
     const counts = new Map<string, number>();

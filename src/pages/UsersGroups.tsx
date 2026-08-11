@@ -8,14 +8,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useOrg } from '../lib/orgContext';
 import { useToast } from '../lib/toast';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
-import { NAV_MODULES } from '../lib/navConfig';
-
-const MENU_LEVELS: { value: MenuPermissionLevel; label: string }[] = [
-  { value: 'none', label: 'No Access' },
-  { value: 'read', label: 'Read' },
-  { value: 'write', label: 'Write' },
-  { value: 'admin', label: 'Admin' },
-];
+import { MenuAccessTree } from '../components/MenuAccessTree';
 
 type MyPermissions = { role: Role; description: string; effectivePermissions: { role: Role; description: string } };
 
@@ -715,35 +708,12 @@ export function UsersGroups() {
               {menuPermsLoading ? (
                 <p className="text-xs text-slate-400">Loading…</p>
               ) : (
-                <div className="max-h-64 overflow-y-auto flex flex-col gap-1.5">
-                  {NAV_MODULES.map((mod) => {
-                    const override = menuOverrides.find((o) => o.menu_key === mod.icon);
-                    const level = menuEffective[mod.icon] ?? 'read';
-                    return (
-                      <div key={mod.icon} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="text-slate-600 dark:text-slate-300 truncate">{mod.label}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {override && (
-                            <button
-                              onClick={() => void handleMenuOverrideReset(selectedMemberForPermissions.userId, override.id)}
-                              title="Revert to role default"
-                              className="text-[10px] text-slate-400 hover:text-brand-600 dark:hover:text-brand-400"
-                            >
-                              reset
-                            </button>
-                          )}
-                          <select
-                            value={level}
-                            onChange={(e) => void handleMenuLevelChange(selectedMemberForPermissions.userId, mod.icon, e.target.value as MenuPermissionLevel)}
-                            className={`rounded-md border px-1.5 py-1 text-[11px] ${override ? 'border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'} bg-white dark:bg-slate-800`}
-                          >
-                            {MENU_LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <MenuAccessTree
+                  overrides={menuOverrides}
+                  effective={menuEffective}
+                  onLevelChange={(menuKey, level) => void handleMenuLevelChange(selectedMemberForPermissions.userId, menuKey, level)}
+                  onReset={(_menuKey, overrideId) => void handleMenuOverrideReset(selectedMemberForPermissions.userId, overrideId)}
+                />
               )}
             </div>
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -821,35 +791,11 @@ export function UsersGroups() {
             {groupMenuPermsLoading ? (
               <p className="text-xs text-slate-400">Loading…</p>
             ) : (
-              <div className="max-h-72 overflow-y-auto flex flex-col gap-1.5">
-                {NAV_MODULES.map((mod) => {
-                  const override = groupMenuOverrides.find((o) => o.menu_key === mod.icon);
-                  return (
-                    <div key={mod.icon} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="text-slate-600 dark:text-slate-300 truncate">{mod.label}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {override && (
-                          <button
-                            onClick={() => void handleGroupMenuOverrideReset(selectedGroupForPermissions.id, override.id)}
-                            title="Remove this group grant"
-                            className="text-[10px] text-slate-400 hover:text-brand-600 dark:hover:text-brand-400"
-                          >
-                            reset
-                          </button>
-                        )}
-                        <select
-                          value={override?.level ?? ''}
-                          onChange={(e) => void handleGroupMenuLevelChange(selectedGroupForPermissions.id, mod.icon, e.target.value as MenuPermissionLevel)}
-                          className={`rounded-md border px-1.5 py-1 text-[11px] ${override ? 'border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'} bg-white dark:bg-slate-800`}
-                        >
-                          <option value="" disabled>No grant set — choose a level to add one</option>
-                          {MENU_LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <MenuAccessTree
+                overrides={groupMenuOverrides}
+                onLevelChange={(menuKey, level) => void handleGroupMenuLevelChange(selectedGroupForPermissions.id, menuKey, level)}
+                onReset={(_menuKey, overrideId) => void handleGroupMenuOverrideReset(selectedGroupForPermissions.id, overrideId)}
+              />
             )}
           </div>
         </Modal>
