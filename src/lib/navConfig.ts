@@ -153,7 +153,6 @@ export const NAV_MODULES: NavModule[] = [
     to: RESOURCES,
     children: [
       { label: 'Resource Inventory', to: RESOURCES, real: true },
-      { label: 'Resource Explorer', to: `${RESOURCES}/all`, real: true },
       { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
       { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
       { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
