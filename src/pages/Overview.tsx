@@ -122,7 +122,7 @@ export function Overview() {
       )}
 
       {/* Executive KPI Row */}
-      <div id="executive-dashboard" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div id="executive-dashboard" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 scroll-mt-4">
         <button type="button" onClick={() => navigate('/cloud-accounts')} className="exec-kpi-card text-left w-full cursor-pointer">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="cloud" size={14} className="text-brand-500" />
@@ -177,7 +177,7 @@ export function Overview() {
 
       {/* Quick Actions */}
       {quickActions.length > 0 && (
-        <div id="quick-actions" className="mb-5">
+        <div id="quick-actions" className="mb-5 scroll-mt-4">
           <h3 className="section-title mb-2 flex items-center gap-1.5">
             <Icon name="zap" size={14} className="text-slate-400" />
             Quick Actions
@@ -267,7 +267,7 @@ export function Overview() {
 
       {/* Favorites + Activity Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <div id="favorites" className="chart-card">
+        <div id="favorites" className="chart-card scroll-mt-4">
           <div className="chart-card-header">
             <h3 className="chart-card-title">Favorites</h3>
             <span className="text-xs text-slate-400">Pinned resources</span>
@@ -288,7 +288,7 @@ export function Overview() {
             </ul>
           )}
         </div>
-        <div id="activity-timeline" className="chart-card">
+        <div id="activity-timeline" className="chart-card scroll-mt-4">
           <div className="chart-card-header">
             <h3 className="chart-card-title">Recent Activity</h3>
             <span className="text-xs text-slate-400">Audit trail</span>
