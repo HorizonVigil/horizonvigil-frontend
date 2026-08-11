@@ -10,7 +10,7 @@ import { LineChart } from '../components/charts/LineChart';
 import { BarChart } from '../components/charts/BarChart';
 import { Icon } from '../components/icons';
 import { useOrg } from '../lib/orgContext';
-import { useFilters } from '../lib/filterContext';
+import { useFilters, dateRangeToDays } from '../lib/filterContext';
 import { api, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
 
 function money(n: number): string {
@@ -19,11 +19,12 @@ function money(n: number): string {
 
 export function Overview() {
   const { folders, projects } = useOrg();
-  const { refreshToken } = useFilters();
+  const { region, dateRange, refreshToken } = useFilters();
   const navigate = useNavigate();
   const location = useLocation();
   const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
   const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
+  const [trendDays, setTrendDays] = useState(30);
   const [costByService, setCostByService] = useState<Record<string, number>>({});
   const [forecast, setForecast] = useState<number | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -34,17 +35,20 @@ export function Overview() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const days = dateRangeToDays(dateRange);
+      const from = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const [dash, resourcesDash, costAnalytics, costForecast, activityRes, quickActionsRes, favoritesRes] = await Promise.all([
-        api.getOverviewDashboard(),
-        api.getResourcesDashboard(),
-        api.getCostAnalytics(),
-        api.getCostForecast(),
-        api.getRecentActivity(1, 8),
+        api.getOverviewDashboard({ region }),
+        api.getResourcesDashboard({ region, days }),
+        api.getCostAnalytics({ region, from }),
+        api.getCostForecast({ region }),
+        api.getRecentActivity(1, 8, from),
         api.getQuickActions(),
         api.getFavorites(),
       ]);
       setDashboard(dash);
       setResourceTrend(resourcesDash.trend30d);
+      setTrendDays(resourcesDash.trendDays);
       setCostByService(costAnalytics.byService);
       setForecast(costForecast.projectedTotal);
       setActivity(activityRes.items);
@@ -53,7 +57,7 @@ export function Overview() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [region, dateRange]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -119,7 +123,7 @@ export function Overview() {
 
       {/* Executive KPI Row */}
       <div id="executive-dashboard" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <div className="exec-kpi-card">
+        <button type="button" onClick={() => navigate('/cloud-accounts')} className="exec-kpi-card text-left w-full cursor-pointer">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="cloud" size={14} className="text-brand-500" />
             Cloud Accounts
@@ -132,24 +136,26 @@ export function Overview() {
               <span className="text-emerald-600 dark:text-emerald-400 font-medium">All connected</span>
             )}
           </span>
-        </div>
-        <div className="exec-kpi-card">
+        </button>
+        <button type="button" onClick={() => navigate('/resources')} className="exec-kpi-card text-left w-full cursor-pointer">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="resources" size={14} className="text-brand-500" />
             Total Resources
           </span>
           <span className="exec-kpi-value">{totalResources.toLocaleString()}</span>
           <span className="text-xs text-slate-400">Across all accounts</span>
-        </div>
-        <div className="exec-kpi-card">
+        </button>
+        <button type="button" onClick={() => navigate('/cost-management')} className="exec-kpi-card text-left w-full cursor-pointer">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="cost" size={14} className="text-brand-500" />
             Cost (MTD)
           </span>
           <span className="exec-kpi-value">{money(monthToDate)}</span>
-          <span className="text-xs text-slate-400">Month to date spend</span>
-        </div>
-        <div className="exec-kpi-card">
+          <span className="text-xs text-slate-400">
+            {monthToDate === 0 && totalConnections > 0 ? 'No billable usage yet this month' : 'Month to date spend'}
+          </span>
+        </button>
+        <button type="button" onClick={() => navigate('/cloud-accounts')} className="exec-kpi-card text-left w-full cursor-pointer">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="gauge" size={14} className="text-brand-500" />
             Health Score
@@ -160,11 +166,13 @@ export function Overview() {
               <span className="text-emerald-600 dark:text-emerald-400 font-medium">Excellent</span>
             ) : healthScore >= 70 ? (
               <span className="text-amber-600 dark:text-amber-400 font-medium">Needs attention</span>
+            ) : healthScore >= 40 ? (
+              <span className="text-orange-600 dark:text-orange-400 font-medium">Degraded</span>
             ) : (
               <span className="text-red-600 dark:text-red-400 font-medium">Critical</span>
             )}
           </span>
-        </div>
+        </button>
       </div>
 
       {/* Quick Actions */}
@@ -193,8 +201,12 @@ export function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
         <div className="chart-card lg:col-span-2">
           <div className="chart-card-header">
-            <h3 className="chart-card-title">Resource Trend (30 days)</h3>
-            <span className="text-xs text-slate-400">Created vs Deleted</span>
+            <h3 className="chart-card-title">Resource Trend ({trendDays} days)</h3>
+            <span className="text-xs text-slate-400">
+              {resourceTrend.reduce((sum, d) => sum + d.created + d.deleted, 0) <= 2
+                ? 'Limited history — this account has had little resource activity yet'
+                : 'Created vs Deleted'}
+            </span>
           </div>
           {resourceTrend.length > 0
             ? <LineChart series={[{ label: 'Created', points: resourceTrend.map(d => ({ x: d.date, y: d.created })) }, { label: 'Deleted', points: resourceTrend.map(d => ({ x: d.date, y: d.deleted })) }]} />
@@ -235,7 +247,9 @@ export function Overview() {
                     <Icon name="folder" size={14} className="text-slate-400" />
                     {f.name}
                   </span>
-                  <span className="text-xs text-slate-400">{projects.filter(p => p.folder_id === f.id).length} projects</span>
+                  <span className="text-xs text-slate-400">
+                    {(() => { const n = projects.filter(p => p.folder_id === f.id).length; return `${n} project${n === 1 ? '' : 's'}`; })()}
+                  </span>
                 </li>
               ))}
               {projects.filter(p => !p.folder_id).map(p => (

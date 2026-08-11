@@ -127,12 +127,12 @@ class ApiClient {
 
   // ── overview-api ─────────────────────────────────────────────────────────
 
-  getOverviewDashboard() { return this.get<OverviewDashboard>('overview', '/api/overview/dashboard'); }
+  getOverviewDashboard(params: { region?: string } = {}) { return this.get<OverviewDashboard>('overview', `/api/overview/dashboard${qs(params)}`); }
   getOverviewResources(connectionIds?: string[]) { return this.get<{ total: number; byCategory: Record<string, number> }>('overview', `/api/overview/resources${qs({ connection_ids: connectionIds?.join(',') })}`); }
   getOverviewCost(connectionIds?: string[]) { return this.get<{ monthToDate: number; currency: string }>('overview', `/api/overview/cost${qs({ connection_ids: connectionIds?.join(',') })}`); }
   getOverviewSecurity(connectionIds?: string[]) { return this.get<{ openFindings: number; bySeverity: Record<string, number> }>('overview', `/api/overview/security${qs({ connection_ids: connectionIds?.join(',') })}`); }
   getOverviewMonitoring(connectionIds?: string[]) { return this.get<{ totalAlarms: number; inAlarm: number }>('overview', `/api/overview/monitoring${qs({ connection_ids: connectionIds?.join(',') })}`); }
-  getRecentActivity(page = 1, limit = 8) { return this.get<Paginated<ActivityEntry>>('overview', `/api/overview/activity${qs({ page, limit })}`); }
+  getRecentActivity(page = 1, limit = 8, from?: string) { return this.get<Paginated<ActivityEntry>>('overview', `/api/overview/activity${qs({ page, limit, from })}`); }
   getFavorites() { return this.get<{ favorites: Favorite[] }>('overview', '/api/overview/favorites'); }
   addFavorite(data: { type: string; label: string; path: string }) { return this.post<{ favorite: Favorite }>('overview', '/api/overview/favorites', data); }
   removeFavorite(id: string) { return this.delete<{ removed: string }>('overview', `/api/overview/favorites/${id}`); }
@@ -280,8 +280,8 @@ class ApiClient {
 
   // ── resources-api ────────────────────────────────────────────────────────
 
-  getResourcesDashboard() {
-    return this.get<{ total: number; byCategory: Record<string, number>; byStatus: Record<string, number>; byRegion: Record<string, number>; trend30d: { date: string; created: number; deleted: number }[] }>('resources', '/api/resources/dashboard');
+  getResourcesDashboard(params: { region?: string; days?: number } = {}) {
+    return this.get<{ total: number; byCategory: Record<string, number>; byStatus: Record<string, number>; byRegion: Record<string, number>; trendDays: number; trend30d: { date: string; created: number; deleted: number }[] }>('resources', `/api/resources/dashboard${qs(params)}`);
   }
   getResourceInventory(params: { connectionId?: string; category?: string; service?: string; region?: string; status?: string; search?: string; includeDeleted?: boolean; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/inventory${qs(params)}`);
@@ -356,8 +356,8 @@ class ApiClient {
   getCostAllocation(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation>('costManagement', `/api/cost-management/allocation${qs(params)}`); }
   getChargeback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { currency: string; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/chargeback${qs(params)}`); }
   getShowback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { billable: false; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/showback${qs(params)}`); }
-  getCostAnalytics(params: { from?: string; to?: string; connectionIds?: string[] } = {}) {
-    return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`);
+  getCostAnalytics(params: { from?: string; to?: string; region?: string; connectionIds?: string[] } = {}) {
+    return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`);
   }
   getBudgets(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<Budget>>('costManagement', `/api/cost-management/budgets${qs(params)}`); }
   createBudget(data: { scopeType: BudgetScopeType; scopeId: string; name: string; monthlyLimit: number; alertThresholds?: number[] }) {
@@ -370,8 +370,8 @@ class ApiClient {
   getCostExplorer(params: { connectionId?: string; from?: string; to?: string; service?: string; region?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CostSnapshot>>('costManagement', `/api/cost-management/explorer${qs(params)}`);
   }
-  getCostForecast() {
-    return this.get<{ method: string; mtdSpend: number; dailyRate: number; daysElapsed: number; daysInMonth: number; projectedTotal: number; currency: string }>('costManagement', '/api/cost-management/forecast');
+  getCostForecast(params: { region?: string } = {}) {
+    return this.get<{ method: string; mtdSpend: number; dailyRate: number; daysElapsed: number; daysInMonth: number; projectedTotal: number; currency: string }>('costManagement', `/api/cost-management/forecast${qs(params)}`);
   }
   async downloadCostReportCsv(params: { from?: string; to?: string } = {}) {
     return this.downloadRaw('costManagement', `/api/cost-management/reports/export${qs({ format: 'csv', ...params })}`, 'cost-report.csv');
