@@ -5,6 +5,7 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { api, type BillingPlan, type BillingSubscription, type BillingInvoice, type BillingUsageMetric, type BillingReferral } from '../lib/api';
 
@@ -21,7 +22,12 @@ const METRIC_LABELS: Record<string, string> = {
 };
 
 export function Subscription() {
+  const canSeeTab = useSubmenuAccess('credit-card');
+  const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Plans');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const { toast } = useToast();
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [subscription, setSubscription] = useState<BillingSubscription | null>(null);
@@ -146,7 +152,7 @@ export function Subscription() {
       )}
 
       <div className="flex gap-1 text-sm flex-wrap mb-4">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
             {t}
           </button>

@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import {
   api,
   type AlertRow, type AlertRule, type NotificationChannel, type EscalationPolicy, type MaintenanceWindow,
@@ -55,7 +56,13 @@ export function Alerts() {
   const { account, connections, refreshToken } = useFilters();
   const { confirm, dialog: confirmDialog } = useConfirm();
 
+  const canSeeNavTab = useSubmenuAccess('alerts');
+  const canSeeTab = useCallback((k: Tab) => canSeeNavTab(TABS.find(t => t.key === k)?.label ?? k), [canSeeNavTab]);
+  const visibleTabs = TABS.filter(t => canSeeTab(t.key));
   const [activeTab, setActiveTab] = useTabParam<Tab>(TAB_KEYS, 'active');
+  useEffect(() => {
+    if (!canSeeTab(activeTab) && visibleTabs.length > 0) setActiveTab(visibleTabs[0].key);
+  }, [activeTab, canSeeTab, visibleTabs, setActiveTab]);
   const [activeAlerts, setActiveAlerts] = useState<AlertRow[]>([]);
   const [historyAlerts, setHistoryAlerts] = useState<AlertRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -369,7 +376,7 @@ export function Alerts() {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 border-b border-slate-200 dark:border-slate-800">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}

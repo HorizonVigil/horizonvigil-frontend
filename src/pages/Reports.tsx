@@ -7,6 +7,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type ReportRow, type ScheduledReport } from '../lib/api';
 
 const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance', 'savings'] as const;
@@ -38,7 +39,12 @@ const TAB_CATEGORY: Record<Tab, Category | null> = {
 };
 
 export function Reports() {
+  const canSeeTab = useSubmenuAccess('reports');
+  const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Executive Reports');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledReport[]>([]);
   const [exportCenter, setExportCenter] = useState<ReportRow[]>([]);
@@ -167,7 +173,7 @@ export function Reports() {
       </div>
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             {t}
           </button>

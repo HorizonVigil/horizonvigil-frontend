@@ -15,6 +15,7 @@ import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
@@ -43,6 +44,15 @@ import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from '../lib/un
 // own "never ship a tab with nothing real behind it" rule.
 const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports'] as const;
 type Tab = typeof TABS[number];
+
+// This page's own tab values are shorter than navConfig.ts's sidebar labels
+// for the same items ("Inventory" here vs. "Account Inventory" there) --
+// useSubmenuAccess keys off the navConfig label, so the two have to be
+// bridged by hand rather than passed straight through.
+const TAB_TO_NAV_LABEL: Record<Tab, string> = {
+  Dashboard: 'Dashboard', Inventory: 'Account Inventory', Onboarding: 'Account Onboarding',
+  Organizations: 'Organizations', Regions: 'Regions', 'Sync Center': 'Sync Center', Reports: 'Reports',
+};
 
 const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
 const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }] as const;
@@ -75,7 +85,13 @@ export function CloudAccounts() {
     toast('Sync started — resources will update as it completes.', 'success');
   }
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
+  const canSeeNavTab = useSubmenuAccess('cloud');
+  const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
+  const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Dashboard');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [awsConnections, setAwsConnections] = useState<CloudConnection[]>([]);
   const [gcpConnections, setGcpConnections] = useState<GcpConnection[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
@@ -368,7 +384,7 @@ export function CloudAccounts() {
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
-          {TABS.map(t => (
+          {visibleTabs.map(t => (
             <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap transition-colors ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
               {t}
             </button>

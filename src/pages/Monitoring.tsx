@@ -9,6 +9,7 @@ import { RoadmapPanel } from '../components/EmptyState';
 import type { IconName } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type MonitoringAlarm, type ResourceMetric } from '../lib/api';
 
 function timeAgo(ts: string): string {
@@ -51,7 +52,12 @@ function NotIntegratedPanel({ tab, section }: { tab: string; section: NotIntegra
 
 export function Monitoring() {
   const { account, refreshToken } = useFilters();
+  const canSeeTab = useSubmenuAccess('monitoring');
+  const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'CloudWatch');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [dashboard, setDashboard] = useState<MonitoringDashboard | null>(null);
   const [alarms, setAlarms] = useState<MonitoringAlarm[]>([]);
   const [metrics, setMetrics] = useState<ResourceMetric[]>([]);
@@ -127,7 +133,7 @@ export function Monitoring() {
       <FilterBar title="Monitoring" breadcrumb={<Breadcrumb />} />
 
       <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             {t}
           </button>

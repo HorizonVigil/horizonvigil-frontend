@@ -8,6 +8,7 @@ import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { BarChart } from '../components/charts/BarChart';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type CustomDashboard, type DashboardWidgetCatalogEntry, type ActivityEntry, type MonitoringAlarm } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -74,10 +75,23 @@ function WidgetPreview({ widget, data }: { widget: { key: string; config: unknow
 type Tab = 'mine' | 'shared' | 'templates' | 'widgets';
 const TAB_KEYS: Tab[] = ['mine', 'shared', 'templates', 'widgets'];
 
+// This page's tab keys are internal identifiers, not navConfig.ts's sidebar
+// labels for the same items -- useSubmenuAccess keys off the label, so the
+// two have to be bridged by hand.
+const TAB_TO_NAV_LABEL: Record<Tab, string> = {
+  mine: 'My Dashboards', shared: 'Shared Dashboards', templates: 'Dashboard Templates', widgets: 'Widget Library',
+};
+
 export function CustomDashboards() {
   const { user } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const canSeeNavTab = useSubmenuAccess('dashboard');
+  const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
+  const visibleTabs = TAB_KEYS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TAB_KEYS, 'mine');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [mine, setMine] = useState<CustomDashboard[]>([]);
   const [shared, setShared] = useState<CustomDashboard[]>([]);
   const [templates, setTemplates] = useState<CustomDashboard[]>([]);
@@ -149,7 +163,7 @@ export function CustomDashboards() {
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm">
-          {(['mine', 'shared', 'templates', 'widgets'] as Tab[]).map(t => (
+          {visibleTabs.map(t => (
             <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
               {t === 'mine' ? 'My Dashboards' : t === 'shared' ? 'Shared Dashboards' : t === 'templates' ? 'Templates' : 'Widget Library'}
             </button>

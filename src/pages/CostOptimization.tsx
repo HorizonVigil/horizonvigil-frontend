@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal';
 import { LineChart } from '../components/charts/LineChart';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
@@ -37,17 +38,37 @@ function money(n: number): string {
 }
 
 const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'History'] as const;
+type Tab = typeof TABS[number];
+
+// This page's tab values diverge from navConfig.ts's sidebar labels for the
+// same items ("Recommendations" here is "Savings Opportunities" there,
+// "History" here is "Optimization History" there) -- useSubmenuAccess keys
+// off the navConfig label, so the two have to be bridged by hand. "Overview"
+// has no sidebar entry of its own (it's the default landing tab, not listed
+// separately) and is left unmapped, which resolves to visible-to-all, same
+// as an unrestricted sidebar item would.
+const TAB_TO_NAV_LABEL: Partial<Record<Tab, string>> = {
+  Recommendations: 'Savings Opportunities', Rightsizing: 'Rightsizing', 'Idle Resources': 'Idle Resources',
+  'Reserved Instances': 'Reserved Instances', 'Savings Plans': 'Savings Plans', 'Cost Anomalies': 'Cost Anomalies',
+  History: 'Optimization History',
+};
 
 export function CostOptimization() {
   const { account, refreshToken } = useFilters();
   const { toast } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const canSeeNavTab = useSubmenuAccess('optimization');
+  const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t] ?? t), [canSeeNavTab]);
+  const visibleTabs = TABS.filter(canSeeTab);
   const [dashboard, setDashboard] = useState<Awaited<ReturnType<typeof api.getCostOptimizationDashboard>> | null>(null);
   // The general open savings-opportunities feed — powers the Recommendations
   // tab and (since there's no single "everything" endpoint anymore) the
   // top stat cards' High Priority count.
   const [savingsOpportunities, setSavingsOpportunities] = useState<CostRecommendation[]>([]);
-  const [tab, setTab] = useTabParam<typeof TABS[number]>(TABS, 'Overview');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [tabRows, setTabRows] = useState<CostRecommendation[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
   const [selected, setSelected] = useState<CostRecommendation | null>(null);
@@ -340,7 +361,7 @@ export function CostOptimization() {
       </div>
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             {t}
           </button>

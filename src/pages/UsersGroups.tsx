@@ -5,6 +5,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useOrg } from '../lib/orgContext';
 import { useToast } from '../lib/toast';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
@@ -59,7 +60,12 @@ export function UsersGroups() {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
   const { projects } = useOrg();
+  const canSeeTab = useSubmenuAccess('users');
+  const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Users');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
@@ -344,7 +350,7 @@ export function UsersGroups() {
       <FilterBar title="Users & Groups" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             {t}
           </button>

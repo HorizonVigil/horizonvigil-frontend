@@ -7,6 +7,7 @@ import { StatCard } from '../components/StatCard';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
+import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution, type RemediationRequest } from '../lib/api';
 
 type JiraConfigState = { siteUrl: string; email: string; defaultProjectKey: string | null; defaultIssueType: string; autoFileEvents: string[] };
@@ -16,9 +17,23 @@ type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' |
 const TAB_KEYS: Tab[] = ['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'];
 type Editable = Runbook | Workflow | ScheduledJob | Webhook;
 
+// This page's tab keys are internal identifiers, not navConfig.ts's sidebar
+// labels for the same items -- useSubmenuAccess keys off the label, so the
+// two have to be bridged by hand.
+const TAB_TO_NAV_LABEL: Record<Tab, string> = {
+  runbooks: 'Runbooks', workflows: 'Workflows', scheduled: 'Scheduled Jobs', remediation: 'Remediation',
+  webhooks: 'Webhooks', integrations: 'Integrations', history: 'Execution History',
+};
+
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const canSeeNavTab = useSubmenuAccess('automation');
+  const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
+  const visibleTabs = TAB_KEYS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TAB_KEYS, 'runbooks');
+  useEffect(() => {
+    if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
+  }, [tab, canSeeTab, visibleTabs, setTab]);
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
@@ -309,7 +324,7 @@ export function Automation() {
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
-          {(['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'] as Tab[]).map(t => (
+          {visibleTabs.map(t => (
             <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
               {t === 'runbooks' ? 'Runbooks' : t === 'workflows' ? 'Workflows' : t === 'scheduled' ? 'Scheduled Jobs' : t === 'remediation' ? 'Remediation' : t === 'webhooks' ? 'Webhooks' : t === 'integrations' ? 'Integrations' : 'Execution History'}
             </button>

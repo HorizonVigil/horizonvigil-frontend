@@ -319,6 +319,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Remediation', to: tabLink(AUTOMATION, 'remediation'), real: true, minRole: 'editor' },
       { label: 'Webhooks', to: tabLink(AUTOMATION, 'webhooks'), real: true },
       { label: 'Integrations', to: tabLink(AUTOMATION, 'integrations'), real: true },
+      { label: 'Execution History', to: tabLink(AUTOMATION, 'history'), real: true },
     ],
   },
   {
@@ -334,6 +335,8 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Credentials', to: tabLink(SETTINGS, 'Credentials'), real: true, minRole: 'admin' },
       { label: 'RBAC', to: tabLink(SETTINGS, 'RBAC'), real: true, minRole: 'admin' },
       { label: 'System Settings', to: tabLink(SETTINGS, 'System Settings'), real: true, minRole: 'admin' },
+      { label: 'Recommendation Rules', to: tabLink(SETTINGS, 'Recommendation Rules'), real: true, minRole: 'editor' },
+      { label: 'Git Integration', to: tabLink(SETTINGS, 'Git Integration'), real: true, minRole: 'editor' },
       { label: 'Branding', to: tabLink(SETTINGS, 'Branding'), real: true, minRole: 'admin' },
       { label: 'License', to: tabLink(SETTINGS, 'License'), real: true, roles: ['billing_admin', 'admin', 'owner'] },
     ],
@@ -347,6 +350,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Plans', to: SUBSCRIPTION, real: true },
       { label: 'Usage', to: tabLink(SUBSCRIPTION, 'Usage'), real: true },
       { label: 'Invoices', to: tabLink(SUBSCRIPTION, 'Invoices'), real: true },
+      { label: 'Referrals', to: tabLink(SUBSCRIPTION, 'Referrals'), real: true },
     ],
   }] : []),
 ];
@@ -398,6 +402,19 @@ export function canSeeChild(child: NavChild, role: Role, parentIcon: string, per
   const override = permissions?.[submenuKey(parentIcon, child.label)];
   if (override) return override !== 'none';
   return canSee(child, role);
+}
+
+/**
+ * Finds a child's real, fully-specified NavChild entry (the one carrying its
+ * actual minRole/roles) by parent icon + label. Used by useCanSeeSubmenu so
+ * an in-page tab guard enforces the same role floor as the sidebar, instead
+ * of a label-only synthetic child that (having no minRole/roles of its own)
+ * would let anyone past regardless of role for any tab lacking an explicit
+ * admin override — the sidebar hides the tab, but a direct
+ * `?tab=<restricted>` URL wouldn't have been blocked without this.
+ */
+export function findNavChild(parentIcon: string, label: string): NavChild | undefined {
+  return NAV_MODULES.find(m => m.icon === parentIcon)?.children.find(c => c.label === label);
 }
 
 /**
