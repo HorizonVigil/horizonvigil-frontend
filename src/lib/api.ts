@@ -287,7 +287,7 @@ class ApiClient {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/inventory${qs(params)}`);
   }
   getResource(id: string) { return this.get<CloudResource>('resources', `/api/resources/inventory/${id}`); }
-  getResourceExplorer(params: { connectionId?: string } = {}) { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', `/api/resources/explorer${qs(params)}`); }
+  getResourceExplorer(params: { connectionId?: string; region?: string } = {}) { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', `/api/resources/explorer${qs(params)}`); }
   getResourceExplorerCategory(category: string, params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/explorer/${encodeURIComponent(category)}${qs(params)}`);
   }
@@ -306,7 +306,7 @@ class ApiClient {
   bulkTagResources(data: { resourceIds: string[]; operation: 'add_tag' | 'remove_tag'; tagKey: string; tagValue?: string }) {
     return this.post<{ operation: string; requestedCount: number; matchedCount: number; updatedCount: number; skipped: string[] }>('resources', '/api/resources/bulk-operations', data);
   }
-  getResourceCatalog(params: { category?: string; scannerStatus?: string } = {}) {
+  getResourceCatalog(params: { category?: string; scannerStatus?: string; provider?: 'aws' | 'gcp' } = {}) {
     return this.get<{ items: ResourceCatalogEntry[] }>('resources', `/api/resources/catalog${qs(params)}`);
   }
 
@@ -822,7 +822,7 @@ export interface AccountPermissionSummary {
 }
 
 export type ResourceCategory = 'Compute' | 'Storage' | 'Database' | 'Networking' | 'Security' | 'Containers' | 'Analytics' | 'Management' | 'Others';
-export interface ResourceCatalogEntry { key: string; service: string; resource_type: string; display_name: string; category: ResourceCategory; console_url_template: string | null; is_default_capable: boolean; scanner_status: 'live' | 'planned' }
+export interface ResourceCatalogEntry { key: string; service: string; resource_type: string; display_name: string; category: ResourceCategory; console_url_template: string | null; is_default_capable: boolean; scanner_status: 'live' | 'planned'; provider: 'aws' | 'gcp' }
 export interface CloudResource {
   id: string; connection_id: string; account_id: string; resource_type_key: string; resource_id: string; resource_name: string | null;
   region: string | null; category: string; service: string; state: string | null; status: string; is_default: boolean;

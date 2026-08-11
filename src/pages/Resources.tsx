@@ -295,9 +295,10 @@ export function Resources() {
 
   const loadGlobal = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
+    const scopedRegion = region === 'all' ? undefined : region;
     const [dash, explorer] = await Promise.all([
-      api.getResourcesDashboard({ region: region === 'all' ? undefined : region, connectionId }),
-      api.getResourceExplorer({ connectionId }),
+      api.getResourcesDashboard({ region: scopedRegion, connectionId }),
+      api.getResourceExplorer({ connectionId, region: scopedRegion }),
     ]);
     setDashboard(dash);
     const svc: Record<string, number> = {};

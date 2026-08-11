@@ -11,7 +11,14 @@ import { serviceLabel } from '../Resources';
  * live or not; only live ones are clickable into a workspace. */
 export function ResourcesCategory() {
   const { category = '' } = useParams<{ category: string }>();
-  const { account, refreshToken } = useFilters();
+  const { account, region, connections, refreshToken } = useFilters();
+  // The catalog is a shared reference table across both providers -- with no
+  // account selected there's no single provider to filter to, so every
+  // catalogued service shows (mixed AWS+GCP). With one account selected, its
+  // provider is known and the grid narrows to just that cloud's services --
+  // otherwise a GCP-filtered user sees a wall of AWS tiles (all correctly
+  // empty, but indistinguishable from a real leak without clicking through).
+  const selectedProvider = account === 'all' ? undefined : connections.find(c => c.id === account)?.provider;
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   // getResourceExplorer() has no per-category variant, but it's a small,
   // cheap-to-fetch aggregate (every category + its services in one call) —
@@ -19,15 +26,15 @@ export function ResourcesCategory() {
   const [byService, setByService] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    void api.getResourceCatalog({ category }).then(r => setCatalog(r.items));
-  }, [category]);
+    void api.getResourceCatalog({ category, provider: selectedProvider }).then(r => setCatalog(r.items));
+  }, [category, selectedProvider]);
 
   useEffect(() => {
-    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account }).then(r => {
+    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account, region: region === 'all' ? undefined : region }).then(r => {
       const entry = r.categories.find(c => c.category === category);
       setByService(Object.fromEntries((entry?.services ?? []).map(s => [s.service, s.count])));
     });
-  }, [category, account, refreshToken]);
+  }, [category, account, region, refreshToken]);
 
   const services = useMemo(() => {
     const byServiceMeta = new Map<string, { live: boolean; typeCount: number }>();
