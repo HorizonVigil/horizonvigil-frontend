@@ -280,7 +280,7 @@ class ApiClient {
 
   // ── resources-api ────────────────────────────────────────────────────────
 
-  getResourcesDashboard(params: { region?: string; days?: number } = {}) {
+  getResourcesDashboard(params: { region?: string; days?: number; connectionId?: string } = {}) {
     return this.get<{ total: number; byCategory: Record<string, number>; byStatus: Record<string, number>; byRegion: Record<string, number>; trendDays: number; trend30d: { date: string; created: number; deleted: number }[] }>('resources', `/api/resources/dashboard${qs(params)}`);
   }
   getResourceInventory(params: { connectionId?: string; category?: string; service?: string; region?: string; status?: string; search?: string; includeDeleted?: boolean; page?: number; limit?: number } = {}) {
@@ -294,13 +294,13 @@ class ApiClient {
   getResourceExplorerService(category: string, service: string, params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/explorer/${encodeURIComponent(category)}/${encodeURIComponent(service)}${qs(params)}`);
   }
-  searchResources(q: string) { return this.get<{ query: string; items: CloudResource[]; capped?: boolean }>('resources', `/api/resources/search${qs({ q })}`); }
+  searchResources(q: string, connectionId?: string) { return this.get<{ query: string; items: CloudResource[]; capped?: boolean }>('resources', `/api/resources/search${qs({ q, connectionId })}`); }
   getResourceRelationships(id: string) { return this.get<{ resource: { id: string; resourceId: string; resourceName: string | null }; relationships: unknown }>('resources', `/api/resources/${id}/relationships`); }
   getDependencyGraph(resourceId: string) {
     return this.get<{ nodes: { id: string; resourceId: string; label: string | null; resourceTypeKey: string; category: string }[]; edges: { from: string; to: string; relation: string }[]; hops: number }>('resources', `/api/resources/dependency-graph${qs({ resourceId })}`);
   }
   getResourceTags() { return this.get<{ scannedResources: number; distinctKeys: number; keys: { key: string; resourceCount: number; sampleValues: string[] }[] }>('resources', '/api/resources/tags'); }
-  getResourceTimeline(params: { eventType?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
+  getResourceTimeline(params: { eventType?: string; from?: string; to?: string; connectionId?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ResourceLifecycleEvent>>('resources', `/api/resources/timeline${qs(params)}`);
   }
   bulkTagResources(data: { resourceIds: string[]; operation: 'add_tag' | 'remove_tag'; tagKey: string; tagValue?: string }) {

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -705,7 +706,7 @@ export function CloudAccounts() {
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-1.5">
                               {row.deniedCount > 0 && <Badge tone="warning">{row.deniedCount} denied</Badge>}
-                              {row.errorCount > 0 && <Badge tone="critical">{row.errorCount} errors</Badge>}
+                              {row.errorCount > 0 && <Badge tone="critical">{row.errorCount} error{row.errorCount === 1 ? '' : 's'}</Badge>}
                               <Badge tone={row.overallStatus === 'succeeded' ? 'good' : row.overallStatus === 'never_run' ? 'neutral' : 'critical'}>{row.overallStatus === 'never_run' ? 'Never validated' : row.overallStatus}</Badge>
                             </div>
                           </td>
@@ -786,16 +787,47 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
 }) {
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Rendered via a portal (see below) precisely because this table's wrapper
+  // has overflow-x-auto for horizontal scrolling — a normal position:absolute
+  // dropdown gets clipped by that overflow boundary the moment the "⋯"
+  // trigger isn't at the very left edge, hiding every item past the first.
+  // Escaping to document.body with fixed positioning sidesteps that
+  // entirely; position is computed from the trigger's own bounding rect.
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target)) return;
+      if (menuRef.current && !menuRef.current.contains(target)) setOpen(false);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !buttonRef.current) { setCoords(null); return; }
+    const rect = buttonRef.current.getBoundingClientRect();
+    const MENU_WIDTH = 224; // w-56
+    setCoords({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8)),
+    });
+  }, [open]);
+
+  // Flip above the trigger if the menu would run off the bottom of the
+  // viewport once its real height is known (only measurable post-render).
+  useEffect(() => {
+    if (!open || !coords || !menuRef.current || !buttonRef.current) return;
+    const menuRect = menuRef.current.getBoundingClientRect();
+    if (menuRect.bottom > window.innerHeight) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords((prev) => (prev ? { ...prev, top: rect.top - menuRect.height - 4 } : prev));
+    }
+  }, [open, coords]);
 
   function copyId() {
     void navigator.clipboard.writeText(row.identifier);
@@ -809,12 +841,17 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   }
 
   return (
-    <div ref={ref} className="relative inline-block text-left" onClick={e => e.stopPropagation()}>
-      <button onClick={() => setOpen(v => !v)} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
+    <div className="inline-block text-left" onClick={e => e.stopPropagation()}>
+      <button ref={buttonRef} onClick={() => setOpen(v => !v)} className="rounded-md w-7 h-7 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Row actions" aria-haspopup="menu" aria-expanded={open}>
         ⋯
       </button>
-      {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]">
+      {open && coords && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{ position: 'fixed', top: coords.top, left: coords.left, width: 224 }}
+          className="z-50 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]"
+        >
           <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources for this account right now">
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
@@ -840,7 +877,8 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
           <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
           <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources and history">Delete Permanently</button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

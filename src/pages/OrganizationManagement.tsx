@@ -413,7 +413,7 @@ export function OrganizationManagement() {
               <li key={t.key} className="py-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-700 dark:text-slate-200">{t.key}</span>
-                  <span className="text-xs text-slate-400">{t.resourceCount} resources</span>
+                  <span className="text-xs text-slate-400">{t.resourceCount} resource{t.resourceCount === 1 ? '' : 's'}</span>
                 </div>
                 <span className="text-xs text-slate-400">{t.values.slice(0, 4).map(v => v.value).join(', ')}{t.values.length > 4 ? '…' : ''}</span>
               </li>
@@ -434,7 +434,7 @@ export function OrganizationManagement() {
             {owners.map(o => (
               <li key={o.owner} className="flex items-center justify-between py-1.5 text-sm">
                 <span className="text-slate-700 dark:text-slate-200">{o.owner}</span>
-                <span className="text-xs text-slate-400">{o.resourceCount} resources</span>
+                <span className="text-xs text-slate-400">{o.resourceCount} resource{o.resourceCount === 1 ? '' : 's'}</span>
               </li>
             ))}
             {owners.length === 0 && <li className="py-2 text-sm text-slate-400">No ownership data yet.</li>}

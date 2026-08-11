@@ -230,6 +230,18 @@ export function Resources() {
     if (fromUrl) setAccount(fromUrl);
   }, [searchParams, setAccount]);
 
+  // ?search=<term> (ResourcesOverview's landing-page search box navigates
+  // here with this param) seeds the local search filter once on arrival —
+  // without this, the URL shows the term but the actual filter/API call
+  // never picks it up, since `search` is otherwise page-local state.
+  const appliedUrlSearch = useRef(false);
+  useEffect(() => {
+    if (appliedUrlSearch.current) return;
+    appliedUrlSearch.current = true;
+    const fromUrl = searchParams.get('search');
+    if (fromUrl) setSearch(fromUrl);
+  }, [searchParams]);
+
   // Only re-syncs when the URL's category/service actually changes (i.e. real
   // navigation between workspaces) — on /resources/all, presetCategory/
   // presetService never change, so this never fights a manual dropdown pick.
@@ -266,22 +278,23 @@ export function Resources() {
   useEffect(() => { void load(); }, [load, refreshToken]);
 
   const loadGlobal = useCallback(async () => {
-    const [dash, explorer] = await Promise.all([api.getResourcesDashboard(), api.getResourceExplorer()]);
+    const connectionId = account === 'all' ? undefined : account;
+    const [dash, explorer] = await Promise.all([
+      api.getResourcesDashboard({ region: region === 'all' ? undefined : region, connectionId }),
+      api.getResourceExplorer({ connectionId }),
+    ]);
     setDashboard(dash);
     const svc: Record<string, number> = {};
     for (const cat of explorer.categories) for (const s of cat.services) svc[s.service] = (svc[s.service] ?? 0) + s.count;
     setExplorerServices(svc);
-  }, []);
+  }, [region, account]);
   useEffect(() => { void loadGlobal(); }, [loadGlobal, refreshToken]);
 
   useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.items)); }, []);
 
-  // The timeline endpoint doesn't take a connectionId filter, so pull a wider
-  // window and filter client-side when a specific account is selected.
   const loadEvents = useCallback(async () => {
-    const timeline = await api.getResourceTimeline({ limit: 100 });
-    const filtered = account === 'all' ? timeline.items : timeline.items.filter(e => e.connection_id === account);
-    setRecentEvents(filtered.slice(0, 20));
+    const timeline = await api.getResourceTimeline({ limit: 20, connectionId: account === 'all' ? undefined : account });
+    setRecentEvents(timeline.items);
   }, [account]);
   useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
 
@@ -301,13 +314,14 @@ export function Resources() {
         eventType: timelineEventType || undefined,
         from: timelineFrom || undefined,
         to: timelineTo || undefined,
+        connectionId: account === 'all' ? undefined : account,
         limit: 100,
       });
       setTimelineEvents(res.items);
     } finally {
       setTimelineLoading(false);
     }
-  }, [tab, timelineEventType, timelineFrom, timelineTo]);
+  }, [tab, timelineEventType, timelineFrom, timelineTo, account]);
   useEffect(() => { void loadTimeline(); }, [loadTimeline, refreshToken]);
 
   // Global Search tab — debounced real cross-category search.
@@ -323,14 +337,17 @@ export function Resources() {
   }, [tab, globalQuery]);
 
   // Resource Relationships tab — same debounced search to find a resource,
-  // then the real relationships endpoint once one is picked.
+  // then the real relationships endpoint once one is picked. Unlike Global
+  // Search (intentionally unscoped and labeled as such), this one respects
+  // the account filter — it's presented as scoped to the current context,
+  // not disclosed as org-wide.
   useEffect(() => {
     if (tab !== 'Resource Relationships' || !relQuery.trim()) { setRelResults([]); return; }
     const handle = setTimeout(() => {
-      void api.searchResources(relQuery.trim()).then(res => setRelResults(res.items));
+      void api.searchResources(relQuery.trim(), account === 'all' ? undefined : account).then(res => setRelResults(res.items));
     }, 300);
     return () => clearTimeout(handle);
-  }, [tab, relQuery]);
+  }, [tab, relQuery, account]);
 
   async function pickRelationshipResource(r: CloudResource) {
     setRelSelected(r);
@@ -787,7 +804,7 @@ export function Resources() {
                 <div key={t.key} className="flex items-center justify-between border-b last:border-0 border-slate-100 dark:border-slate-800/60 py-1.5 text-sm">
                   <span className="text-slate-700 dark:text-slate-200 font-medium">{t.key}</span>
                   <span className="text-xs text-slate-400 truncate max-w-md">{t.sampleValues.slice(0, 4).join(', ')}{t.sampleValues.length > 4 ? '…' : ''}</span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">{t.resourceCount} resources</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">{t.resourceCount} resource{t.resourceCount === 1 ? '' : 's'}</span>
                 </div>
               ))}
               {providerTagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
