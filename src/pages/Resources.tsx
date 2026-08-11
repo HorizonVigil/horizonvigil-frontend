@@ -340,23 +340,23 @@ export function Resources() {
   }, [tab, timelineEventType, timelineFrom, timelineTo, account]);
   useEffect(() => { void loadTimeline(); }, [loadTimeline, refreshToken]);
 
-  // Global Search tab — debounced real cross-category search.
+  // Global Search tab — debounced real cross-category search, scoped to the
+  // top FilterBar's Account selection like every other tab on this page (it
+  // used to ignore that filter entirely, so picking a specific AWS/GCP
+  // account and searching still surfaced every other account's resources).
   useEffect(() => {
     if (tab !== 'Global Search' || !globalQuery.trim()) { setGlobalResults([]); return; }
     setGlobalLoading(true);
     const handle = setTimeout(() => {
-      void api.searchResources(globalQuery.trim())
+      void api.searchResources(globalQuery.trim(), account === 'all' ? undefined : account)
         .then(res => { setGlobalResults(res.items); setGlobalCapped(!!res.capped); })
         .finally(() => setGlobalLoading(false));
     }, 300);
     return () => clearTimeout(handle);
-  }, [tab, globalQuery]);
+  }, [tab, globalQuery, account]);
 
   // Resource Relationships tab — same debounced search to find a resource,
-  // then the real relationships endpoint once one is picked. Unlike Global
-  // Search (intentionally unscoped and labeled as such), this one respects
-  // the account filter — it's presented as scoped to the current context,
-  // not disclosed as org-wide.
+  // then the real relationships endpoint once one is picked.
   useEffect(() => {
     if (tab !== 'Resource Relationships' || !relQuery.trim()) { setRelResults([]); return; }
     const handle = setTimeout(() => {
