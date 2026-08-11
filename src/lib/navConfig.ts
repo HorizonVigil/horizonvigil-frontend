@@ -159,7 +159,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
       { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
       { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
-      { label: 'Bulk Operations', to: `${RESOURCES}/all`, real: true, minRole: 'editor' },
+      { label: 'Bulk Operations', to: `${RESOURCES}/all?bulk=1`, real: true, minRole: 'editor' },
     ],
   },
   {

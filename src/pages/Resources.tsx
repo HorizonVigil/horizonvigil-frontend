@@ -242,6 +242,17 @@ export function Resources() {
     if (fromUrl) setSearch(fromUrl);
   }, [searchParams]);
 
+  // ?bulk=1 (the sidebar's "Bulk Operations" link) pre-activates bulk select
+  // mode on arrival instead of landing on a plain, indistinguishable All
+  // Resources view — bulk mode itself is a toggle within this tab, not a
+  // separate page.
+  const appliedUrlBulk = useRef(false);
+  useEffect(() => {
+    if (appliedUrlBulk.current) return;
+    appliedUrlBulk.current = true;
+    if (searchParams.get('bulk') === '1') setBulkMode(true);
+  }, [searchParams]);
+
   // Only re-syncs when the URL's category/service actually changes (i.e. real
   // navigation between workspaces) — on /resources/all, presetCategory/
   // presetService never change, so this never fights a manual dropdown pick.
