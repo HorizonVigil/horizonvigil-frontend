@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { FilterBar } from '../../components/FilterBar';
 import { Breadcrumb } from '../../components/Breadcrumb';
 import { useTheme } from '../../lib/theme';
 import { useFilters } from '../../lib/filterContext';
+import { useResourcesUrlFilters } from '../../lib/useResourcesUrlFilters';
 import { categoryColor } from '../../components/charts/palette';
 import { api, type ResourceCatalogEntry } from '../../lib/api';
 import { CategoryIcon } from '../Resources';
@@ -17,9 +18,11 @@ const CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking', 'Security', 
  * away at /resources/all for when category-first isn't what you want. */
 export function ResourcesOverview() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { account, refreshToken } = useFilters();
+  const { account, region, refreshToken } = useFilters();
+  useResourcesUrlFilters();
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   const [byCategory, setByCategory] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
@@ -28,15 +31,16 @@ export function ResourcesOverview() {
     void api.getResourceCatalog().then(r => setCatalog(r.items));
   }, []);
 
-  // Re-fetches whenever the header's Account filter changes — this is the
-  // one control that lets you tell "is this AWS or GCP" apart on this page:
-  // picking a specific "AWS — ..." or "GCP — ..." account re-scopes every
-  // category count to just that connection. There's no separate provider
-  // toggle; the Account dropdown already lists both, labeled.
+  // Re-fetches whenever the header's Account or Region filter changes — the
+  // Account filter is also the one control that lets you tell "is this AWS
+  // or GCP" apart on this page: picking a specific "AWS — ..." or "GCP — ..."
+  // account re-scopes every category count to just that connection. There's
+  // no separate provider toggle; the Account dropdown already lists both,
+  // labeled.
   useEffect(() => {
-    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account })
+    void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account, region: region === 'all' ? undefined : region })
       .then(r => setByCategory(Object.fromEntries(r.categories.map(c => [c.category, c.total]))));
-  }, [account, refreshToken]);
+  }, [account, region, refreshToken]);
 
   const categoryMeta = useMemo(() => {
     const byCat = new Map<string, { services: Set<string>; live: Set<string> }>();
@@ -52,7 +56,10 @@ export function ResourcesOverview() {
 
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (search.trim()) navigate(`/resources/all?search=${encodeURIComponent(search.trim())}`);
+    if (!search.trim()) return;
+    const params = new URLSearchParams(location.search);
+    params.set('search', search.trim());
+    navigate(`/resources/all?${params.toString()}`);
   }
 
   return (
@@ -70,7 +77,7 @@ export function ResourcesOverview() {
 
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Browse by Category</h3>
-        <Link to="/resources/all" className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources, unfiltered →</Link>
+        <Link to={{ pathname: '/resources/all', search: location.search }} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources, unfiltered →</Link>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -79,7 +86,7 @@ export function ResourcesOverview() {
           const color = categoryColor(cat, isDark);
           const count = byCategory[cat] ?? 0;
           return (
-            <Link key={cat} to={`/resources/${cat}`} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center gap-3 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition">
+            <Link key={cat} to={{ pathname: `/resources/${cat}`, search: location.search }} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center gap-3 hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition">
               <span className="shrink-0 h-10 w-10 rounded-full flex items-center justify-center" style={{ backgroundColor: `${color}1a` }}>
                 <CategoryIcon category={cat} color={color} />
               </span>

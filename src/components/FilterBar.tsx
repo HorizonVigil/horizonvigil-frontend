@@ -40,12 +40,18 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true, showReg
         {breadcrumb}
         <h1 className="text-xl font-semibold text-slate-900 dark:text-white mt-0.5">{title}</h1>
       </div>
-      <div className="flex items-end gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         {showAccountFilter && (
           <label className="flex flex-col gap-1">
             <span className="text-[11px] uppercase tracking-wide text-slate-400">Account</span>
-            <select value={account} onChange={e => setAccount(e.target.value)} className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-              <option value="all">All Accounts</option>
+            <select
+              value={account}
+              onChange={e => setAccount(e.target.value)}
+              disabled={connections.length === 0}
+              title={connections.length === 0 ? 'No accounts connected yet' : undefined}
+              className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 disabled:opacity-60 disabled:cursor-not-allowed ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}
+            >
+              <option value="all">{connections.length === 0 ? 'No accounts connected' : 'All Accounts'}</option>
               {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : 'AWS'} — {c.name}</option>)}
             </select>
           </label>

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { FilterBar } from '../../components/FilterBar';
 import { WorkspaceBreadcrumb } from '../../components/WorkspaceBreadcrumb';
 import { EmptyState } from '../../components/EmptyState';
 import { useFilters } from '../../lib/filterContext';
+import { useResourcesUrlFilters } from '../../lib/useResourcesUrlFilters';
 import { api, type ResourceCatalogEntry } from '../../lib/api';
 import { serviceLabel } from '../Resources';
 
@@ -14,6 +15,8 @@ export function ResourcesCategory() {
   const { category = '' } = useParams<{ category: string }>();
   const { account, region, connections, refreshToken } = useFilters();
   const navigate = useNavigate();
+  const location = useLocation();
+  useResourcesUrlFilters();
   // The catalog is a shared reference table across both providers -- with no
   // account selected there's no single provider to filter to, so every
   // catalogued service shows (mixed AWS+GCP). With one account selected, its
@@ -58,7 +61,7 @@ export function ResourcesCategory() {
     <div>
       <FilterBar
         title={category}
-        breadcrumb={<WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: category }]} />}
+        breadcrumb={<WorkspaceBreadcrumb items={[{ label: 'Resources', to: `/resources${location.search}` }, { label: category }]} />}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -75,7 +78,7 @@ export function ResourcesCategory() {
             </div>
           );
           return s.live ? (
-            <Link key={s.service} to={`/resources/${category}/${s.service}`}>{card}</Link>
+            <Link key={s.service} to={{ pathname: `/resources/${category}/${s.service}`, search: location.search }}>{card}</Link>
           ) : (
             <div key={s.service} title="No live discovery scanner for this service yet" className="cursor-default">{card}</div>
           );

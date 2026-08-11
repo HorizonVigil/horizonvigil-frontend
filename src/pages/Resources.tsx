@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useSearchParams, useParams } from 'react-router-dom';
+import { useSearchParams, useParams, useLocation } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { WorkspaceBreadcrumb } from '../components/WorkspaceBreadcrumb';
@@ -13,6 +13,7 @@ import { useTheme } from '../lib/theme';
 import { categoryColor, categoricalColor, CHROME, STATUS, pick } from '../components/charts/palette';
 import { useTabParam } from '../lib/useTabParam';
 import { useFilters } from '../lib/filterContext';
+import { useResourcesUrlFilters } from '../lib/useResourcesUrlFilters';
 import { api, type CloudResource, type ResourceCatalogEntry, type ResourceLifecycleEvent } from '../lib/api';
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
@@ -142,10 +143,12 @@ export function Resources() {
   // Account + Region live in the global FilterBar (top of every page) —
   // see filterContext.tsx. Category/Service/Status/Search stay local since
   // they're specific to this page's data shape.
-  const { region, account, setAccount, connections, refreshToken } = useFilters();
+  const { region, account, connections, refreshToken } = useFilters();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  useResourcesUrlFilters();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const routeParams = useParams<{ category?: string; service?: string }>();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'All Resources');
   // Reached two ways: /resources/all (every filter free, the "view everything"
@@ -219,16 +222,12 @@ export function Resources() {
   const [timelineTo, setTimelineTo] = useState('');
   const [timelineLoading, setTimelineLoading] = useState(false);
 
-  // ?account=<id> (e.g. "View all resources for this account" on the account
-  // detail page) sets the *global* account filter once on arrival, so it's
-  // reflected consistently in the top bar rather than a page-local override.
-  const appliedUrlAccount = useRef(false);
-  useEffect(() => {
-    if (appliedUrlAccount.current) return;
-    appliedUrlAccount.current = true;
-    const fromUrl = searchParams.get('account');
-    if (fromUrl) setAccount(fromUrl);
-  }, [searchParams, setAccount]);
+  // ?account=<id>/?region=<r> (e.g. "View all resources for this account" on
+  // the account detail page, or arriving from ResourcesOverview/Category with
+  // filters carried in the URL) are applied to the *global* filter state, and
+  // kept in sync back to the URL as they change, by useResourcesUrlFilters()
+  // above -- so this stays reflected in the top bar and the address bar stays
+  // bookmarkable/shareable rather than silently dropping back to "all".
 
   // ?search=<term> (ResourcesOverview's landing-page search box navigates
   // here with this param) seeds both the All Resources inventory filter and
@@ -617,7 +616,7 @@ export function Resources() {
   ];
 
   const workspaceCrumb = isWorkspaceView
-    ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: '/resources' }, { label: presetCategory, to: `/resources/${presetCategory}` }, { label: serviceLabel(presetService, presetCategory) }]} />
+    ? <WorkspaceBreadcrumb items={[{ label: 'Resources', to: `/resources${location.search}` }, { label: presetCategory, to: `/resources/${presetCategory}${location.search}` }, { label: serviceLabel(presetService, presetCategory) }]} />
     : <Breadcrumb />;
 
   return (
