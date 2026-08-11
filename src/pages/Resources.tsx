@@ -231,15 +231,20 @@ export function Resources() {
   }, [searchParams, setAccount]);
 
   // ?search=<term> (ResourcesOverview's landing-page search box navigates
-  // here with this param) seeds the local search filter once on arrival —
-  // without this, the URL shows the term but the actual filter/API call
-  // never picks it up, since `search` is otherwise page-local state.
+  // here with this param) seeds both the All Resources inventory filter and
+  // the Global Search tab's own query box on arrival -- they're separate
+  // page-local state (`search` vs `globalQuery`), and a user can land on
+  // either tab, so both need the term or one of them shows an empty box
+  // with no results despite the URL carrying it correctly.
   const appliedUrlSearch = useRef(false);
   useEffect(() => {
     if (appliedUrlSearch.current) return;
     appliedUrlSearch.current = true;
     const fromUrl = searchParams.get('search');
-    if (fromUrl) setSearch(fromUrl);
+    if (fromUrl) {
+      setSearch(fromUrl);
+      setGlobalQuery(fromUrl);
+    }
   }, [searchParams]);
 
   // ?bulk=1 (the sidebar's "Bulk Operations" link) pre-activates bulk select
