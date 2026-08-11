@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -21,6 +21,7 @@ export function Overview() {
   const { folders, projects } = useOrg();
   const { refreshToken } = useFilters();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
   const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
   const [costByService, setCostByService] = useState<Record<string, number>>({});
@@ -55,6 +56,18 @@ export function Overview() {
   }, []);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+
+  // The Overview submenu links to sections within this same page (Executive
+  // Dashboard, Activity Timeline, Quick Actions, Favorites) rather than
+  // separate routes, so scrolling has to happen client-side -- the browser's
+  // native hash-scroll only fires on a real page load, not an SPA route
+  // change. Waits for `loading` to clear since the target sections don't
+  // exist in the DOM until the dashboard data has rendered.
+  useEffect(() => {
+    if (loading || !location.hash) return;
+    const el = document.getElementById(location.hash.slice(1));
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [location.hash, loading]);
 
   async function removeFavorite(id: string) {
     await api.removeFavorite(id);
@@ -105,7 +118,7 @@ export function Overview() {
       )}
 
       {/* Executive KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div id="executive-dashboard" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <div className="exec-kpi-card">
           <span className="exec-kpi-label flex items-center gap-1.5">
             <Icon name="cloud" size={14} className="text-brand-500" />
@@ -156,7 +169,7 @@ export function Overview() {
 
       {/* Quick Actions */}
       {quickActions.length > 0 && (
-        <div className="mb-5">
+        <div id="quick-actions" className="mb-5">
           <h3 className="section-title mb-2 flex items-center gap-1.5">
             <Icon name="zap" size={14} className="text-slate-400" />
             Quick Actions
@@ -240,7 +253,7 @@ export function Overview() {
 
       {/* Favorites + Activity Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <div className="chart-card">
+        <div id="favorites" className="chart-card">
           <div className="chart-card-header">
             <h3 className="chart-card-title">Favorites</h3>
             <span className="text-xs text-slate-400">Pinned resources</span>
@@ -261,7 +274,7 @@ export function Overview() {
             </ul>
           )}
         </div>
-        <div className="chart-card">
+        <div id="activity-timeline" className="chart-card">
           <div className="chart-card-header">
             <h3 className="chart-card-title">Recent Activity</h3>
             <span className="text-xs text-slate-400">Audit trail</span>

@@ -126,10 +126,10 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'overview',
     to: OVERVIEW,
     children: [
-      { label: 'Executive Dashboard', to: OVERVIEW, real: true },
-      { label: 'Activity Timeline', to: OVERVIEW, real: true },
-      { label: 'Quick Actions', to: OVERVIEW, real: true },
-      { label: 'Favorites', to: OVERVIEW, real: true },
+      { label: 'Executive Dashboard', to: `${OVERVIEW}#executive-dashboard`, real: true },
+      { label: 'Activity Timeline', to: `${OVERVIEW}#activity-timeline`, real: true },
+      { label: 'Quick Actions', to: `${OVERVIEW}#quick-actions`, real: true },
+      { label: 'Favorites', to: `${OVERVIEW}#favorites`, real: true },
     ],
   },
   {
@@ -428,7 +428,8 @@ export function findActiveModule(pathname: string): NavModule {
  */
 export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string): boolean {
   if (!child.to) return false;
-  const [childPath, childQuery] = child.to.split('?');
+  const [beforeHash] = child.to.split('#');
+  const [childPath, childQuery] = beforeHash.split('?');
   if (pathname !== childPath) return false;
   const currentTab = new URLSearchParams(search).get('tab');
   const childTab = childQuery ? new URLSearchParams(childQuery).get('tab') : null;
