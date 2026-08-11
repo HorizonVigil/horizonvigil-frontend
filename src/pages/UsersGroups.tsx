@@ -7,7 +7,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
 import { useOrg } from '../lib/orgContext';
 import { useToast } from '../lib/toast';
-import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel } from '../lib/api';
+import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
 import { NAV_MODULES } from '../lib/navConfig';
 
 const MENU_LEVELS: { value: MenuPermissionLevel; label: string }[] = [
@@ -94,6 +94,11 @@ export function UsersGroups() {
   const [selectedGroupForPermissions, setSelectedGroupForPermissions] = useState<UserGroup | null>(null);
   const [groupMenuOverrides, setGroupMenuOverrides] = useState<MenuPermissionRow[]>([]);
   const [groupMenuPermsLoading, setGroupMenuPermsLoading] = useState(false);
+  const [connections, setConnections] = useState<{ id: string; label: string }[]>([]);
+  const [resourceGrants, setResourceGrants] = useState<ResourceGrantRow[]>([]);
+  const [resourceRestricted, setResourceRestricted] = useState(false);
+  const [resourcePermsLoading, setResourcePermsLoading] = useState(false);
+  const [addGrantConnectionId, setAddGrantConnectionId] = useState('');
 
   const load = useCallback(async () => {
     const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes, perms] = await Promise.all([
@@ -115,6 +120,15 @@ export function UsersGroups() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    void Promise.all([api.getAccounts({ limit: 1000 }), api.getGcpAccounts({ limit: 1000 })]).then(([aws, gcp]) => {
+      setConnections([
+        ...aws.items.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.aws_account_id} (AWS)` })),
+        ...gcp.items.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.gcp_project_id} (GCP)` })),
+      ]);
+    });
+  }, []);
+
   const loadMenuPermissions = useCallback(async (userId: string) => {
     setMenuPermsLoading(true);
     try {
@@ -133,6 +147,39 @@ export function UsersGroups() {
     if (selectedMemberForPermissions) void loadMenuPermissions(selectedMemberForPermissions.userId);
     else { setMenuOverrides([]); setMenuEffective({}); }
   }, [selectedMemberForPermissions, loadMenuPermissions]);
+
+  const loadResourceGrants = useCallback(async (userId: string) => {
+    setResourcePermsLoading(true);
+    try {
+      const [{ items }, { restricted }] = await Promise.all([
+        api.getResourceGrants(userId),
+        api.getEffectiveResourceGrants(userId),
+      ]);
+      setResourceGrants(items);
+      setResourceRestricted(restricted);
+    } finally {
+      setResourcePermsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedMemberForPermissions) void loadResourceGrants(selectedMemberForPermissions.userId);
+    else { setResourceGrants([]); setResourceRestricted(false); setAddGrantConnectionId(''); }
+  }, [selectedMemberForPermissions, loadResourceGrants]);
+
+  async function handleAddResourceGrant(userId: string) {
+    if (!addGrantConnectionId) return;
+    await api.setResourceGrant(userId, addGrantConnectionId);
+    setAddGrantConnectionId('');
+    await loadResourceGrants(userId);
+    toast('Resource access granted', 'success');
+  }
+
+  async function handleRemoveResourceGrant(userId: string, grantId: string) {
+    await api.deleteResourceGrant(grantId);
+    await loadResourceGrants(userId);
+    toast('Resource access revoked', 'success');
+  }
 
   async function handleMenuLevelChange(userId: string, menuKey: string, level: MenuPermissionLevel) {
     await api.setMenuPermission({ userId, menuKey, level });
@@ -697,6 +744,54 @@ export function UsersGroups() {
                     );
                   })}
                 </div>
+              )}
+            </div>
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-400 block mb-2">
+                Resource Access — restricts {selectedMemberForPermissions.email ?? 'this user'} to specific AWS accounts / GCP projects instead of every connection in the org. With no grants (the default), they see everything.
+              </span>
+              {resourcePermsLoading ? (
+                <p className="text-xs text-slate-400">Loading…</p>
+              ) : (
+                <>
+                  <div className="mb-2">
+                    <Badge tone={resourceRestricted ? 'warning' : 'neutral'}>{resourceRestricted ? 'Restricted' : 'Unrestricted — sees all connections'}</Badge>
+                  </div>
+                  {resourceGrants.length > 0 && (
+                    <div className="max-h-40 overflow-y-auto flex flex-col gap-1.5 mb-2">
+                      {resourceGrants.map((g) => (
+                        <div key={g.id} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="text-slate-600 dark:text-slate-300 truncate">{connections.find((c) => c.id === g.connection_id)?.label ?? g.connection_id}</span>
+                          <button
+                            onClick={() => void handleRemoveResourceGrant(selectedMemberForPermissions.userId, g.id)}
+                            className="text-[10px] text-slate-400 hover:text-red-600 dark:hover:text-red-400 shrink-0"
+                          >
+                            revoke
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={addGrantConnectionId}
+                      onChange={(e) => setAddGrantConnectionId(e.target.value)}
+                      className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300"
+                    >
+                      <option value="">Grant access to…</option>
+                      {connections.filter((c) => !resourceGrants.some((g) => g.connection_id === c.id)).map((c) => (
+                        <option key={c.id} value={c.id}>{c.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => void handleAddResourceGrant(selectedMemberForPermissions.userId)}
+                      disabled={!addGrantConnectionId}
+                      className="text-[11px] rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300 disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </>
               )}
             </div>
             {projects.length > 0 && (

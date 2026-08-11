@@ -511,6 +511,19 @@ class ApiClient {
     return this.delete<{ deleted: boolean }>('users', `/api/users/menu-permissions/${id}`);
   }
 
+  getEffectiveResourceGrants(userId?: string) {
+    return this.get<{ userId: string; restricted: boolean; connectionIds: string[] }>('users', `/api/users/resource-grants/effective${qs({ userId })}`);
+  }
+  getResourceGrants(userId: string) {
+    return this.get<{ items: ResourceGrantRow[] }>('users', `/api/users/resource-grants${qs({ userId })}`);
+  }
+  setResourceGrant(userId: string, connectionId: string) {
+    return this.put<ResourceGrantRow>('users', '/api/users/resource-grants', { userId, connectionId });
+  }
+  deleteResourceGrant(id: string) {
+    return this.delete<{ deleted: boolean }>('users', `/api/users/resource-grants/${id}`);
+  }
+
   getApiKeys() { return this.get<{ apiKeys: ApiKeySummary[] }>('users', '/api/users/api-keys'); }
   createApiKey(name: string) { return this.post<{ apiKey: string; id: string; name: string; keyPrefix: string; note: string }>('users', '/api/users/api-keys', { name }); }
   revokeApiKey(id: string) { return this.delete<ApiKeySummary>('users', `/api/users/api-keys/${id}`); }
@@ -905,6 +918,8 @@ export interface Integration { id: string; org_id: string; category: string; pro
 
 export type MenuPermissionLevel = 'none' | 'read' | 'write' | 'admin';
 export interface MenuPermissionRow { id: string; user_id: string | null; group_id: string | null; menu_key: string; level: MenuPermissionLevel; created_at: string; updated_at: string }
+
+export interface ResourceGrantRow { id: string; user_id: string | null; connection_id: string; created_at: string }
 
 export interface ChatSource { type: string; summary: string }
 export interface ChatReply { conversationId: string; message: string; sources: ChatSource[] }
