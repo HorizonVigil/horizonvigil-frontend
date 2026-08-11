@@ -91,6 +91,9 @@ export function UsersGroups() {
   const [menuOverrides, setMenuOverrides] = useState<MenuPermissionRow[]>([]);
   const [menuEffective, setMenuEffective] = useState<Record<string, MenuPermissionLevel>>({});
   const [menuPermsLoading, setMenuPermsLoading] = useState(false);
+  const [selectedGroupForPermissions, setSelectedGroupForPermissions] = useState<UserGroup | null>(null);
+  const [groupMenuOverrides, setGroupMenuOverrides] = useState<MenuPermissionRow[]>([]);
+  const [groupMenuPermsLoading, setGroupMenuPermsLoading] = useState(false);
 
   const load = useCallback(async () => {
     const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes, perms] = await Promise.all([
@@ -141,6 +144,33 @@ export function UsersGroups() {
     await api.deleteMenuPermission(overrideId);
     await loadMenuPermissions(userId);
     toast('Reverted to role default', 'success');
+  }
+
+  const loadGroupMenuPermissions = useCallback(async (groupId: string) => {
+    setGroupMenuPermsLoading(true);
+    try {
+      const { items } = await api.getMenuPermissionOverrides({ groupId });
+      setGroupMenuOverrides(items);
+    } finally {
+      setGroupMenuPermsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedGroupForPermissions) void loadGroupMenuPermissions(selectedGroupForPermissions.id);
+    else setGroupMenuOverrides([]);
+  }, [selectedGroupForPermissions, loadGroupMenuPermissions]);
+
+  async function handleGroupMenuLevelChange(groupId: string, menuKey: string, level: MenuPermissionLevel) {
+    await api.setMenuPermission({ groupId, menuKey, level });
+    await loadGroupMenuPermissions(groupId);
+    toast('Group menu permission updated', 'success');
+  }
+
+  async function handleGroupMenuOverrideReset(groupId: string, overrideId: string) {
+    await api.deleteMenuPermission(overrideId);
+    await loadGroupMenuPermissions(groupId);
+    toast('Group override removed', 'success');
   }
 
   async function handleInvite(e: React.FormEvent) {
@@ -399,6 +429,7 @@ export function UsersGroups() {
                   <button onClick={() => setExpandedGroup(v => v === g.id ? null : g.id)} className="text-left flex-1">
                     <span className="font-medium text-slate-700 dark:text-slate-200">{g.name}</span> <span className="text-xs text-slate-400">({g.memberIds.length} members)</span>
                   </button>
+                  <button onClick={() => setSelectedGroupForPermissions(g)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline mr-3">Menu Access</button>
                   <button onClick={() => void handleDeleteGroup(g.id)} className="text-xs text-red-500 hover:underline">Delete</button>
                 </div>
                 {expandedGroup === g.id && (
@@ -679,6 +710,50 @@ export function UsersGroups() {
                     </label>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Group Permissions Modal */}
+      {selectedGroupForPermissions && (
+        <Modal open={!!selectedGroupForPermissions} onClose={() => setSelectedGroupForPermissions(null)} title={`Menu Access — ${selectedGroupForPermissions.name}`}>
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-slate-400">
+              Grants set here apply to every member of this group, unless a member has their own individual override (which always wins). When a member belongs to more than one group, the most permissive grant across their groups applies.
+            </p>
+            {groupMenuPermsLoading ? (
+              <p className="text-xs text-slate-400">Loading…</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto flex flex-col gap-1.5">
+                {NAV_MODULES.map((mod) => {
+                  const override = groupMenuOverrides.find((o) => o.menu_key === mod.icon);
+                  return (
+                    <div key={mod.icon} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-600 dark:text-slate-300 truncate">{mod.label}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {override && (
+                          <button
+                            onClick={() => void handleGroupMenuOverrideReset(selectedGroupForPermissions.id, override.id)}
+                            title="Remove this group grant"
+                            className="text-[10px] text-slate-400 hover:text-brand-600 dark:hover:text-brand-400"
+                          >
+                            reset
+                          </button>
+                        )}
+                        <select
+                          value={override?.level ?? ''}
+                          onChange={(e) => void handleGroupMenuLevelChange(selectedGroupForPermissions.id, mod.icon, e.target.value as MenuPermissionLevel)}
+                          className={`rounded-md border px-1.5 py-1 text-[11px] ${override ? 'border-brand-300 dark:border-brand-700 text-brand-700 dark:text-brand-300' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'} bg-white dark:bg-slate-800`}
+                        >
+                          <option value="" disabled>No grant set — choose a level to add one</option>
+                          {MENU_LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

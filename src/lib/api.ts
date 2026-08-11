@@ -504,7 +504,7 @@ class ApiClient {
   getMenuPermissionOverrides(params: { userId?: string; groupId?: string }) {
     return this.get<{ items: MenuPermissionRow[] }>('users', `/api/users/menu-permissions${qs(params)}`);
   }
-  setMenuPermission(data: { userId: string; menuKey: string; level: MenuPermissionLevel }) {
+  setMenuPermission(data: ({ userId: string; groupId?: never } | { userId?: never; groupId: string }) & { menuKey: string; level: MenuPermissionLevel }) {
     return this.put<MenuPermissionRow>('users', '/api/users/menu-permissions', data);
   }
   deleteMenuPermission(id: string) {
