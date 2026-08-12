@@ -810,7 +810,7 @@ export interface AwsAccountsDashboard {
 export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
 export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }
 export interface IdentitySummary { arn: string | null; accountId: string | null; userId: string | null }
-export interface ValidationRun { id: string; status: 'running' | 'succeeded' | 'failed'; identity_arn?: string | null; identity_account_id?: string | null; started_at: string; finished_at: string | null; error_message: string | null; triggered_by?: string | null }
+export interface ValidationRun { id: string; run_type?: 'permission_validation' | 'discovery'; status: 'running' | 'succeeded' | 'failed'; identity_arn?: string | null; identity_account_id?: string | null; started_at: string; finished_at: string | null; error_message: string | null; triggered_by?: string | null }
 export interface AccountPermissionSummary {
   connectionId: string;
   connectionName: string;

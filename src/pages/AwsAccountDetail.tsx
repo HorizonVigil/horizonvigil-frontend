@@ -543,6 +543,7 @@ export function AwsAccountDetail() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Identity</th>
                 <th className="px-3 py-2">Started</th>
@@ -554,6 +555,7 @@ export function AwsAccountDetail() {
             <tbody>
               {syncRuns.map(run => (
                 <tr key={run.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.run_type === 'discovery' ? 'Discover Resources' : 'Permission Check'}</td>
                   <td className="px-3 py-2"><Badge tone={run.status === 'succeeded' ? 'good' : run.status === 'running' ? 'warning' : 'critical'}>{run.status}</Badge></td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{run.identity_arn ?? '—'}</td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{new Date(run.started_at).toLocaleString()}</td>
@@ -562,7 +564,7 @@ export function AwsAccountDetail() {
                   <td className="px-3 py-2 text-red-500 text-xs">{run.error_message ?? '—'}</td>
                 </tr>
               ))}
-              {syncRuns.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">No validation runs yet.</td></tr>}
+              {syncRuns.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No sync activity yet.</td></tr>}
             </tbody>
           </table>
         </div>
