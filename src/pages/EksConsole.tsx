@@ -46,11 +46,20 @@ export function EksConsole() {
   const [eksPods, setEksPods] = useState<CloudResource[]>([]);
   const [eksNamespaces, setEksNamespaces] = useState<CloudResource[]>([]);
   const [helmReleaseReason, setHelmReleaseReason] = useState('Not built in this pass.');
+  const [eksAccessEntries, setEksAccessEntries] = useState<CloudResource[]>([]);
+  const [eksAuthMappings, setEksAuthMappings] = useState<CloudResource[]>([]);
+  // IRSA readiness isn't its own resource -- it's whether the cluster's own
+  // OIDC issuer (eks.ts) has a matching IAM OIDC identity provider
+  // registered (iam.ts's existing iam_oidc_provider scan, account-wide, not
+  // duplicated here). Pulled via the generic inventory endpoint rather than
+  // a dedicated route, since this is the only place in the app that needs
+  // this one IAM resource type cross-referenced against something else.
+  const [iamOidcProviders, setIamOidcProviders] = useState<CloudResource[]>([]);
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
-    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes] = await Promise.all([
+    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes] = await Promise.all([
       api.getEksClusters({ connectionId, limit: 200 }),
       api.getEcsClusters({ connectionId, limit: 200 }),
       api.getEksNodes({ connectionId, limit: 500 }),
@@ -61,6 +70,9 @@ export function EksConsole() {
       api.getEksNamespaces({ connectionId, limit: 500 }),
       api.getEksHelmReleases(),
       api.getEksNodegroups({ connectionId, limit: 200 }),
+      api.getEksAccessEntries({ connectionId, limit: 200 }),
+      api.getEksAuthMappings({ connectionId, limit: 200 }),
+      api.getResourceInventory({ connectionId, service: 'iam', limit: 200 }),
     ]);
     setEksClusters(eksRes.items);
     setEcsClusters(ecsClusterRes.items);
@@ -72,6 +84,9 @@ export function EksConsole() {
     setEksNamespaces(namespaces.items);
     setEksNodegroups(nodegroupsRes.items);
     setHelmReleaseReason(helmReleases.reason);
+    setEksAccessEntries(accessEntriesRes.items);
+    setEksAuthMappings(authMappingsRes.items);
+    setIamOidcProviders(oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'));
   }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -228,6 +243,7 @@ export function EksConsole() {
             eksClusters={eksClusters} eksNodes={eksNodes} eksNodegroups={eksNodegroups}
             eksNamespaces={eksNamespaces} eksDeployments={eksDeployments} eksPods={eksPods}
             ecsServices={ecsServices}
+            eksAccessEntries={eksAccessEntries} eksAuthMappings={eksAuthMappings} iamOidcProviders={iamOidcProviders}
           />
         )}
       </Drawer>
@@ -251,9 +267,10 @@ interface ResourceDetailProps {
   eksClusters: CloudResource[]; eksNodes: CloudResource[]; eksNodegroups: CloudResource[];
   eksNamespaces: CloudResource[]; eksDeployments: CloudResource[]; eksPods: CloudResource[];
   ecsServices: CloudResource[];
+  eksAccessEntries: CloudResource[]; eksAuthMappings: CloudResource[]; iamOidcProviders: CloudResource[];
 }
 
-function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNodegroups, eksNamespaces, eksDeployments, eksPods, ecsServices }: ResourceDetailProps) {
+function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNodegroups, eksNamespaces, eksDeployments, eksPods, ecsServices, eksAccessEntries, eksAuthMappings, iamOidcProviders }: ResourceDetailProps) {
   const m = r.metadata ?? {};
   const clusterName = r.relationships?.clusterName as string | undefined;
   const cluster = clusterName ? eksClusters.find(c => c.resource_name === clusterName) : undefined;
@@ -271,6 +288,10 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
     const logTypes = (m.logTypes as { type: string; enabled: boolean }[] | undefined) ?? [];
     const healthIssues = (m.healthIssues as { code?: string; message?: string }[] | undefined) ?? [];
     const behindLatest = typeof m.version === 'string' && typeof m.latestStandardSupportVersion === 'string' && m.version !== m.latestStandardSupportVersion;
+    const accessEntriesHere = eksAccessEntries.filter(e => e.relationships?.clusterName === r.resource_name);
+    const authMappingsHere = eksAuthMappings.filter(a => a.relationships?.clusterName === r.resource_name);
+    const oidcIssuer = m.oidcIssuerUrl as string | undefined;
+    const hasIrsa = !!oidcIssuer && iamOidcProviders.some(p => p.resource_id.endsWith(oidcIssuer.replace('https://', '')));
     return (
       <div className="flex flex-col gap-4 text-sm">
         {healthIssues.length > 0 && (
@@ -315,6 +336,19 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
         <DetailSection title="Encryption">
           <DetailField label="Secrets Encryption" value={m.secretsEncryptionKeyArn ? <span className="font-mono text-[11px]">{m.secretsEncryptionKeyArn as string}</span> : <Badge tone="warning">not enabled</Badge>} />
         </DetailSection>
+        <DetailSection title="IAM / Auth">
+          <DetailField label="Cluster IAM Role" value={<span className="font-mono text-[11px]">{r.relationships?.roleArn as string}</span>} />
+          <DetailField label="OIDC Issuer" value={oidcIssuer ? <span className="font-mono text-[11px]">{oidcIssuer}</span> : undefined} />
+          <DetailField label="IRSA (IAM Roles for Service Accounts)" value={
+            oidcIssuer ? <Badge tone={hasIrsa ? 'good' : 'warning'}>{hasIrsa ? 'configured' : 'OIDC provider not registered in IAM'}</Badge> : <Badge tone="neutral">not applicable</Badge>
+          } />
+        </DetailSection>
+        <RelatedList title="Access Entries" items={accessEntriesHere} empty={m.authenticationMode === 'CONFIG_MAP' ? 'This cluster uses CONFIG_MAP-only auth — access entries don\'t apply, see aws-auth Mappings below.' : 'No access entries found.'} render={e => (
+          <RelatedRow key={e.id} resource={e} onClick={() => onNavigate(e)} right={<span className="text-xs text-slate-400">{(e.metadata?.kubernetesGroups as string[] | undefined)?.join(', ') || (e.metadata?.type as string)}</span>} />
+        )} />
+        <RelatedList title="aws-auth Mappings" items={authMappingsHere} empty="No aws-auth ConfigMap found — this cluster likely uses pure API authentication mode." render={a => (
+          <RelatedRow key={a.id} resource={a} onClick={() => onNavigate(a)} right={<span className="text-xs text-slate-400">{(a.metadata?.groups as string[] | undefined)?.join(', ')}</span>} />
+        )} />
         {nodegroupsHere.some(ng => ng.state && !['ACTIVE'].includes(ng.state)) && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             {nodegroupsHere.filter(ng => ng.state && ng.state !== 'ACTIVE').map(ng => (
@@ -597,6 +631,45 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <RelatedRow key={s.id} resource={s} onClick={() => onNavigate(s)} right={`${(s.metadata?.runningCount as number) ?? 0}/${(s.metadata?.desiredCount as number) ?? 0} running`} />
         )} />
         <RawMetadata metadata={r.metadata} />
+      </div>
+    );
+  }
+
+  if (r.resource_type_key === 'eks_access_entry') {
+    const policies = (m.associatedPolicies as { policyArn?: string; scopeType?: string; namespaces?: string[] }[] | undefined) ?? [];
+    return (
+      <div className="flex flex-col gap-4 text-sm">
+        <DetailSection title="Overview">
+          {clusterLink}
+          <DetailField label="Principal" value={<span className="font-mono text-[11px]">{(m.principalArn as string) ?? r.resource_name}</span>} />
+          <DetailField label="Type" value={m.type as string} />
+          <DetailField label="Kubernetes Groups" value={((m.kubernetesGroups as string[] | undefined) ?? []).join(', ') || '—'} />
+          <DetailField label="Username Override" value={m.username as string} />
+          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+        </DetailSection>
+        {policies.length > 0 && (
+          <DetailSection title="Associated Access Policies">
+            {policies.map((p, i) => (
+              <DetailField key={i} label={p.policyArn?.split('/').pop() ?? `Policy ${i + 1}`} value={
+                <span className="text-xs text-slate-500 dark:text-slate-400">{p.scopeType}{p.namespaces?.length ? ` (${p.namespaces.join(', ')})` : ''}</span>
+              } />
+            ))}
+          </DetailSection>
+        )}
+      </div>
+    );
+  }
+
+  if (r.resource_type_key === 'eks_auth_mapping') {
+    return (
+      <div className="flex flex-col gap-4 text-sm">
+        <DetailSection title="Overview">
+          {clusterLink}
+          <DetailField label="Kind" value={m.kind === 'role' ? 'IAM Role' : 'IAM User'} />
+          <DetailField label="ARN" value={<span className="font-mono text-[11px]">{m.arn as string}</span>} />
+          <DetailField label="Kubernetes Username" value={m.username as string} />
+          <DetailField label="Kubernetes Groups" value={((m.groups as string[] | undefined) ?? []).join(', ') || '—'} />
+        </DetailSection>
       </div>
     );
   }
