@@ -320,12 +320,15 @@ export function Resources() {
   }, [account]);
   useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
 
-  // Tags Explorer tab — fetched when opened, refreshed on external refresh.
+  // Tags Explorer tab — fetched when opened, refreshed on external refresh or
+  // when the top FilterBar's Account selection changes (this used to ignore
+  // it entirely -- switching accounts left the exact same org-wide tag list
+  // showing regardless of which one was selected).
   useEffect(() => {
     if (tab !== 'Tags Explorer') return;
     setTagsLoading(true);
-    void api.getResourceTags().then(r => setTagKeys(r.keys)).finally(() => setTagsLoading(false));
-  }, [tab, refreshToken]);
+    void api.getResourceTags(account === 'all' ? undefined : account).then(r => setTagKeys(r.keys)).finally(() => setTagsLoading(false));
+  }, [tab, refreshToken, account]);
 
   // Resource Timeline tab — real filters, loaded on open and whenever they change.
   const loadTimeline = useCallback(async () => {
@@ -773,7 +776,7 @@ export function Resources() {
       {tab === 'Global Search' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Global Search</h3>
-          <p className="text-xs text-slate-400 mb-3">Searches every discovered resource across all connected accounts and categories at once — not scoped by the filters on All Resources.</p>
+          <p className="text-xs text-slate-400 mb-3">Searches every discovered resource across every category at once — scoped to the Account filter above, same as the rest of this page (not the category/status filters specific to All Resources).</p>
           <input value={globalQuery} onChange={e => setGlobalQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full max-w-md mb-3" />
           {globalLoading && <p className="text-sm text-slate-400">Searching…</p>}
           {!globalLoading && globalQuery.trim() && (

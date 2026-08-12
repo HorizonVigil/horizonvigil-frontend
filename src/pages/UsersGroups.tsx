@@ -240,7 +240,15 @@ export function UsersGroups() {
       toast(`Role updated to "${ENTERPRISE_ROLES.find(r => r.value === role)?.label ?? role}"`, 'success');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update this role.');
+      // Also toasted, not just set into `error` -- that state only renders
+      // far down the page inside the Invite New Member card, nowhere near
+      // the members table this action was actually taken from (e.g. the
+      // last-owner guard's "Cannot change the role of the last owner"
+      // rejection was previously invisible unless you happened to scroll
+      // all the way down after the dropdown silently reverted).
+      const message = err instanceof Error ? err.message : 'Could not update this role.';
+      setError(message);
+      toast(message, 'error');
     }
   }
 
@@ -252,7 +260,9 @@ export function UsersGroups() {
       toast('Member removed from organization', 'success');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove this member.');
+      const message = err instanceof Error ? err.message : 'Could not remove this member.';
+      setError(message);
+      toast(message, 'error');
     }
   }
 

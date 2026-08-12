@@ -299,7 +299,7 @@ class ApiClient {
   getDependencyGraph(resourceId: string) {
     return this.get<{ nodes: { id: string; resourceId: string; label: string | null; resourceTypeKey: string; category: string }[]; edges: { from: string; to: string; relation: string }[]; hops: number }>('resources', `/api/resources/dependency-graph${qs({ resourceId })}`);
   }
-  getResourceTags() { return this.get<{ scannedResources: number; distinctKeys: number; keys: { key: string; resourceCount: number; sampleValues: string[] }[] }>('resources', '/api/resources/tags'); }
+  getResourceTags(connectionId?: string) { return this.get<{ scannedResources: number; distinctKeys: number; keys: { key: string; resourceCount: number; sampleValues: string[] }[] }>('resources', `/api/resources/tags${connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : ''}`); }
   getResourceTimeline(params: { eventType?: string; from?: string; to?: string; connectionId?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ResourceLifecycleEvent>>('resources', `/api/resources/timeline${qs(params)}`);
   }
