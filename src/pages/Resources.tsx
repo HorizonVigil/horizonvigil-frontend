@@ -809,7 +809,11 @@ export function Resources() {
             {!relLoading && relData && (
               <div className="text-sm">
                 <p className="text-slate-600 dark:text-slate-300 mb-2">{relData.resource.resourceName ?? relData.resource.resourceId}</p>
-                <pre className="text-xs bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify(relData.relationships, null, 2)}</pre>
+                {relData.relationships == null || (Array.isArray(relData.relationships) ? relData.relationships.length === 0 : Object.keys(relData.relationships).length === 0) ? (
+                  <p className="text-sm text-slate-400">No relationships found for this resource.</p>
+                ) : (
+                  <pre className="text-xs bg-slate-50 dark:bg-slate-800 rounded p-2 overflow-x-auto">{JSON.stringify(relData.relationships, null, 2)}</pre>
+                )}
               </div>
             )}
             {!relLoading && !relData && <p className="text-sm text-slate-400">Pick a resource on the left to see its stored relationships.</p>}

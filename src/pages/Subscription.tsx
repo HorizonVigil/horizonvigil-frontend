@@ -4,6 +4,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
+import { EmptyState } from '../components/EmptyState';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
@@ -159,7 +160,11 @@ export function Subscription() {
         ))}
       </div>
 
-      {tab === 'Plans' && (
+      {tab === 'Plans' && !loading && plans.length === 0 && (
+        <EmptyState icon="credit-card" title="No plans available" description="This environment has no billing plans configured yet — nothing to subscribe to until at least one is added." />
+      )}
+
+      {tab === 'Plans' && (loading || plans.length > 0) && (
         <>
           <div className="flex items-center gap-2 mb-5 text-sm">
             <button onClick={() => setBillingInterval('monthly')} className={`px-3 py-1.5 rounded-md ${billingInterval === 'monthly' ? 'bg-brand-600 text-white' : 'border border-slate-200 dark:border-slate-700'}`}>Monthly</button>
@@ -193,7 +198,6 @@ export function Subscription() {
               );
             })}
           </div>
-          {!loading && plans.length === 0 && <p className="text-sm text-slate-400">No plans available.</p>}
         </>
       )}
 

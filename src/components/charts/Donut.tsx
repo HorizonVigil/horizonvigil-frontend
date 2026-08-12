@@ -29,6 +29,13 @@ export function Donut({ data, size = 160, thickness = 24, centerLabel }: { data:
     const color = d.colorCategory ? categoryColor(d.colorCategory, isDark) : categoricalColor(i, isDark);
     return { ...d, startAngle, endAngle, fraction, color, index: i };
   });
+  // A single 100% segment sweeps exactly 2π, which makes its arc's start
+  // and end points mathematically identical -- the SVG path degenerates to
+  // nothing visible regardless of the large-arc-flag, rendering as a blank
+  // ring with only the legend showing. Only ever possible for the one
+  // segment carrying the entire total, so it's drawn as a plain filled
+  // circle instead of an arc path in that one case.
+  const soleSegment = segments.filter(s => s.value > 0).length === 1 ? segments.find(s => s.value > 0) : null;
 
   function arcPath(startAngle: number, endAngle: number): string {
     const x1 = cx + radius * Math.cos(startAngle), y1 = cy + radius * Math.sin(startAngle);
@@ -44,6 +51,13 @@ export function Donut({ data, size = 160, thickness = 24, centerLabel }: { data:
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Distribution donut chart">
         {total === 0 ? (
           <circle cx={cx} cy={cy} r={radius - thickness / 2} fill="none" stroke={pick(CHROME.gridline, isDark)} strokeWidth={thickness} />
+        ) : soleSegment ? (
+          <circle
+            cx={cx} cy={cy} r={radius - thickness / 2} fill="none" stroke={soleSegment.color} strokeWidth={thickness}
+            onMouseEnter={() => setHoverIndex(soleSegment.index)} onMouseLeave={() => setHoverIndex(null)}
+          >
+            <title>{`${soleSegment.label}: ${soleSegment.value.toLocaleString()} (100%)`}</title>
+          </circle>
         ) : (
           segments.map(seg => (
             <path

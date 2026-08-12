@@ -363,7 +363,7 @@ export function CostOptimization() {
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (
           <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-            {t}
+            {TAB_TO_NAV_LABEL[t] ?? t}
           </button>
         ))}
       </div>

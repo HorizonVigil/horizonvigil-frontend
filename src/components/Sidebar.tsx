@@ -139,7 +139,7 @@ export function Sidebar() {
             ) : child.real && child.to ? (
               <NavLink
                 to={child.to}
-                className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search, location.hash) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
                 {child.label}
               </NavLink>

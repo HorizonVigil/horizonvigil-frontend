@@ -159,7 +159,10 @@ export function GcpProjectDetail() {
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Breakdown</h3>
-            <Donut data={Object.entries(categoryCounts).map(([label, value]) => ({ label, value, colorCategory: label }))} centerLabel={{ value: String(resources.length), caption: 'resources' }} />
+            <Donut
+              data={Object.entries(connection.resource_summary?.categoryCounts ?? categoryCounts).map(([label, value]) => ({ label, value, colorCategory: label }))}
+              centerLabel={{ value: (connection.resource_summary?.totalResources ?? resources.length).toLocaleString(), caption: 'resources' }}
+            />
           </div>
         </>
       )}

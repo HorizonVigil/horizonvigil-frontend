@@ -456,23 +456,40 @@ export function findActiveModule(pathname: string): NavModule {
   return NAV_MODULES.find(m => moduleMatchesPath(m, pathname)) ?? NAV_MODULES[0];
 }
 
+/** path + tab + hash identity a child's `to` resolves to — the unit isChildActive dedupes/compares on, not the raw `to` string (two children can carry different `to` values that land on the exact same page+tab, e.g. Resources' Dependency Graph and Bulk Operations both resolving to /resources/all with no distinguishing tab). */
+function childIdentity(child: NavChild): string | null {
+  if (!child.to) return null;
+  const [beforeHash, hash = ''] = child.to.split('#');
+  const [path, query] = beforeHash.split('?');
+  const tab = query ? new URLSearchParams(query).get('tab') : null;
+  return `${path}|${tab ?? ''}|${hash}`;
+}
+
 /**
  * Whether `child` is the one currently showing, for sidebar highlighting.
- * Compares pathname AND the `tab` query param (if the child's `to` carries
- * one) — NavLink's own `isActive` only looks at pathname, which would light
- * up every sibling sharing one URL at once now that most of them carry
- * distinct `?tab=` values.
+ * Compares pathname, the `tab` query param, and the hash fragment (if the
+ * child's `to` carries one) — NavLink's own `isActive` only looks at
+ * pathname, which would light up every sibling sharing one URL at once now
+ * that most of them carry distinct `?tab=` values or (Overview) distinct
+ * `#section` anchors.
  *
- * `siblings` is the module's full children list.
+ * `siblings` is the module's full children list. `hash` must be the
+ * caller's actual `location.hash` (including the leading `#`, or empty
+ * string) — omitting it previously made every hash-anchor sibling
+ * (Overview's Executive Dashboard/Activity Timeline/Quick Actions/
+ * Favorites) match simultaneously, since the hash was stripped before any
+ * comparison happened at all.
  */
-export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string): boolean {
+export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string, hash: string): boolean {
   if (!child.to) return false;
-  const [beforeHash] = child.to.split('#');
+  const [beforeHash, childHash = ''] = child.to.split('#');
   const [childPath, childQuery] = beforeHash.split('?');
   if (pathname !== childPath) return false;
   const currentTab = new URLSearchParams(search).get('tab');
   const childTab = childQuery ? new URLSearchParams(childQuery).get('tab') : null;
   if ((currentTab ?? null) !== (childTab ?? null)) return false;
-  const sharedBy = siblings.filter(s => s.to === child.to).length;
+  if (childHash && hash.replace(/^#/, '') !== childHash) return false;
+  const thisIdentity = childIdentity(child);
+  const sharedBy = siblings.filter(s => childIdentity(s) === thisIdentity).length;
   return sharedBy === 1;
 }
