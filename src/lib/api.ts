@@ -325,6 +325,7 @@ class ApiClient {
   getEksHelmReleases() { return this.get<NotIntegrated>('containers', '/api/containers/eks/helm-releases'); }
   getEksAccessEntries(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/access-entries${qs(params)}`); }
   getEksAuthMappings(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/auth-mappings${qs(params)}`); }
+  getEksAddons(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/addons${qs(params)}`); }
 
   getGcpCloudRun(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/cloud-run${qs(params)}`); }
   getGcpArtifactRegistryRepos(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/gcp/artifact-registry/repositories${qs(params)}`); }

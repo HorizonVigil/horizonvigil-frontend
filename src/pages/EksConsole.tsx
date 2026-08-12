@@ -55,11 +55,12 @@ export function EksConsole() {
   // a dedicated route, since this is the only place in the app that needs
   // this one IAM resource type cross-referenced against something else.
   const [iamOidcProviders, setIamOidcProviders] = useState<CloudResource[]>([]);
+  const [eksAddons, setEksAddons] = useState<CloudResource[]>([]);
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
-    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes] = await Promise.all([
+    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes, addonsRes] = await Promise.all([
       api.getEksClusters({ connectionId, limit: 200 }),
       api.getEcsClusters({ connectionId, limit: 200 }),
       api.getEksNodes({ connectionId, limit: 500 }),
@@ -73,6 +74,7 @@ export function EksConsole() {
       api.getEksAccessEntries({ connectionId, limit: 200 }),
       api.getEksAuthMappings({ connectionId, limit: 200 }),
       api.getResourceInventory({ connectionId, service: 'iam', limit: 200 }),
+      api.getEksAddons({ connectionId, limit: 200 }),
     ]);
     setEksClusters(eksRes.items);
     setEcsClusters(ecsClusterRes.items);
@@ -87,6 +89,7 @@ export function EksConsole() {
     setEksAccessEntries(accessEntriesRes.items);
     setEksAuthMappings(authMappingsRes.items);
     setIamOidcProviders(oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'));
+    setEksAddons(addonsRes.items);
   }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -244,6 +247,7 @@ export function EksConsole() {
             eksNamespaces={eksNamespaces} eksDeployments={eksDeployments} eksPods={eksPods}
             ecsServices={ecsServices}
             eksAccessEntries={eksAccessEntries} eksAuthMappings={eksAuthMappings} iamOidcProviders={iamOidcProviders}
+            eksAddons={eksAddons}
           />
         )}
       </Drawer>
@@ -268,9 +272,10 @@ interface ResourceDetailProps {
   eksNamespaces: CloudResource[]; eksDeployments: CloudResource[]; eksPods: CloudResource[];
   ecsServices: CloudResource[];
   eksAccessEntries: CloudResource[]; eksAuthMappings: CloudResource[]; iamOidcProviders: CloudResource[];
+  eksAddons: CloudResource[];
 }
 
-function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNodegroups, eksNamespaces, eksDeployments, eksPods, ecsServices, eksAccessEntries, eksAuthMappings, iamOidcProviders }: ResourceDetailProps) {
+function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNodegroups, eksNamespaces, eksDeployments, eksPods, ecsServices, eksAccessEntries, eksAuthMappings, iamOidcProviders, eksAddons }: ResourceDetailProps) {
   const m = r.metadata ?? {};
   const clusterName = r.relationships?.clusterName as string | undefined;
   const cluster = clusterName ? eksClusters.find(c => c.resource_name === clusterName) : undefined;
@@ -290,6 +295,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
     const behindLatest = typeof m.version === 'string' && typeof m.latestStandardSupportVersion === 'string' && m.version !== m.latestStandardSupportVersion;
     const accessEntriesHere = eksAccessEntries.filter(e => e.relationships?.clusterName === r.resource_name);
     const authMappingsHere = eksAuthMappings.filter(a => a.relationships?.clusterName === r.resource_name);
+    const addonsHere = eksAddons.filter(a => a.relationships?.clusterName === r.resource_name);
     const oidcIssuer = m.oidcIssuerUrl as string | undefined;
     const hasIrsa = !!oidcIssuer && iamOidcProviders.some(p => p.resource_id.endsWith(oidcIssuer.replace('https://', '')));
     return (
@@ -358,6 +364,14 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
         )}
         <RelatedList title="Node Groups" items={nodegroupsHere} empty="No node groups discovered." render={ng => (
           <RelatedRow key={ng.id} resource={ng} onClick={() => onNavigate(ng)} right={<Badge tone={ng.state === 'ACTIVE' ? 'good' : 'warning'}>{ng.state}</Badge>} />
+        )} />
+        <RelatedList title="Add-ons" items={addonsHere} empty="No add-ons discovered." render={a => (
+          <RelatedRow key={a.id} resource={a} onClick={() => onNavigate(a)} right={
+            <span className="inline-flex items-center gap-1.5">
+              {Boolean(a.metadata?.behindLatest) && <Badge tone="warning">update available</Badge>}
+              <Badge tone={a.state === 'ACTIVE' ? 'good' : a.state === 'CREATE_FAILED' || a.state === 'DEGRADED' ? 'critical' : 'warning'}>{a.state}</Badge>
+            </span>
+          } />
         )} />
         <RelatedList title="Nodes" items={nodesHere} empty="No nodes discovered — re-run Discover Resources, or check the access entry / aws-auth mapping." render={n => (
           <RelatedRow key={n.id} resource={n} onClick={() => onNavigate(n)} right={<Badge tone={n.state === 'Ready' ? 'good' : 'critical'}>{n.state}</Badge>} />
@@ -487,14 +501,23 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
   if (r.resource_type_key === 'eks_namespace') {
     const podsHere = eksPods.filter(p => p.metadata?.namespace === r.resource_name && p.relationships?.clusterName === clusterName);
     const depsHere = eksDeployments.filter(d => d.metadata?.namespace === r.resource_name && d.relationships?.clusterName === clusterName);
+    const quotas = (m.resourceQuotas as { name: string; hard?: Record<string, string>; used?: Record<string, string> }[] | undefined) ?? [];
     return (
       <div className="flex flex-col gap-4 text-sm">
         <DetailSection title="Overview">
           <DetailField label="Status" value={<Badge>{r.state ?? r.status}</Badge>} />
           {clusterLink}
+          <DetailField label="Age" value={formatAge(m.createdAt as string)} />
           <DetailField label="Pods" value={podsHere.length} />
           <DetailField label="Deployments" value={depsHere.length} />
         </DetailSection>
+        {quotas.map(q => (
+          <DetailSection key={q.name} title={`Resource Quota: ${q.name}`}>
+            {Object.entries(q.hard ?? {}).map(([resource, hard]) => (
+              <DetailField key={resource} label={resource} value={`${q.used?.[resource] ?? '0'} / ${hard}`} />
+            ))}
+          </DetailSection>
+        ))}
         <RelatedList title="Deployments" items={depsHere} empty="No deployments in this namespace." render={d => <RelatedRow key={d.id} resource={d} onClick={() => onNavigate(d)} />} />
         <RelatedList title="Pods" items={podsHere} empty="No pods in this namespace." render={p => (
           <RelatedRow key={p.id} resource={p} onClick={() => onNavigate(p)} right={<Badge>{p.state ?? p.status}</Badge>} />
@@ -531,7 +554,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <DetailField label="Strategy" value={strategy?.type} />
           {strategy?.rollingUpdate && <DetailField label="Rolling Update" value={`maxSurge ${strategy.rollingUpdate.maxSurge ?? '—'}, maxUnavailable ${strategy.rollingUpdate.maxUnavailable ?? '—'}`} />}
           <DetailField label="Service Account" value={m.serviceAccountName as string} />
-          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+          <DetailField label="Age" value={formatAge(m.createdAt as string)} />
         </DetailSection>
         {conditions.length > 0 && (
           <DetailSection title="Conditions">
@@ -631,6 +654,33 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <RelatedRow key={s.id} resource={s} onClick={() => onNavigate(s)} right={`${(s.metadata?.runningCount as number) ?? 0}/${(s.metadata?.desiredCount as number) ?? 0} running`} />
         )} />
         <RawMetadata metadata={r.metadata} />
+      </div>
+    );
+  }
+
+  if (r.resource_type_key === 'eks_addon') {
+    const healthIssues = (m.healthIssues as { code?: string; message?: string }[] | undefined) ?? [];
+    return (
+      <div className="flex flex-col gap-4 text-sm">
+        {healthIssues.length > 0 && (
+          <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-xs text-red-800 dark:text-red-300 flex flex-col gap-1">
+            {healthIssues.map((issue, i) => <div key={i}>⚠ {issue.code ? `${issue.code}: ` : ''}{issue.message}</div>)}
+          </div>
+        )}
+        <DetailSection title="Overview">
+          <DetailField label="Status" value={<Badge tone={r.state === 'ACTIVE' ? 'good' : 'warning'}>{r.state}</Badge>} />
+          {clusterLink}
+          <DetailField label="Version" value={
+            <span className="inline-flex items-center gap-1.5">
+              {m.version as string}
+              {Boolean(m.behindLatest) && <Badge tone="warning">update available ({m.latestVersion as string})</Badge>}
+            </span>
+          } />
+          <DetailField label="Publisher" value={m.publisher as string} />
+          <DetailField label="Owner" value={m.owner as string} />
+          <DetailField label="Service Account Role" value={m.serviceAccountRoleArn ? <span className="font-mono text-[11px]">{m.serviceAccountRoleArn as string}</span> : undefined} />
+          <DetailField label="Age" value={formatAge(m.createdAt as string)} />
+        </DetailSection>
       </div>
     );
   }
