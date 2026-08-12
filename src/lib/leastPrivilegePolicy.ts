@@ -15,9 +15,19 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "rds:Describe*", "rds:List*", "dynamodb:Describe*", "dynamodb:List*",
       "elasticache:Describe*", "redshift:Describe*", "redshift:GetClusterCredentials"
     ], "Resource": "*" },
+    { "Sid": "AnalyticsAndDataPipelines", "Effect": "Allow", "Action": [
+      "athena:List*", "athena:Get*", "glue:Get*", "glue:List*",
+      "kinesis:List*", "kinesis:Describe*", "kafka:List*", "elasticmapreduce:List*"
+    ], "Resource": "*" },
+    { "Sid": "DevOpsCiCdAndMl", "Effect": "Allow", "Action": [
+      "codebuild:List*", "codebuild:BatchGet*", "codepipeline:List*",
+      "cognito-idp:List*", "cognito-identity:List*", "sagemaker:List*"
+    ], "Resource": "*" },
     { "Sid": "ContainersAndServerless", "Effect": "Allow", "Action": [
       "eks:Describe*", "eks:List*", "ecs:Describe*", "ecs:List*", "lambda:List*", "lambda:Get*",
-      "cloudformation:Describe*", "cloudformation:List*", "cloudformation:Get*"
+      "cloudformation:Describe*", "cloudformation:List*", "cloudformation:Get*",
+      "events:List*", "events:Describe*", "states:List*", "states:Describe*",
+      "batch:Describe*", "elasticbeanstalk:Describe*", "apigateway:GET"
     ], "Resource": "*" },
     { "Sid": "NetworkingEdgeDns", "Effect": "Allow", "Action": [
       "route53:List*", "route53:Get*", "cloudfront:List*", "cloudfront:Get*",
