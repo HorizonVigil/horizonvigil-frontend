@@ -44,7 +44,9 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "securityhub:Get*", "securityhub:List*", "securityhub:Describe*",
       "guardduty:Get*", "guardduty:List*", "guardduty:Describe*",
       "inspector2:List*", "inspector2:Get*", "inspector2:BatchGetAccountStatus",
-      "access-analyzer:List*", "access-analyzer:Get*", "config:Describe*", "config:Get*", "config:List*"
+      "access-analyzer:List*", "access-analyzer:Get*", "config:Describe*", "config:Get*", "config:List*",
+      "fms:ListPolicies", "shield:ListProtections", "network-firewall:List*",
+      "cloudhsm:DescribeClusters", "detective:ListGraphs"
     ], "Resource": "*" },
     { "Sid": "MonitoringAndOps", "Effect": "Allow", "Action": [
       "cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*",
@@ -60,6 +62,12 @@ export const LEAST_PRIVILEGE_POLICY = `{
     { "Sid": "TrustedAdvisorSupport", "Effect": "Allow", "Action": ["support:Describe*", "trustedadvisor:Describe*"], "Resource": "*" },
     { "Sid": "TaggingAndResourceGroups", "Effect": "Allow", "Action": [
       "tag:GetResources", "tag:GetTagKeys", "tag:GetTagValues", "resource-groups:List*", "resource-groups:Get*"
+    ], "Resource": "*" },
+    { "Sid": "GovernanceAndOptimization", "Effect": "Allow", "Action": [
+      "controltower:ListLandingZones", "resiliencehub:ListApps", "wellarchitected:ListWorkloads",
+      "compute-optimizer:GetEnrollmentStatus", "compute-optimizer:GetEC2InstanceRecommendations",
+      "servicecatalog:ListPortfolios", "servicecatalog:SearchProductsAsAdmin",
+      "ram:GetResourceShares", "ds:DescribeDirectories"
     ], "Resource": "*" }
   ]
 }`;
