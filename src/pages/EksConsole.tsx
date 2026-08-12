@@ -19,7 +19,7 @@ import {
 // since both are AWS-only container platforms discovered via the same
 // connection). Split out from the old unified Clusters.tsx so this page
 // only ever shows AWS data — see the multi-cloud K8s consoles plan.
-const TABS = ['EKS Clusters', 'Nodes', 'Namespaces', 'Deployments', 'Pods', 'Helm Releases', 'ECS Clusters', 'ECS Services', 'ECS Tasks'] as const;
+const TABS = ['EKS Clusters', 'Node Groups', 'Nodes', 'Namespaces', 'Deployments', 'Pods', 'Helm Releases', 'ECS Clusters', 'ECS Services', 'ECS Tasks'] as const;
 type Tab = typeof TABS[number];
 
 function costCell(c: CloudResource) {
@@ -94,6 +94,16 @@ export function EksConsole() {
     { key: 'nodes', header: 'Nodes', render: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length, sortValue: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length },
     { key: 'version', header: 'Version', render: c => (c.metadata?.version as string) ?? '—' },
     { key: 'cost', header: 'Est. Monthly Cost', render: costCell, sortValue: c => c.cost_monthly ?? 0 },
+  ];
+
+  const nodegroupColumns: Column<CloudResource>[] = [
+    { key: 'name', header: 'Node Group', render: ng => ng.resource_name ?? ng.resource_id, sortValue: ng => ng.resource_name ?? '' },
+    { key: 'cluster', header: 'Cluster', render: ng => (ng.relationships?.clusterName as string) ?? '—', sortValue: ng => (ng.relationships?.clusterName as string) ?? '' },
+    { key: 'instanceTypes', header: 'Instance Types', render: ng => ((ng.metadata?.instanceTypes as string[] | undefined) ?? []).join(', ') || '—' },
+    { key: 'capacityType', header: 'Capacity Type', render: ng => (ng.metadata?.capacityType as string) ?? '—' },
+    { key: 'size', header: 'Size (cur / min / max)', render: ng => `${(ng.metadata?.desiredSize as number) ?? '—'} / ${(ng.metadata?.minSize as number) ?? '—'} / ${(ng.metadata?.maxSize as number) ?? '—'}` },
+    { key: 'amiType', header: 'AMI Type', render: ng => (ng.metadata?.amiType as string) ?? '—' },
+    { key: 'status', header: 'Status', render: ng => <Badge tone={ng.state === 'ACTIVE' ? 'good' : ng.state === 'CREATE_FAILED' || ng.state === 'DEGRADED' ? 'critical' : 'warning'}>{ng.state ?? ng.status}</Badge>, sortValue: ng => ng.state ?? ng.status },
   ];
 
   const ecsServiceColumns: Column<CloudResource>[] = [
@@ -177,6 +187,9 @@ export function EksConsole() {
           <DataTable columns={eksClusterColumns} rows={eksClusters} rowKey={c => c.id} onRowClick={setSelected} emptyMessage="No EKS clusters discovered yet." />
         </>
       )}
+      {tab === 'Node Groups' && (
+        <DataTable columns={nodegroupColumns} rows={eksNodegroups} rowKey={ng => ng.id} onRowClick={setSelected} emptyMessage="No node groups discovered yet." />
+      )}
       {tab === 'Nodes' && (
         <DataTable columns={nodeColumns} rows={eksNodes} rowKey={n => n.id} onRowClick={setSelected} emptyMessage="No EKS nodes discovered yet." />
       )}
@@ -255,14 +268,52 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
     const nsHere = eksNamespaces.filter(n => n.relationships?.clusterName === r.resource_name);
     const depsHere = eksDeployments.filter(d => d.relationships?.clusterName === r.resource_name);
     const readyCount = nodesHere.filter(n => n.state === 'Ready').length;
+    const logTypes = (m.logTypes as { type: string; enabled: boolean }[] | undefined) ?? [];
+    const healthIssues = (m.healthIssues as { code?: string; message?: string }[] | undefined) ?? [];
+    const behindLatest = typeof m.version === 'string' && typeof m.latestStandardSupportVersion === 'string' && m.version !== m.latestStandardSupportVersion;
     return (
       <div className="flex flex-col gap-4 text-sm">
+        {healthIssues.length > 0 && (
+          <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-xs text-red-800 dark:text-red-300 flex flex-col gap-1">
+            {healthIssues.map((issue, i) => <div key={i}>⚠ {issue.code ? `${issue.code}: ` : ''}{issue.message}</div>)}
+          </div>
+        )}
         <DetailSection title="Overview">
           <DetailField label="Status" value={<Badge>{r.state ?? r.status}</Badge>} />
-          <DetailField label="Version" value={m.version as string} />
+          <DetailField label="ARN" value={<span className="font-mono text-[11px]">{r.resource_id}</span>} />
+          <DetailField label="Version" value={
+            <span className="inline-flex items-center gap-1.5">
+              {m.version as string}
+              {behindLatest && <Badge tone="warning">behind latest ({m.latestStandardSupportVersion as string})</Badge>}
+            </span>
+          } />
+          <DetailField label="Platform Version" value={m.platformVersion as string} />
           <DetailField label="Region" value={r.region} />
           <DetailField label="Endpoint" value={<span className="font-mono text-[11px]">{m.endpoint as string}</span>} />
+          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
           <DetailField label="Nodes Ready" value={`${readyCount} / ${nodesHere.length}`} />
+          <DetailField label="Auth Mode" value={m.authenticationMode as string} />
+        </DetailSection>
+        <DetailSection title="Networking">
+          <DetailField label="VPC" value={<span className="font-mono text-[11px]">{r.relationships?.vpcId as string}</span>} />
+          <DetailField label="Subnets" value={<span className="font-mono text-[11px]">{((m.subnetIds as string[] | undefined) ?? []).join(', ') || '—'}</span>} />
+          <DetailField label="Cluster Security Group" value={<span className="font-mono text-[11px]">{m.clusterSecurityGroupId as string}</span>} />
+          <DetailField label="Additional Security Groups" value={<span className="font-mono text-[11px]">{((m.securityGroupIds as string[] | undefined) ?? []).join(', ') || '—'}</span>} />
+          <DetailField label="Endpoint Access" value={
+            <span className="inline-flex items-center gap-1.5">
+              {Boolean(m.endpointPublicAccess) && <Badge tone="neutral">Public</Badge>}
+              {Boolean(m.endpointPrivateAccess) && <Badge tone="neutral">Private</Badge>}
+            </span>
+          } />
+          {Boolean(m.endpointPublicAccess) && (
+            <DetailField label="Public Access CIDRs" value={<span className="font-mono text-[11px]">{((m.publicAccessCidrs as string[] | undefined) ?? []).join(', ') || '0.0.0.0/0'}</span>} />
+          )}
+        </DetailSection>
+        <DetailSection title="Logging">
+          {logTypes.map(lt => <DetailField key={lt.type} label={lt.type} value={<Badge tone={lt.enabled ? 'good' : 'neutral'}>{lt.enabled ? 'enabled' : 'disabled'}</Badge>} />)}
+        </DetailSection>
+        <DetailSection title="Encryption">
+          <DetailField label="Secrets Encryption" value={m.secretsEncryptionKeyArn ? <span className="font-mono text-[11px]">{m.secretsEncryptionKeyArn as string}</span> : <Badge tone="warning">not enabled</Badge>} />
         </DetailSection>
         {nodegroupsHere.some(ng => ng.state && !['ACTIVE'].includes(ng.state)) && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
@@ -271,11 +322,71 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
             ))}
           </div>
         )}
+        <RelatedList title="Node Groups" items={nodegroupsHere} empty="No node groups discovered." render={ng => (
+          <RelatedRow key={ng.id} resource={ng} onClick={() => onNavigate(ng)} right={<Badge tone={ng.state === 'ACTIVE' ? 'good' : 'warning'}>{ng.state}</Badge>} />
+        )} />
         <RelatedList title="Nodes" items={nodesHere} empty="No nodes discovered — re-run Discover Resources, or check the access entry / aws-auth mapping." render={n => (
           <RelatedRow key={n.id} resource={n} onClick={() => onNavigate(n)} right={<Badge tone={n.state === 'Ready' ? 'good' : 'critical'}>{n.state}</Badge>} />
         )} />
         <RelatedList title="Namespaces" items={nsHere} empty="No namespaces discovered." render={n => <RelatedRow key={n.id} resource={n} onClick={() => onNavigate(n)} />} />
         <RelatedList title="Deployments" items={depsHere} empty="No deployments discovered." render={d => <RelatedRow key={d.id} resource={d} onClick={() => onNavigate(d)} />} />
+      </div>
+    );
+  }
+
+  if (r.resource_type_key === 'eks_nodegroup') {
+    // AWS sets this label automatically on every node it launches as part of
+    // a managed node group -- the one reliable way to match a Node object
+    // back to the group that created it (nodegroups themselves have no
+    // per-node list in the DescribeNodegroup response, only the ASG(s)
+    // backing them).
+    const nodesHere = eksNodes.filter(n => n.relationships?.clusterName === clusterName && n.tags?.['eks.amazonaws.com/nodegroup'] === r.resource_name);
+    const labels = (m.labels as Record<string, string> | undefined) ?? {};
+    const taints = (m.taints as { key?: string; value?: string; effect?: string }[] | undefined) ?? [];
+    const launchTemplate = m.launchTemplate as { id?: string; name?: string; version?: string } | undefined;
+    const healthIssues = (m.healthIssues as { code?: string; message?: string }[] | undefined) ?? [];
+    return (
+      <div className="flex flex-col gap-4 text-sm">
+        {healthIssues.length > 0 && (
+          <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-900/10 px-3 py-2 text-xs text-red-800 dark:text-red-300 flex flex-col gap-1">
+            {healthIssues.map((issue, i) => <div key={i}>⚠ {issue.code ? `${issue.code}: ` : ''}{issue.message}</div>)}
+          </div>
+        )}
+        <DetailSection title="Overview">
+          <DetailField label="Status" value={<Badge tone={r.state === 'ACTIVE' ? 'good' : 'warning'}>{r.state}</Badge>} />
+          {clusterLink}
+          <DetailField label="Instance Types" value={((m.instanceTypes as string[] | undefined) ?? []).join(', ')} />
+          <DetailField label="Capacity Type" value={m.capacityType as string} />
+          <DetailField label="AMI Type" value={m.amiType as string} />
+          <DetailField label="Kubernetes Version" value={m.kubernetesVersion as string} />
+          <DetailField label="Release Version" value={m.releaseVersion as string} />
+          <DetailField label="Disk Size" value={m.diskSizeGiB ? `${m.diskSizeGiB} GiB` : undefined} />
+          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+        </DetailSection>
+        <DetailSection title="Scaling">
+          <DetailField label="Current Size" value={m.desiredSize as number} />
+          <DetailField label="Min / Max" value={`${m.minSize ?? '—'} / ${m.maxSize ?? '—'}`} />
+        </DetailSection>
+        {launchTemplate && (
+          <DetailSection title="Launch Template">
+            <DetailField label="Name" value={launchTemplate.name} />
+            <DetailField label="ID" value={<span className="font-mono text-[11px]">{launchTemplate.id}</span>} />
+            <DetailField label="Version" value={launchTemplate.version} />
+          </DetailSection>
+        )}
+        {Object.keys(labels).length > 0 && (
+          <DetailSection title="Labels">
+            {Object.entries(labels).map(([k, v]) => <DetailField key={k} label={k} value={<span className="font-mono text-[11px]">{v}</span>} />)}
+          </DetailSection>
+        )}
+        {taints.length > 0 && (
+          <DetailSection title="Taints">
+            {taints.map((t, i) => <DetailField key={i} label={t.key ?? ''} value={<span className="font-mono text-[11px]">{t.value ? `${t.value}:` : ''}{t.effect}</span>} />)}
+          </DetailSection>
+        )}
+        <RelatedList title="Nodes in this group" items={nodesHere} empty="No nodes matched to this group by label — node-to-nodegroup matching relies on the eks.amazonaws.com/nodegroup label AWS sets automatically." render={n => (
+          <RelatedRow key={n.id} resource={n} onClick={() => onNavigate(n)} right={<Badge tone={n.state === 'Ready' ? 'good' : 'critical'}>{n.state}</Badge>} />
+        )} />
       </div>
     );
   }
