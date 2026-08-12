@@ -37,7 +37,8 @@ export const LEAST_PRIVILEGE_POLICY = `{
     { "Sid": "IdentityAndKms", "Effect": "Allow", "Action": [
       "iam:List*", "iam:Get*", "iam:GenerateCredentialReport", "iam:GenerateServiceLastAccessedDetails",
       "kms:List*", "kms:Describe*", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus",
-      "secretsmanager:List*", "secretsmanager:DescribeSecret", "organizations:List*", "organizations:Describe*"
+      "secretsmanager:List*", "secretsmanager:DescribeSecret", "organizations:List*", "organizations:Describe*",
+      "sts:GetCallerIdentity"
     ], "Resource": "*" },
     { "Sid": "SecurityAndCompliance", "Effect": "Allow", "Action": [
       "securityhub:Get*", "securityhub:List*", "securityhub:Describe*",
