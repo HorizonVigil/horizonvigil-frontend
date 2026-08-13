@@ -84,7 +84,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           if (result.error) stepErrors.push({ message: `${stepId}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
         }
         setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
-        const summary = await api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service);
+        const summary = await api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service, steps.length);
         // Best-effort — a scan that found real resources should still report
         // success even if this fails. GCP has no recommendations engine yet
         // (Phase 1 scope, see the plan doc), so this is AWS-only for now.

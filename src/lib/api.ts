@@ -177,8 +177,8 @@ class ApiClient {
   runDiscoveryStep(id: string, stepId: string, service: CloudAccountService = 'awsAccounts') {
     return this.post<{ stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/run-step`, { stepId });
   }
-  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[], service: CloudAccountService = 'awsAccounts') {
-    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors });
+  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[], service: CloudAccountService = 'awsAccounts', totalSteps = 0) {
+    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors, totalSteps });
   }
 
   // ── gcp-accounts-api ─────────────────────────────────────────────────────
