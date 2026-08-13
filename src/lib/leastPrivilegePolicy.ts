@@ -11,7 +11,8 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "s3:GetEncryptionConfiguration", "s3:GetBucketPolicyStatus", "s3:GetBucketPublicAccessBlock",
       "efs:Describe*", "fsx:Describe*", "backup:List*", "backup:Describe*", "backup:Get*",
       "datasync:List*", "glacier:ListVaults", "storagegateway:List*", "storagegateway:Describe*",
-      "snowball:ListJobs", "drs:DescribeSourceServers"
+      "snowball:ListJobs", "drs:DescribeSourceServers", "lightsail:Get*", "outposts:ListOutposts",
+      "apprunner:List*", "imagebuilder:List*", "workspaces:Describe*"
     ], "Resource": "*" },
     { "Sid": "DatabasesAndCaching", "Effect": "Allow", "Action": [
       "rds:Describe*", "rds:List*", "dynamodb:Describe*", "dynamodb:List*",
@@ -24,7 +25,9 @@ export const LEAST_PRIVILEGE_POLICY = `{
     ], "Resource": "*" },
     { "Sid": "DevOpsCiCdAndMl", "Effect": "Allow", "Action": [
       "codebuild:List*", "codebuild:BatchGet*", "codepipeline:List*",
-      "cognito-idp:List*", "cognito-identity:List*", "sagemaker:List*"
+      "cognito-idp:List*", "cognito-identity:List*", "sagemaker:List*",
+      "codecommit:List*", "codecommit:BatchGetRepositories",
+      "codedeploy:List*", "codedeploy:BatchGetApplications", "codeartifact:List*"
     ], "Resource": "*" },
     { "Sid": "ContainersAndServerless", "Effect": "Allow", "Action": [
       "eks:Describe*", "eks:List*", "ecs:Describe*", "ecs:List*", "lambda:List*", "lambda:Get*",
