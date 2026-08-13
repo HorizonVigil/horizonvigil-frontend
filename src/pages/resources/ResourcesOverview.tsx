@@ -21,22 +21,25 @@ export function ResourcesOverview() {
   const location = useLocation();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { account, region, refreshToken } = useFilters();
+  const { account, region, connections, refreshToken } = useFilters();
   useResourcesUrlFilters();
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   const [byCategory, setByCategory] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    void api.getResourceCatalog().then(r => setCatalog(r.items));
-  }, []);
+  // Same selectedProvider derivation as ResourcesCategory.tsx (one level
+  // deeper in this drill-down) — without it, this page's catalog fetch never
+  // reacted to the Account filter at all, unlike what its old comment
+  // claimed, and AWS/GCP services sharing a literal `service` string (e.g.
+  // both providers have one named "iam") silently collapsed into a single
+  // Set entry when merged unfiltered, undercounting "X of Y services live".
+  const selectedProvider = account === 'all' ? undefined : connections.find(c => c.id === account)?.provider;
 
-  // Re-fetches whenever the header's Account or Region filter changes — the
-  // Account filter is also the one control that lets you tell "is this AWS
-  // or GCP" apart on this page: picking a specific "AWS — ..." or "GCP — ..."
-  // account re-scopes every category count to just that connection. There's
-  // no separate provider toggle; the Account dropdown already lists both,
-  // labeled.
+  useEffect(() => {
+    void api.getResourceCatalog({ provider: selectedProvider }).then(r => setCatalog(r.items));
+  }, [selectedProvider]);
+
+  // Re-fetches whenever the header's Account or Region filter changes.
   useEffect(() => {
     void api.getResourceExplorer({ connectionId: account === 'all' ? undefined : account, region: region === 'all' ? undefined : region })
       .then(r => setByCategory(Object.fromEntries(r.categories.map(c => [c.category, c.total]))));
@@ -48,8 +51,13 @@ export function ResourcesOverview() {
     for (const entry of catalog) {
       const bucket = byCat.get(entry.category);
       if (!bucket) continue;
-      bucket.services.add(entry.service);
-      if (entry.scanner_status === 'live') bucket.live.add(entry.service);
+      // Keyed by provider+service, not service alone — AWS and GCP both
+      // catalogue a service literally named "iam", and a bare `service` key
+      // would merge them into one entry even when only one provider's
+      // scanner is actually live.
+      const svcKey = `${entry.provider}:${entry.service}`;
+      bucket.services.add(svcKey);
+      if (entry.scanner_status === 'live') bucket.live.add(svcKey);
     }
     return byCat;
   }, [catalog]);
