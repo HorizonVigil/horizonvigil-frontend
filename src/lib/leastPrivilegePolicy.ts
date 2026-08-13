@@ -9,11 +9,14 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "elasticloadbalancing:Describe*", "autoscaling:Describe*",
       "s3:List*", "s3:GetBucket*", "s3:GetObjectTagging", "s3:GetLifecycleConfiguration",
       "s3:GetEncryptionConfiguration", "s3:GetBucketPolicyStatus", "s3:GetBucketPublicAccessBlock",
-      "efs:Describe*", "fsx:Describe*", "backup:List*", "backup:Describe*", "backup:Get*"
+      "efs:Describe*", "fsx:Describe*", "backup:List*", "backup:Describe*", "backup:Get*",
+      "datasync:List*", "glacier:ListVaults", "storagegateway:List*", "storagegateway:Describe*",
+      "snowball:ListJobs", "drs:DescribeSourceServers"
     ], "Resource": "*" },
     { "Sid": "DatabasesAndCaching", "Effect": "Allow", "Action": [
       "rds:Describe*", "rds:List*", "dynamodb:Describe*", "dynamodb:List*",
-      "elasticache:Describe*", "redshift:Describe*", "redshift:GetClusterCredentials"
+      "elasticache:Describe*", "redshift:Describe*", "redshift:GetClusterCredentials",
+      "memorydb:Describe*", "redshift-serverless:ListWorkgroups", "timestream:List*", "timestream:Describe*"
     ], "Resource": "*" },
     { "Sid": "AnalyticsAndDataPipelines", "Effect": "Allow", "Action": [
       "athena:List*", "athena:Get*", "glue:Get*", "glue:List*",
@@ -32,7 +35,10 @@ export const LEAST_PRIVILEGE_POLICY = `{
     { "Sid": "NetworkingEdgeDns", "Effect": "Allow", "Action": [
       "route53:List*", "route53:Get*", "cloudfront:List*", "cloudfront:Get*",
       "acm:List*", "acm:Describe*", "wafv2:List*", "wafv2:Get*",
-      "sqs:List*", "sqs:Get*", "sns:List*", "sns:Get*"
+      "sqs:List*", "sqs:Get*", "sns:List*", "sns:Get*",
+      "directconnect:Describe*", "globalaccelerator:ListAccelerators",
+      "route53resolver:List*", "servicediscovery:List*", "appmesh:List*",
+      "appmesh:Describe*"
     ], "Resource": "*" },
     { "Sid": "IdentityAndKms", "Effect": "Allow", "Action": [
       "iam:List*", "iam:Get*", "iam:GenerateCredentialReport", "iam:GenerateServiceLastAccessedDetails",
