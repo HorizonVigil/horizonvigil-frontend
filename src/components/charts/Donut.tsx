@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { useTheme } from '../../lib/theme';
-import { categoricalColor, categoryColor, CHROME, pick } from './palette';
+import { categoricalColor, categoryColor, CHROME, STATUS, pick } from './palette';
 
-export interface DonutSlice { label: string; value: number; colorCategory?: string }
+export interface DonutSlice {
+  label: string;
+  value: number;
+  colorCategory?: string;
+  /** Locks this slice to the shared severity/status tone palette (same tokens as Badge/StatCard) instead of the generic categorical order -- use for severity/remediation-style breakdowns where the color itself carries meaning (critical=red etc), not just a label to distinguish. Takes priority over colorCategory. */
+  tone?: keyof typeof STATUS;
+}
 
 /**
  * Donut chart for identity/composition breakdowns (e.g. resources by category).
@@ -10,7 +16,7 @@ export interface DonutSlice { label: string; value: number; colorCategory?: stri
  * is always the same color across every chart); otherwise slices are colored
  * by their position in the fixed 8-hue order.
  */
-export function Donut({ data, size = 160, thickness = 24, centerLabel }: { data: DonutSlice[]; size?: number; thickness?: number; centerLabel?: { value: string; caption: string } }) {
+export function Donut({ data, size = 160, thickness = 24, centerLabel, showPercent = false }: { data: DonutSlice[]; size?: number; thickness?: number; centerLabel?: { value: string; caption: string }; showPercent?: boolean }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -26,7 +32,7 @@ export function Donut({ data, size = 160, thickness = 24, centerLabel }: { data:
     const startAngle = cumulative * 2 * Math.PI - Math.PI / 2;
     cumulative += fraction;
     const endAngle = cumulative * 2 * Math.PI - Math.PI / 2;
-    const color = d.colorCategory ? categoryColor(d.colorCategory, isDark) : categoricalColor(i, isDark);
+    const color = d.tone ? pick(STATUS[d.tone], isDark) : d.colorCategory ? categoryColor(d.colorCategory, isDark) : categoricalColor(i, isDark);
     return { ...d, startAngle, endAngle, fraction, color, index: i };
   });
   // A single 100% segment sweeps exactly 2π, which makes its arc's start
@@ -86,7 +92,9 @@ export function Donut({ data, size = 160, thickness = 24, centerLabel }: { data:
           <li key={seg.label} className="flex items-center gap-2 cursor-default" onMouseEnter={() => setHoverIndex(seg.index)} onMouseLeave={() => setHoverIndex(null)}>
             <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
             <span className="text-slate-600 dark:text-slate-300">{seg.label}</span>
-            <span className="text-slate-400 dark:text-slate-500 tabular-nums">{seg.value.toLocaleString()}</span>
+            <span className="text-slate-400 dark:text-slate-500 tabular-nums">
+              {seg.value.toLocaleString()}{showPercent && total > 0 ? ` (${(seg.fraction * 100).toFixed(1)}%)` : ''}
+            </span>
           </li>
         ))}
       </ul>

@@ -31,7 +31,7 @@ const RANGE_LABELS: Record<DateRangePreset, string> = {
  * otherwise the control renders but silently does nothing when changed,
  * which is worse than not having it.
  */
-export function FilterBar({ title, breadcrumb, showAccountFilter = true, showRegionFilter = true, showDateFilter = true }: { title: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean; showRegionFilter?: boolean; showDateFilter?: boolean }) {
+export function FilterBar({ title, subtitle, breadcrumb, showAccountFilter = true, showRegionFilter = true, showDateFilter = true }: { title: string; subtitle?: string; breadcrumb?: React.ReactNode; showAccountFilter?: boolean; showRegionFilter?: boolean; showDateFilter?: boolean }) {
   const { region, setRegion, account, setAccount, connections, dateRange, setDateRange, refresh } = useFilters();
 
   return (
@@ -39,6 +39,7 @@ export function FilterBar({ title, breadcrumb, showAccountFilter = true, showReg
       <div>
         {breadcrumb}
         <h1 className="text-xl font-semibold text-slate-900 dark:text-white mt-0.5">{title}</h1>
+        {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{subtitle}</p>}
       </div>
       <div className="flex flex-wrap items-end gap-2">
         {showAccountFilter && (
