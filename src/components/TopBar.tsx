@@ -20,7 +20,12 @@ const ENV_STYLES: Record<string, string> = {
  * No fabricated data — the alert count is a real getActiveAlerts() call, and
  * degrades to nothing (not a fake "0") if it fails.
  */
-export function TopBar() {
+interface TopBarProps {
+  /** Opens the off-canvas Sidebar drawer -- only rendered/relevant below `lg` (1024px). */
+  onMenuClick: () => void;
+}
+
+export function TopBar({ onMenuClick }: TopBarProps) {
   const { theme, toggleTheme } = useTheme();
   const { currentOrg } = useOrg();
   const navigate = useNavigate();
@@ -51,16 +56,28 @@ export function TopBar() {
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3 px-6 pt-3 pb-1">
-        <button
-          onClick={() => setPaletteOpen(true)}
-          className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-500 dark:hover:text-slate-400 w-64"
-          aria-label="Open command palette"
-        >
-          <Icon name="search" size={14} className="text-slate-400" />
-          <span className="flex-1 text-left">Jump to…</span>
-          <kbd className="text-[10px] rounded border border-slate-200 dark:border-slate-700 px-1 py-0.5">Ctrl K</kbd>
-        </button>
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-6 pt-3 pb-1">
+        <div className="flex items-center gap-2 min-w-0 flex-1 sm:flex-initial">
+          {/* Sidebar's own nav (module submenu, folders/projects) has no
+              other entry point below `lg` once it's an off-canvas drawer --
+              this button is that entry point, not decorative. */}
+          <button
+            onClick={onMenuClick}
+            className="lg:hidden shrink-0 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+            aria-label="Open menu"
+          >
+            <Icon name="menu" size={16} />
+          </button>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 hover:text-slate-500 dark:hover:text-slate-400 w-full sm:w-64"
+            aria-label="Open command palette"
+          >
+            <Icon name="search" size={14} className="text-slate-400 shrink-0" />
+            <span className="flex-1 text-left truncate">Jump to…</span>
+            <kbd className="hidden sm:inline text-[10px] rounded border border-slate-200 dark:border-slate-700 px-1 py-0.5">Ctrl K</kbd>
+          </button>
+        </div>
 
         <div className="flex items-center gap-2">
           <span className={`text-[10px] font-medium uppercase tracking-wide rounded-full border px-2 py-0.5 ${ENV_STYLES[env]}`} title={`Connected to the ${env} environment`}>

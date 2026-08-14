@@ -1,9 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
 import { findActiveModule, isChildActive, canSeeChild, canSeeModule, type Role } from '../lib/navConfig';
 import { Icon, NAV_ICON_MAP } from './icons';
+
+interface SidebarProps {
+  /** Below `lg` (1024px) the sidebar is an off-canvas drawer, closed by
+   * default — there's no width left to show it inline once AppRail's 64px
+   * and this sidebar's 256px are both accounted for on a 768-1024px
+   * viewport. `open`/`onClose` only matter below that breakpoint; at `lg`
+   * and up the sidebar is always visible regardless of this prop. */
+  open: boolean;
+  onClose: () => void;
+}
 
 /**
  * This domain's OWN sidebar — scoped to whichever module AppRail says is
@@ -12,7 +22,7 @@ import { Icon, NAV_ICON_MAP } from './icons';
  * only ever shows one module's sub-nav, the way a real separate app would.
  * Switching domains happens in AppRail, not here.
  */
-export function Sidebar() {
+export function Sidebar({ open, onClose }: SidebarProps) {
   const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope, menuPermissions } = useOrg();
   const { signOut, user } = useAuth();
   const location = useLocation();
@@ -21,6 +31,20 @@ export function Sidebar() {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const role = (currentOrg?.myRole as Role) ?? 'owner';
+
+  // Below `lg` the drawer should get out of the way the moment a nav link is
+  // actually followed (matches the standard off-canvas-drawer convention) --
+  // harmless above `lg`, where `open` is ignored by the responsive classes
+  // on the <aside> below anyway.
+  useEffect(() => { onClose(); }, [location.pathname, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(e: KeyboardEvent) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   const activeModule = useMemo(() => findActiveModule(location.pathname), [location.pathname]);
   const filteredChildren = useMemo(() => {
     if (!activeModule) return [];
@@ -93,16 +117,36 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-      <div className="px-4 py-4 border-b border-slate-200 dark:border-slate-800">
-        <div className="relative">
-          <button onClick={() => setOrgMenuOpen(v => !v)} className="w-full flex items-center justify-between text-sm rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-            <span className="truncate flex items-center gap-1.5">
-              <Icon name="building" size={14} className="text-slate-400 shrink-0" />
-              {currentOrg?.name ?? 'Select organization'}
-            </span>
-            <Icon name="chevron-down" size={14} className="text-slate-400" />
-          </button>
+    <>
+      {/* Backdrop — below `lg` only, and only while the drawer is open.
+          Clicking it closes the drawer, same as Escape. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`w-64 shrink-0 h-screen flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900
+          fixed top-0 z-40 transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'}
+          lg:static lg:z-auto lg:translate-x-0 lg:transition-none lg:sticky lg:top-0`}
+      >
+        <div className="px-4 py-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-2 lg:hidden mb-3">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Menu</span>
+            <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Close menu">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+          <div className="relative">
+            <button onClick={() => setOrgMenuOpen(v => !v)} className="w-full flex items-center justify-between text-sm rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <span className="truncate flex items-center gap-1.5">
+                <Icon name="building" size={14} className="text-slate-400 shrink-0" />
+                {currentOrg?.name ?? 'Select organization'}
+              </span>
+              <Icon name="chevron-down" size={14} className="text-slate-400" />
+            </button>
           {orgMenuOpen && (
             <ul className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
               {orgs.map(o => (
@@ -187,5 +231,6 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }
