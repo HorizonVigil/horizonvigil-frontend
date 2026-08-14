@@ -214,6 +214,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Security Findings', to: tabLink(VULN, 'Security Findings'), real: true },
       { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true },
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
+      { label: 'Scanners', to: tabLink(VULN, 'Scanners'), real: true },
     ],
   },
   {

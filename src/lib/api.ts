@@ -439,6 +439,24 @@ class ApiClient {
     return this.get<Paginated<ComplianceBenchmark>>('vulnerabilityManagement', `/api/vulnerability-management/compliance${qs(params)}`);
   }
 
+  // Proxies to the cloudops360-scanner-* microservices (separate
+  // cloudscape-security GCP project) via vulnerability-management-api's
+  // own scanner client -- see that service's scannerClient.ts. Scan/finding
+  // data lives in the scanner platform's own Postgres, fetched live here,
+  // not mirrored into this app's own findings table.
+  getScannerStatuses() {
+    return this.get<{ scanners: Array<{ scanner: string; reachable: boolean; error?: string }> }>('vulnerabilityManagement', '/api/vulnerability-management/scanners');
+  }
+  startScan(scanner: string, body: { scan_type: string; target: { type: string; uri: string }; options?: Record<string, unknown>; asset_id?: string; provider?: string }) {
+    return this.post<{ scan_id?: string; status?: string; error?: string }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans`, body);
+  }
+  getScanStatus(scanner: string, scanId: string) {
+    return this.get<ScanRecord>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans/${scanId}`);
+  }
+  getScanResults(scanner: string, scanId: string, params: { severity?: string; status?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ScannerFinding>>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans/${scanId}/results${qs(params)}`);
+  }
+
   // ── alerts-api ───────────────────────────────────────────────────────────
 
   getActiveAlerts(params: { severity?: string; connection_id?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<AlertRow>>('alerts', `/api/alerts/active${qs(params)}`); }
@@ -887,6 +905,26 @@ export interface VulnerabilityFinding {
 export interface ComplianceBenchmark { id: string; connection_id: string; framework: 'cis_aws_foundations' | 'pci_dss' | 'iso_27001'; passed_checks: number; total_checks: number; last_evaluated_at: string; passRate: number | null }
 
 export interface AlertRow { id: string; org_id: string; connection_id: string | null; resource_id: string | null; rule_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low'; alert_name: string; status: 'open' | 'acknowledged' | 'in_progress' | 'resolved'; triggered_at: string; acknowledged_at: string | null; resolved_at: string | null; metadata: Record<string, unknown> }
+
+// cloudops360-scanner-* microservices (Prowler, Trivy, Semgrep, Gitleaks,
+// Checkov, Grype, Syft, TruffleHog, Nuclei, Dependency-Check) — see each
+// repo's shared-lib types.ts for the authoritative schema this mirrors.
+export interface ScanRecord {
+  scan_id: string; tenant_id: string; scanner: string; scanner_version: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timeout';
+  scan_type: string; provider: string | null; asset_id: string | null;
+  target: { type: string; uri: string }; created_at: string; started_at: string | null;
+  finished_at: string | null; duration_ms: number | null; finding_count: number;
+  error_count: number; error_message: string | null;
+}
+export interface ScannerFinding {
+  finding_id: string; tenant_id: string; scan_id: string; scanner: string; scanner_version: string;
+  asset_id: string | null; asset_type: string | null; resource_id: string | null; title: string;
+  description: string | null; severity: 'informational' | 'low' | 'medium' | 'high' | 'critical';
+  scanner_severity: string | null; cvss: number | null; cve: string | null; cwe: string | null;
+  status: 'open' | 'resolved' | 'suppressed' | 'accepted_risk'; first_seen: string; last_seen: string;
+  source_finding_id: string; location: Record<string, unknown> | null; references: string[] | null;
+}
 export interface AlertRule { id: string; org_id: string; name: string; condition: unknown; severity: string; notification_channels: unknown[]; enabled: boolean; created_at: string }
 export interface NotificationChannel { id: string; org_id: string; channel_type: string; name: string; config: unknown; enabled: boolean; created_at: string }
 export interface EscalationPolicy { id: string; org_id: string; name: string; steps: unknown[]; created_at: string }
