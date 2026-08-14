@@ -15,8 +15,14 @@ interface DataTableProps<T> {
   rows: T[];
   rowKey: (row: T) => string;
   pageSize?: number;
+  /** Page sizes offered in the pager's selector. Defaults to [10, 20, 50, 100]. */
+  pageSizeOptions?: number[];
   onRowClick?: (row: T) => void;
   emptyMessage?: string;
+  /** Opt-in checkbox column + selection state, for bulk actions. Omit for every table that doesn't need it — this changes nothing for existing callers. */
+  selectable?: boolean;
+  selectedKeys?: Set<string>;
+  onSelectionChange?: (keys: Set<string>) => void;
 }
 
 function toCsv<T>(columns: Column<T>[], rows: T[]): string {
@@ -28,11 +34,28 @@ function toCsv<T>(columns: Column<T>[], rows: T[]): string {
   return [header, ...lines].join('\n');
 }
 
-export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick, emptyMessage = 'No results.' }: DataTableProps<T>) {
+/** Page numbers with an ellipsis for anything beyond a small window around the current page — avoids rendering hundreds of page buttons for a large result set. */
+function pageWindow(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i);
+  const pages = new Set([0, total - 1, current, current - 1, current + 1]);
+  const sorted = [...pages].filter(p => p >= 0 && p < total).sort((a, b) => a - b);
+  const out: (number | 'ellipsis')[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) out.push('ellipsis');
+    out.push(sorted[i]);
+  }
+  return out;
+}
+
+export function DataTable<T>({
+  columns, rows, rowKey, pageSize: initialPageSize = 20, pageSizeOptions = [10, 20, 50, 100],
+  onRowClick, emptyMessage = 'No results.', selectable = false, selectedKeys, onSelectionChange,
+}: DataTableProps<T>) {
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set(columns.filter(c => c.defaultHidden).map(c => c.key)));
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(initialPageSize);
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -64,7 +87,15 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
   }, [searchedRows, sortKey, sortDir, columns]);
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
-  const pageRows = sortedRows.slice(page * pageSize, (page + 1) * pageSize);
+  // Clamped rather than stored — if an upstream filter shrinks `rows` while
+  // sitting on page 5, this snaps back to a real page instead of rendering
+  // an empty table that looks broken.
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = sortedRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const rangeStart = sortedRows.length === 0 ? 0 : safePage * pageSize + 1;
+  const rangeEnd = Math.min(sortedRows.length, (safePage + 1) * pageSize);
+
+  const allOnPageSelected = selectable && pageRows.length > 0 && pageRows.every(r => selectedKeys?.has(rowKey(r)));
 
   function updateQuery(next: string) {
     setQuery(next);
@@ -74,6 +105,21 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
   function toggleSort(key: string) {
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
+  }
+
+  function toggleRowSelection(key: string) {
+    if (!onSelectionChange) return;
+    const next = new Set(selectedKeys ?? []);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onSelectionChange(next);
+  }
+
+  function togglePageSelection() {
+    if (!onSelectionChange) return;
+    const next = new Set(selectedKeys ?? []);
+    if (allOnPageSelected) pageRows.forEach(r => next.delete(rowKey(r)));
+    else pageRows.forEach(r => next.add(rowKey(r)));
+    onSelectionChange(next);
   }
 
   function exportCsv() {
@@ -122,6 +168,11 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800">
+              {selectable && (
+                <th className="w-8 px-3 py-2">
+                  <input type="checkbox" checked={allOnPageSelected} onChange={togglePageSelection} aria-label="Select all rows on this page" />
+                </th>
+              )}
               {visibleColumns.map(c => (
                 <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
                   <button className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100" onClick={() => c.sortValue && toggleSort(c.key)} disabled={!c.sortValue}>
@@ -133,26 +184,62 @@ export function DataTable<T>({ columns, rows, rowKey, pageSize = 20, onRowClick,
             </tr>
           </thead>
           <tbody>
-            {pageRows.map(row => (
-              <tr key={rowKey(row)} className={`group border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`} onClick={() => onRowClick?.(row)}>
-                {visibleColumns.map(c => (
-                  <td key={c.key} className={`px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200 ${c.sticky ? 'sticky left-0 z-[1] bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50' : ''}`}>{c.render(row)}</td>
-                ))}
-              </tr>
-            ))}
+            {pageRows.map(row => {
+              const key = rowKey(row);
+              return (
+                <tr key={key} className={`group border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`} onClick={() => onRowClick?.(row)}>
+                  {selectable && (
+                    <td className="w-8 px-3 py-2" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedKeys?.has(key) ?? false} onChange={() => toggleRowSelection(key)} aria-label="Select row" />
+                    </td>
+                  )}
+                  {visibleColumns.map(c => (
+                    <td key={c.key} className={`px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200 ${c.sticky ? 'sticky left-0 z-[1] bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50' : ''}`}>{c.render(row)}</td>
+                  ))}
+                </tr>
+              );
+            })}
             {pageRows.length === 0 && (
-              <tr><td colSpan={visibleColumns.length} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">{query.trim() && rows.length > 0 ? 'No rows match your search.' : emptyMessage}</td></tr>
+              <tr><td colSpan={visibleColumns.length + (selectable ? 1 : 0)} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">{query.trim() && rows.length > 0 ? 'No rows match your search.' : emptyMessage}</td></tr>
             )}
           </tbody>
         </table>
       </div>
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
-          <span>Page {page + 1} of {totalPages}</span>
-          <div className="flex gap-1">
-            <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
-            <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+      {sortedRows.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-3">
+            <span>Showing {rangeStart}–{rangeEnd} of {sortedRows.length.toLocaleString()}</span>
+            <label className="flex items-center gap-1.5">
+              <select
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-slate-600 dark:text-slate-300"
+              >
+                {pageSizeOptions.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <span>/ page</span>
+            </label>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button disabled={safePage === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+              {pageWindow(safePage, totalPages).map((p, i) =>
+                p === 'ellipsis'
+                  ? <span key={`e${i}`} className="px-1.5">…</span>
+                  : (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      aria-current={p === safePage ? 'page' : undefined}
+                      className={`min-w-[26px] px-2 py-1 rounded-md border tabular-nums ${p === safePage ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    >
+                      {p + 1}
+                    </button>
+                  )
+              )}
+              <button disabled={safePage >= totalPages - 1} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+            </div>
+          )}
         </div>
       )}
     </div>

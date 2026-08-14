@@ -425,13 +425,28 @@ class ApiClient {
   // ── vulnerability-management-api ────────────────────────────────────────
 
   getVulnerabilityDashboard() {
-    return this.get<{ openFindings: number; bySeverity: Record<string, number>; riskScore: number; compliance: { benchmarksEvaluated: number; averagePassRate: number } }>('vulnerabilityManagement', '/api/vulnerability-management/dashboard');
+    return this.get<{
+      openFindings: number; bySeverity: Record<string, number>; riskScore: number;
+      compliance: { benchmarksEvaluated: number; averagePassRate: number };
+      // Scoped to AWS-native findings (vulnerability_findings) only -- does
+      // NOT include cloudops360-scanner-* results, a separate database with
+      // no connection to this one. See the Scanners tab's own banner.
+      topAssets: Array<{ resource: string; label: string; findingCount: number }>;
+      bySource: Array<{ source: string; label: string; count: number }>;
+      remediation: { open: number; resolved: number; suppressed: number };
+    }>('vulnerabilityManagement', '/api/vulnerability-management/dashboard');
   }
   getFindings(params: { severity?: string; status?: string; finding_source?: string; region?: string; connection_id?: string; search?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/findings${qs(params)}`);
   }
   getFinding(id: string) { return this.get<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`); }
-  updateFindingStatus(id: string, status: 'open' | 'resolved' | 'suppressed') { return this.patch<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`, { status }); }
+  updateFindingStatus(id: string, status: 'open' | 'resolved' | 'suppressed', reason?: string) {
+    return this.patch<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`, reason ? { status, reason } : { status });
+  }
+  /** Additive beyond the original single-finding action -- same PATCH semantics, up to 200 ids per call, one audit log entry per finding server-side. */
+  bulkUpdateFindingStatus(ids: string[], status: 'open' | 'resolved' | 'suppressed', reason?: string) {
+    return this.patch<{ requestedCount: number; updatedCount: number; items: VulnerabilityFinding[] }>('vulnerabilityManagement', '/api/vulnerability-management/findings/bulk-status', reason ? { ids, status, reason } : { ids, status });
+  }
   getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor', params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
   }
