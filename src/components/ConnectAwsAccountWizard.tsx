@@ -129,7 +129,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
 
       {method === 'access_key' ? (
         <ol className="text-xs text-slate-500 dark:text-slate-400 list-decimal list-inside space-y-1 mb-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg p-3">
-          <li>IAM → Users → Create user (e.g. <code>cloudops360-readonly</code>), programmatic access only — no console password.</li>
+          <li>IAM → Users → Create user (e.g. <code>horizonvigil-readonly</code>), programmatic access only — no console password.</li>
           <li>Attach managed policies <code>ReadOnlyAccess</code> + <code>SecurityAudit</code>, or the <button type="button" onClick={() => setShowPolicy(v => !v)} className="text-brand-600 dark:text-brand-400 underline">hardened custom policy</button> below.</li>
           <li>Download the access key CSV immediately — the secret is shown once.</li>
           <li>Paste the Account ID + keys here. We encrypt the secret at rest and never show it again — live validation against AWS isn't performed yet, only that the credentials are present and well-formed.</li>

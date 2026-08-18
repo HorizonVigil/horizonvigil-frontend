@@ -507,7 +507,7 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
           <>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-600 dark:text-slate-300">URL</span>
-              <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/cloudops360 or a Slack Incoming Webhook URL" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/horizonvigil or a Slack Incoming Webhook URL" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-600 dark:text-slate-300">Payload format</span>

@@ -8,18 +8,18 @@
 export const GCP_RECOMMENDED_ROLE = 'roles/viewer';
 
 export const GCP_ROLE_DESCRIPTION =
-  'GCP\'s built-in read-only role. Covers list/get access across Compute Engine, Cloud Storage, Cloud SQL, GKE, and effectively every other resource type in the project — the equivalent of AWS\'s ReadOnlyAccess managed policy. CloudOps360 only ever calls read (list/get) operations.';
+  'GCP\'s built-in read-only role. Covers list/get access across Compute Engine, Cloud Storage, Cloud SQL, GKE, and effectively every other resource type in the project — the equivalent of AWS\'s ReadOnlyAccess managed policy. HorizonVigil only ever calls read (list/get) operations.';
 
 export const SERVICE_ACCOUNT_KEY_STEPS = [
-  'IAM & Admin → Service Accounts → Create Service Account (e.g. cloudops360-readonly), no console access needed.',
+  'IAM & Admin → Service Accounts → Create Service Account (e.g. horizonvigil-readonly), no console access needed.',
   `Grant it the "${GCP_RECOMMENDED_ROLE}" role (Viewer) on the project.`,
   'Open the new service account → Keys → Add Key → Create new key → JSON. Downloads immediately — the private key is shown once.',
   'Paste the full JSON file contents here. We encrypt it at rest and never show it again.',
 ];
 
 export const SERVICE_ACCOUNT_IMPERSONATION_STEPS = [
-  'IAM & Admin → Service Accounts → Create Service Account (e.g. cloudops360-readonly), no keys needed for this method.',
+  'IAM & Admin → Service Accounts → Create Service Account (e.g. horizonvigil-readonly), no keys needed for this method.',
   `Grant it the "${GCP_RECOMMENDED_ROLE}" role (Viewer) on the project.`,
-  'On that same service account, open the Permissions tab and grant CloudOps360\'s platform service account (shown after you submit this form) the "Service Account Token Creator" role (roles/iam.serviceAccountTokenCreator) — this is what lets us mint short-lived tokens without ever storing a key.',
+  'On that same service account, open the Permissions tab and grant HorizonVigil\'s platform service account (shown after you submit this form) the "Service Account Token Creator" role (roles/iam.serviceAccountTokenCreator) — this is what lets us mint short-lived tokens without ever storing a key.',
   'Paste the service account\'s email address here (the one you just created, not the platform\'s).',
 ];

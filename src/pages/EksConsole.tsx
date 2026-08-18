@@ -259,7 +259,7 @@ export function EksConsole() {
 // Every relationship below is derived from data already loaded on this page
 // (no extra API calls), matched the same way the K8s objects themselves
 // relate: pod.metadata.namespace/nodeName are literal Kubernetes fields, not
-// something CloudOps360 invented. Deployment -> Pod matching is the one
+// something HorizonVigil invented. Deployment -> Pod matching is the one
 // heuristic (K8s pods are owned by a ReplicaSet, which is owned by the
 // Deployment; no ReplicaSet scanner exists yet) -- matched by namespace +
 // the standard "<deployment>-<hash>" pod-name prefix Kubernetes itself

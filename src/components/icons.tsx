@@ -1,5 +1,5 @@
 /**
- * Professional SVG icon system for CloudOps360 — replaces the Unicode/emoji
+ * Professional SVG icon system for HorizonVigil — replaces the Unicode/emoji
  * glyphs that made the app feel like an MVP. All icons are stroke-based
  * Lucide-style SVGs (24×24, 1.8 stroke, round caps) so they read consistently
  * at any size and in both light and dark mode.

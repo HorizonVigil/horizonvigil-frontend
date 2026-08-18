@@ -116,7 +116,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
         ) : (
           <Field
             label="Service Account Email" required value={form.impersonatedServiceAccount}
-            onChange={v => setForm(f => ({ ...f, impersonatedServiceAccount: v }))} placeholder="cloudops360-readonly@my-project.iam.gserviceaccount.com"
+            onChange={v => setForm(f => ({ ...f, impersonatedServiceAccount: v }))} placeholder="horizonvigil-readonly@my-project.iam.gserviceaccount.com"
           />
         )}
 
