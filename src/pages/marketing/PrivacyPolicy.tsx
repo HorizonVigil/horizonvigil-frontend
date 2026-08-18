@@ -5,7 +5,7 @@ export function PrivacyPolicy() {
     <LegalPage title="Privacy Policy" updated="August 2026">
       <section>
         <h2>1. What this covers</h2>
-        <p>This policy describes how CloudOps360 ("we", "us") collects, uses, and protects information when you use the CloudOps360 platform — the website, the application, and the APIs behind it.</p>
+        <p>This policy describes how HorizonVigil ("we", "us") collects, uses, and protects information when you use the HorizonVigil platform — the website, the application, and the APIs behind it.</p>
       </section>
 
       <section>
@@ -25,7 +25,7 @@ export function PrivacyPolicy() {
 
       <section>
         <h2>4. Cloud account access</h2>
-        <p>When you connect an AWS account or GCP project, you grant CloudOps360 read access (and, only where you explicitly enable automation, limited write access for specific remediation actions) scoped to the permissions you configure. We never request broader access than a module needs to function, and every automated action is recorded in your organization's audit log.</p>
+        <p>When you connect an AWS account or GCP project, you grant HorizonVigil read access (and, only where you explicitly enable automation, limited write access for specific remediation actions) scoped to the permissions you configure. We never request broader access than a module needs to function, and every automated action is recorded in your organization's audit log.</p>
       </section>
 
       <section>

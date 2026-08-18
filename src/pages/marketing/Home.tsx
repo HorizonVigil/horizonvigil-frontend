@@ -51,7 +51,7 @@ const SECURITY_FEATURES = [
 ];
 
 const FAQS = [
-  { q: 'Which clouds does CloudOps360 support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is planned but not yet built; we\'d rather ship two clouds well than three clouds half-finished.' },
+  { q: 'Which clouds does HorizonVigil support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is planned but not yet built; we\'d rather ship two clouds well than three clouds half-finished.' },
   { q: 'How does account access work?', a: 'For AWS, connect via a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. For GCP, connect via a service-account key or service-account impersonation.' },
   { q: 'Is there a free plan?', a: 'Yes. Free connects one cloud account for two users, with 7-day data retention — enough to see real value before you pay anything.' },
   { q: 'Can I cancel or change plans anytime?', a: 'Yes, from the in-app billing portal. Downgrades and cancellations take effect at the end of your current billing period; there\'s no lock-in contract below Enterprise.' },
@@ -133,7 +133,7 @@ function ProductOverview() {
         <Eyebrow>Product overview</Eyebrow>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Everything your cloud ops team checks daily, in one place.</h2>
         <p className="text-slate-600 dark:text-slate-300 mt-4">
-          CloudOps360 connects directly to your AWS accounts and GCP projects, builds a live inventory, and layers cost, security, and automation on top — so the answer to "what's running, what does it cost, and is it safe" is always one login away.
+          HorizonVigil connects directly to your AWS accounts and GCP projects, builds a live inventory, and layers cost, security, and automation on top — so the answer to "what's running, what does it cost, and is it safe" is always one login away.
         </p>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">

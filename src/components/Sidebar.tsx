@@ -175,7 +175,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <div key={child.label}>
             {child.action === 'open-chat' ? (
               <button
-                onClick={() => window.dispatchEvent(new CustomEvent('cloudops:open-chat'))}
+                onClick={() => window.dispatchEvent(new CustomEvent('horizonvigil:open-chat'))}
                 className="w-full text-left truncate rounded-md px-2 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 {child.label}

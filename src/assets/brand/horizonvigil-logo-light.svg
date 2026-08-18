@@ -1,0 +1,20 @@
+<svg width="720" height="220" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="dawn" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4EEBAE"/>
+      <stop offset="100%" stop-color="#22B58C"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(68,44)">
+    <line x1="-38" y1="70" x2="38" y2="70" stroke="#14211F" stroke-width="11" stroke-linecap="round"/>
+    <path d="M-24 70 A24 24 0 0 1 24 70" fill="none" stroke="url(#dawn)" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="0" cy="70" r="11" fill="#F5F3EE"/>
+    <circle cx="0" cy="70" r="11" fill="none" stroke="url(#dawn)" stroke-width="5"/>
+  </g>
+
+  <g transform="translate(120,0)">
+    <text x="0" y="118" font-family="'Helvetica Neue', Arial, sans-serif" font-size="56" font-weight="700" letter-spacing="-1" fill="#0E1B1E">Horizon<tspan font-weight="400" fill="#1F9C7A">Vigil</tspan></text>
+    <text x="2" y="148" font-family="'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="700" letter-spacing="1.5" fill="#33403D">MULTI-CLOUD COST &amp; OPERATIONS</text>
+  </g>
+</svg>

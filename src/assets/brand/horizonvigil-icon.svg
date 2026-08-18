@@ -1,0 +1,19 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="dawnIcon" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4EEBAE"/>
+      <stop offset="100%" stop-color="#1F9C7A"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="200" height="200" rx="44" fill="#0E1B1E"/>
+
+  <g transform="translate(100,108)">
+    <line x1="-40" y1="34" x2="40" y2="34" stroke="#3A4B48" stroke-width="14" stroke-linecap="round"/>
+    <path d="M-38 34 A38 38 0 0 1 38 34" fill="none" stroke="#0E1B1E" stroke-width="22" stroke-linecap="round"/>
+    <path d="M-38 34 A38 38 0 0 1 38 34" fill="none" stroke="url(#dawnIcon)" stroke-width="16" stroke-linecap="round"/>
+
+    <circle cx="0" cy="34" r="17" fill="#0E1B1E"/>
+    <circle cx="0" cy="34" r="17" fill="none" stroke="url(#dawnIcon)" stroke-width="8"/>
+  </g>
+</svg>

@@ -4,8 +4,8 @@
  * capture backend yet, so "Contact sales" / "Book a demo" are honest
  * mailto: links rather than a form that would silently go nowhere.
  */
-export const CONTACT_SALES_HREF = 'mailto:sales@cloudops360.com?subject=CloudOps360%20—%20Contact%20Sales';
-export const BOOK_DEMO_HREF = 'mailto:sales@cloudops360.com?subject=CloudOps360%20—%20Book%20a%20Demo';
+export const CONTACT_SALES_HREF = 'mailto:sales@cloudops360.com?subject=HorizonVigil%20—%20Contact%20Sales';
+export const BOOK_DEMO_HREF = 'mailto:sales@cloudops360.com?subject=HorizonVigil%20—%20Book%20a%20Demo';
 
 export interface MarketingPlan {
   key: string;
@@ -31,7 +31,7 @@ const fmt = (n: number) => n === -1 ? 'Unlimited' : n.toLocaleString();
 export const MARKETING_PLANS: MarketingPlan[] = [
   {
     key: 'free', name: 'Free', monthlyCents: 0, annualCents: 0,
-    tagline: 'Connect one account and see what CloudOps360 finds.',
+    tagline: 'Connect one account and see what HorizonVigil finds.',
     cloudAccounts: fmt(1), users: fmt(2), automations: fmt(0), retention: '7 days',
     support: 'Community', sla: null, sso: false, samlSso: false, auditLog: false, compliance: [],
   },

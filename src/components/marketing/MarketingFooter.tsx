@@ -59,7 +59,7 @@ export function MarketingFooter() {
       </div>
       <div className="border-t border-slate-200 dark:border-slate-800">
         <div className="max-w-6xl mx-auto px-5 py-5 text-xs text-slate-400 dark:text-slate-500">
-          © {new Date().getFullYear()} CloudOps360. All rights reserved.
+          © {new Date().getFullYear()} HorizonVigil. All rights reserved.
         </div>
       </div>
     </footer>

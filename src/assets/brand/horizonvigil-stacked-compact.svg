@@ -1,0 +1,20 @@
+<svg width="360" height="200" viewBox="0 0 360 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="dawn" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4EEBAE"/>
+      <stop offset="100%" stop-color="#22B58C"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="360" height="200" fill="#0E1B1E"/>
+
+  <g transform="translate(180,58)">
+    <line x1="-29" y1="26" x2="29" y2="26" stroke="#3A4B48" stroke-width="10" stroke-linecap="round"/>
+    <path d="M-27 26 A27 27 0 0 1 27 26" fill="none" stroke="#0E1B1E" stroke-width="18" stroke-linecap="round"/>
+    <path d="M-27 26 A27 27 0 0 1 27 26" fill="none" stroke="url(#dawn)" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="0" cy="26" r="12" fill="#0E1B1E"/>
+    <circle cx="0" cy="26" r="12" fill="none" stroke="url(#dawn)" stroke-width="6"/>
+  </g>
+
+  <text x="102" y="156" text-anchor="start" font-family="'Helvetica Neue', Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.8" fill="#EAF3F1">Horizon<tspan font-weight="400" fill="#4EEBAE">Vigil</tspan></text>
+</svg>

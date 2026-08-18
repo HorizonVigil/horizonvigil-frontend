@@ -372,7 +372,7 @@ export function CostOptimization() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           <p>{dashboard?.openRecommendations ?? 0} open recommendation{dashboard?.openRecommendations === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account — from your discovered resource inventory (idle instances, unattached volumes, unreleased IPs, stale snapshots), and from AWS Cost Explorer's own Reserved Instance and Savings Plan recommendation APIs. RI/Savings Plan recommendations only appear once an account has 30 days of steady enough on-demand usage for AWS to have something to recommend — a new or low-usage account legitimately shows none yet, which is expected, not a bug.</p>
-          <p className="mt-2">CloudOps360 only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you its details so you can action it yourself.</p>
+          <p className="mt-2">HorizonVigil only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you its details so you can action it yourself.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
             <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection on the Cost Management page.</p>
           )}
@@ -422,7 +422,7 @@ export function CostOptimization() {
               </button>
             </div>
 
-            <p className="text-xs text-slate-400 dark:text-slate-500">CloudOps360 only has read-only access to your AWS account and never makes this change for you — action it yourself in the AWS Console or CLI, then mark it done here.</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never makes this change for you — action it yourself in the AWS Console or CLI, then mark it done here.</p>
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
@@ -487,7 +487,7 @@ export function CostOptimization() {
             <div>
               <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Email preview</div>
               <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-600 dark:text-slate-300 space-y-1">
-                <p>A cost optimization recommendation in CloudOps360 has been assigned to you.</p>
+                <p>A cost optimization recommendation in HorizonVigil has been assigned to you.</p>
                 <p><strong>Issue:</strong> {notifyTarget.issue}</p>
                 <p><strong>Recommended action:</strong> {notifyTarget.recommended_action}</p>
                 <p><strong>Potential savings:</strong> {money(notifyTarget.potential_monthly_savings)}/month</p>
@@ -671,7 +671,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
             <button onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
               {resizeRequesting ? 'Requesting…' : 'Request Automated Resize'}
             </button>
-            <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. CloudOps360 executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
+            <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. HorizonVigil executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
           </>
         ) : (
           <p className="text-xs text-slate-400">Not enough resource detail to request an automated resize — see the manual CLI steps below instead.</p>
@@ -728,7 +728,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         )}
       </div>
 
-      <p className="text-xs text-slate-400 dark:text-slate-500">CloudOps360 only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
+      <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
         <button onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>

@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { getVisibleModules, type Role } from '../lib/navConfig';
 import { useOrg } from '../lib/orgContext';
 import { Icon, NAV_ICON_MAP } from './icons';
+import horizonvigilIcon from '../assets/brand/horizonvigil-icon.svg';
 
 export function AppRail() {
   const [expanded, setExpanded] = useState<boolean>(false);
@@ -26,13 +27,11 @@ export function AppRail() {
       >
         {/* Header */}
         <div className="h-16 flex items-center px-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-sm">
-            C
-          </div>
+          <img src={horizonvigilIcon} alt="HorizonVigil" className="h-9 w-9 rounded-lg shrink-0 shadow-sm" />
 
           {expanded && (
             <span className="ml-3 text-lg font-semibold text-slate-900 dark:text-white whitespace-nowrap">
-              CloudOps360
+              HorizonVigil
             </span>
           )}
         </div>

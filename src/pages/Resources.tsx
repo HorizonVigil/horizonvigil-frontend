@@ -946,7 +946,7 @@ export function Resources() {
 
       <Modal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)} title={`Bulk Tag ${selectedIds.size} Resources`}>
         <form onSubmit={submitBulkOperation} className="flex flex-col gap-3">
-          <p className="text-xs text-slate-400">Only tag add/remove is supported — CloudOps360 has read-only AWS access, so it can't start, stop, or terminate resources in bulk.</p>
+          <p className="text-xs text-slate-400">Only tag add/remove is supported — HorizonVigil has read-only AWS access, so it can't start, stop, or terminate resources in bulk.</p>
           <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Operation</span>
             <select value={bulkOperation} onChange={e => setBulkOperation(e.target.value as 'add_tag' | 'remove_tag')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
               <option value="add_tag">Add tag</option>

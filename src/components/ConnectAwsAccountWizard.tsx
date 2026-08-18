@@ -136,7 +136,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         </ol>
       ) : (
         <ol className="text-xs text-slate-500 dark:text-slate-400 list-decimal list-inside space-y-1 mb-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg p-3">
-          <li>In your AWS account, create an IAM role trusting CloudOps360's platform account, with the external ID below.</li>
+          <li>In your AWS account, create an IAM role trusting HorizonVigil's platform account, with the external ID below.</li>
           <li>Attach <code>ReadOnlyAccess</code> + <code>SecurityAudit</code>, or the hardened custom policy.</li>
           <li>Paste the role ARN and external ID here — nothing long-lived to store or rotate. (Live scanning via <code>sts:AssumeRole</code> isn't wired up yet in this build.)</li>
         </ol>
@@ -168,7 +168,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
           </>
         ) : (
           <>
-            <Field label="Role ARN" required value={form.roleArn} onChange={v => setForm(f => ({ ...f, roleArn: v }))} placeholder="arn:aws:iam::123456789012:role/CloudOps360Read" />
+            <Field label="Role ARN" required value={form.roleArn} onChange={v => setForm(f => ({ ...f, roleArn: v }))} placeholder="arn:aws:iam::123456789012:role/HorizonVigilRead" />
             <Field label="External ID" required value={form.externalId} onChange={v => setForm(f => ({ ...f, externalId: v }))} />
           </>
         )}

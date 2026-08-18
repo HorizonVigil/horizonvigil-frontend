@@ -10,11 +10,11 @@ const STEPS = [
   },
   {
     title: '2. Connect an AWS account',
-    body: 'From Cloud Accounts, choose "Connect AWS Account" and pick a method: a scoped access key (fastest to set up) or a cross-account IAM role (no long-lived key stored — recommended for production). Either way, CloudOps360 only requests read access unless you separately enable automation.',
+    body: 'From Cloud Accounts, choose "Connect AWS Account" and pick a method: a scoped access key (fastest to set up) or a cross-account IAM role (no long-lived key stored — recommended for production). Either way, HorizonVigil only requests read access unless you separately enable automation.',
   },
   {
     title: '3. Or connect a GCP project',
-    body: 'Choose "Connect GCP Project" and either upload a service-account key JSON, or set up service-account impersonation so CloudOps360 never holds a long-lived credential at all. You\'ll pick which regions/services to scan.',
+    body: 'Choose "Connect GCP Project" and either upload a service-account key JSON, or set up service-account impersonation so HorizonVigil never holds a long-lived credential at all. You\'ll pick which regions/services to scan.',
   },
   {
     title: '4. Let discovery run',

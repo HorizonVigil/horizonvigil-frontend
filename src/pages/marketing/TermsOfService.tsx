@@ -5,12 +5,12 @@ export function TermsOfService() {
     <LegalPage title="Terms of Service" updated="August 2026">
       <section>
         <h2>1. Agreement</h2>
-        <p>These terms govern your use of CloudOps360 (the "Service"). By creating an account, you agree to these terms on behalf of yourself and, if applicable, your organization.</p>
+        <p>These terms govern your use of HorizonVigil (the "Service"). By creating an account, you agree to these terms on behalf of yourself and, if applicable, your organization.</p>
       </section>
 
       <section>
         <h2>2. The Service</h2>
-        <p>CloudOps360 connects to cloud accounts you authorize (currently AWS and Google Cloud) and provides inventory, cost, security, and automation features on top of that data. Feature availability, included limits, and data retention vary by plan — see the pricing page for current details.</p>
+        <p>HorizonVigil connects to cloud accounts you authorize (currently AWS and Google Cloud) and provides inventory, cost, security, and automation features on top of that data. Feature availability, included limits, and data retention vary by plan — see the pricing page for current details.</p>
       </section>
 
       <section>
@@ -20,7 +20,7 @@ export function TermsOfService() {
 
       <section>
         <h2>4. Cloud account authorization</h2>
-        <p>You represent that you have the authority to connect any cloud account or project you connect to CloudOps360, and to grant the permissions that connection requires. You can disconnect an account at any time; automation tied to that account stops immediately on disconnect.</p>
+        <p>You represent that you have the authority to connect any cloud account or project you connect to HorizonVigil, and to grant the permissions that connection requires. You can disconnect an account at any time; automation tied to that account stops immediately on disconnect.</p>
       </section>
 
       <section>
@@ -45,12 +45,12 @@ export function TermsOfService() {
 
       <section>
         <h2>9. Data ownership</h2>
-        <p>You retain ownership of your cloud resource data and account information. We retain ownership of the CloudOps360 platform itself. On account termination, you may export your data before deletion per our Privacy Policy's retention terms.</p>
+        <p>You retain ownership of your cloud resource data and account information. We retain ownership of the HorizonVigil platform itself. On account termination, you may export your data before deletion per our Privacy Policy's retention terms.</p>
       </section>
 
       <section>
         <h2>10. Limitation of liability</h2>
-        <p>The Service is provided "as is." To the maximum extent permitted by law, CloudOps360 is not liable for indirect, incidental, or consequential damages arising from use of the Service, including actions taken via automation features you configured.</p>
+        <p>The Service is provided "as is." To the maximum extent permitted by law, HorizonVigil is not liable for indirect, incidental, or consequential damages arising from use of the Service, including actions taken via automation features you configured.</p>
       </section>
 
       <section>

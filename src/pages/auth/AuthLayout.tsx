@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
+import horizonvigilIcon from '../../assets/brand/horizonvigil-icon.svg';
 
 export function AuthLayout({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <div className="text-xl font-semibold text-slate-900 dark:text-white">CloudOps360</div>
+          <div className="flex items-center justify-center gap-2.5 mb-1">
+            <img src={horizonvigilIcon} alt="HorizonVigil" className="h-8 w-8 rounded-lg" />
+            <span className="text-xl font-semibold text-slate-900 dark:text-white">HorizonVigil</span>
+          </div>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">One login, every AWS and GCP account.</p>
         </div>
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">

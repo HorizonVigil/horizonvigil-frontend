@@ -142,7 +142,7 @@ export function AiCopilot() {
               <EmptyState
                 icon="sparkles"
                 title="Ask about your cloud infrastructure"
-                description="Cost, security findings, Kubernetes clusters, resources — the Copilot fetches live CloudOps360 data for whatever you ask, scoped to what you're allowed to see."
+                description="Cost, security findings, Kubernetes clusters, resources — the Copilot fetches live HorizonVigil data for whatever you ask, scoped to what you're allowed to see."
               />
             ) : (
               messages.map((m) => (

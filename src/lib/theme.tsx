@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
-const THEME_KEY = 'cloudops360_theme';
+const THEME_KEY = 'horizonvigil_theme';
 type Theme = 'light' | 'dark';
 
 function getInitialTheme(): Theme {

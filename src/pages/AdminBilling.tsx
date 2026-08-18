@@ -67,7 +67,7 @@ export function AdminBilling() {
         <FilterBar title="Billing Admin" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center">
           <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Restricted</div>
-          <p className="text-sm text-slate-500 dark:text-slate-400">This console is limited to CloudOps360 platform staff.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">This console is limited to HorizonVigil platform staff.</p>
         </div>
       </div>
     );
