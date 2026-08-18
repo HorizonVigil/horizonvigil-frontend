@@ -27,14 +27,10 @@
   </head>
   <body>
     <!-- Applies the saved/preferred theme before React mounts, avoiding a
-         flash of the light theme on a dark-mode load. -->
-    <script>
-      (function () {
-        var stored = localStorage.getItem('horizonvigil_theme');
-        var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        if (dark) document.documentElement.classList.add('dark');
-      })();
-    </script>
+         flash of the light theme on a dark-mode load. External file (not
+         inline) so it works under a `script-src 'self'` CSP without needing
+         a hash allowance that would silently break on any edit. -->
+    <script src="/theme-init.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
