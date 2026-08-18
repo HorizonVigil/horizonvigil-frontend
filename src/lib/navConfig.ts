@@ -204,6 +204,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Inspector', to: tabLink(VULN, 'Inspector'), real: true },
       { label: 'IAM Access Analyzer', to: tabLink(VULN, 'IAM Access Analyzer'), real: true },
       { label: 'AWS Config', to: tabLink(VULN, 'AWS Config'), real: true },
+      { label: 'Container Images', to: tabLink(VULN, 'Container Images'), real: true },
       { label: 'Security Findings', to: tabLink(VULN, 'Security Findings'), real: true },
       { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true },
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },

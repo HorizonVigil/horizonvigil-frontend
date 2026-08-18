@@ -472,7 +472,7 @@ class ApiClient {
   bulkUpdateFindingStatus(ids: string[], status: 'open' | 'resolved' | 'suppressed', reason?: string) {
     return this.patch<{ requestedCount: number; updatedCount: number; items: VulnerabilityFinding[] }>('vulnerabilityManagement', '/api/vulnerability-management/findings/bulk-status', reason ? { ids, status, reason } : { ids, status });
   }
-  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor', params: { page?: number; limit?: number } = {}) {
+  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images', params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
   }
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
@@ -911,7 +911,7 @@ export interface RemediationRequest {
 }
 
 export interface VulnerabilityFinding {
-  id: string; connection_id: string; resource_id: string | null; finding_source: 'internal' | 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'aws_config' | 'trusted_advisor';
+  id: string; connection_id: string; resource_id: string | null; finding_source: 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'aws_config' | 'trusted_advisor' | 'gcp_scc' | 'trivy';
   aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational'; cvss_score: number | null; title: string; description: string | null;
   compliance_frameworks: string[]; status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null; resource_arn: string | null;
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
