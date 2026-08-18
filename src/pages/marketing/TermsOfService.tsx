@@ -65,7 +65,7 @@ export function TermsOfService() {
 
       <section>
         <h2>13. Contact</h2>
-        <p>Questions about these terms: <a href="mailto:legal@cloudops360.com" className="text-brand-600 dark:text-brand-400 hover:underline">legal@cloudops360.com</a></p>
+        <p>Questions about these terms: <a href="mailto:legal@horizonvigil.com" className="text-brand-600 dark:text-brand-400 hover:underline">legal@horizonvigil.com</a></p>
       </section>
     </LegalPage>
   );

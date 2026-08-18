@@ -55,7 +55,7 @@ export function PrivacyPolicy() {
 
       <section>
         <h2>10. Contact</h2>
-        <p>Questions about this policy: <a href="mailto:privacy@cloudops360.com" className="text-brand-600 dark:text-brand-400 hover:underline">privacy@cloudops360.com</a></p>
+        <p>Questions about this policy: <a href="mailto:privacy@horizonvigil.com" className="text-brand-600 dark:text-brand-400 hover:underline">privacy@horizonvigil.com</a></p>
       </section>
     </LegalPage>
   );

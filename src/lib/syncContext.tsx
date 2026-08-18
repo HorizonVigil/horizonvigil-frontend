@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { api, type CloudAccountService } from './api';
+import { useAuth } from './auth';
 
 export interface SyncState {
   status: 'running' | 'done' | 'error';
@@ -33,6 +34,7 @@ const SyncContext = createContext<SyncContextType | null>(null);
  * this loop is genuinely provider-agnostic, not duplicated per provider.
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const runningIds = useRef<Set<string>>(new Set());
   const [autoSyncStatus, setAutoSyncStatus] = useState<'idle' | 'checking' | 'syncing' | 'done' | 'error'>('idle');
@@ -111,6 +113,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   // and GCP project, checks if it needs a sync (lastSync is null or older
   // than 24 hours) and triggers discovery for stale ones.
   const runAutoSync = useCallback(async () => {
+    // SyncProvider is mounted at the app root, above the router -- including
+    // the public marketing routes. Without this guard, every anonymous
+    // visitor triggered these authenticated-only calls ~3s after page load.
+    if (!isAuthenticated) return;
     if (syncingRef.current) return;
     syncingRef.current = true;
     setAutoSyncStatus('checking');
@@ -173,7 +179,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     } finally {
       syncingRef.current = false;
     }
-  }, [startDiscovery]);
+  }, [startDiscovery, isAuthenticated]);
 
   // Initialize auto-sync on mount and schedule every 24 hours
   useEffect(() => {

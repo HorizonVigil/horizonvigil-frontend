@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api } from './api';
+import { useAuth } from './auth';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from './unifiedAccounts';
 
 export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd' | 'custom';
@@ -23,6 +24,7 @@ interface FilterContextType extends GlobalFilters {
 const FilterContext = createContext<FilterContextType | null>(null);
 
 export function FilterProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [region, setRegion] = useState('all');
   const [account, setAccount] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangePreset>('30d');
@@ -42,12 +44,17 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // allSettled, not all — a hiccup in one provider's API (e.g. gcp-accounts-api
   // briefly unavailable) must not blank out the other provider's accounts too.
   useEffect(() => {
+    // FilterProvider wraps the whole app, including the public marketing
+    // routes -- without this guard, every anonymous visitor to "/" fired
+    // these two authenticated-only calls and ate a 401, for no purpose
+    // (there's no connections list to show until someone's logged in).
+    if (!isAuthenticated) { setConnections([]); return; }
     void Promise.allSettled([api.getAccounts({ limit: 200 }), api.getGcpAccounts({ limit: 200 })]).then(([aws, gcp]) => {
       const awsRows = aws.status === 'fulfilled' ? aws.value.items.map(toUnifiedRow) : [];
       const gcpRows = gcp.status === 'fulfilled' ? gcp.value.items.map(toUnifiedGcpRow) : [];
       setConnections([...awsRows, ...gcpRows]);
     });
-  }, [refreshToken]);
+  }, [refreshToken, isAuthenticated]);
 
   return (
     <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, setRegion, setAccount, setDateRange, refresh }}>

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { MarketingNav } from '../../components/marketing/MarketingNav';
 import { MarketingFooter } from '../../components/marketing/MarketingFooter';
 import { MARKETING_PLANS, formatPrice, CONTACT_SALES_HREF, BOOK_DEMO_HREF } from '../../lib/marketingContent';
@@ -67,7 +67,31 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-3">{children}</div>;
 }
 
+// Sticky header height (MarketingNav is h-16) -- scrollIntoView alone would
+// land the section's top edge right under it, clipping the heading.
+const STICKY_HEADER_OFFSET = 64;
+
 export function MarketingHome() {
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash) return;
+    const id = hash.slice(1);
+    // React Router's client-side navigation doesn't reliably trigger the
+    // browser's native scroll-to-anchor -- it worked for #platform (near the
+    // top, laid out almost immediately) but not #security (much further
+    // down, past several sections whose images/layout may not have settled
+    // yet when a native scroll attempt would fire). Doing it explicitly,
+    // after a frame, makes it work regardless of how far down the target is.
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const top = el.getBoundingClientRect().top + window.scrollY - STICKY_HEADER_OFFSET;
+      window.scrollTo({ top, behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [hash]);
+
   return (
     <div className="bg-white dark:bg-slate-950">
       <MarketingNav />
