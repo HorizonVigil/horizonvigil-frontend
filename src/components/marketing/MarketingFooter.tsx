@@ -1,6 +1,18 @@
 import { Link } from 'react-router-dom';
 import { Logo } from './Logo';
 import { CONTACT_SALES_HREF, BOOK_DEMO_HREF } from '../../lib/marketingContent';
+import { scrollToSection } from '../../lib/scrollToSection';
+
+// Same fix as MarketingNav's handleSectionLinkClick -- see that component
+// for why a plain <Link> can't be trusted for a same-page hash change.
+function handleSectionLinkClick(e: React.MouseEvent, href: string) {
+  if (!href.startsWith('/#') || window.location.pathname !== '/') return;
+  e.preventDefault();
+  const id = href.slice(2);
+  if (scrollToSection(id)) {
+    window.history.pushState(null, '', `/#${id}`);
+  }
+}
 
 const COLUMNS: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
   {
@@ -49,7 +61,7 @@ export function MarketingFooter() {
                   {l.external ? (
                     <a href={l.href} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</a>
                   ) : (
-                    <Link to={l.href} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</Link>
+                    <Link to={l.href} onClick={e => handleSectionLinkClick(e, l.href)} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</Link>
                   )}
                 </li>
               ))}

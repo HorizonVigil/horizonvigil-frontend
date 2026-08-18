@@ -3,15 +3,19 @@ import { Link, useLocation } from 'react-router-dom';
 import { MarketingNav } from '../../components/marketing/MarketingNav';
 import { MarketingFooter } from '../../components/marketing/MarketingFooter';
 import { MARKETING_PLANS, formatPrice, CONTACT_SALES_HREF, BOOK_DEMO_HREF } from '../../lib/marketingContent';
+import { scrollToSection } from '../../lib/scrollToSection';
 
 const MODULES = [
   { name: 'Cloud Accounts', desc: 'Connect AWS accounts and GCP projects once — access-key, cross-account role, or service-account impersonation, your choice.' },
   { name: 'Resources & Containers', desc: 'A live, searchable inventory across EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, and Artifact Registry.' },
-  { name: 'Cost Management', desc: 'Real spend data with anomaly detection and prioritized savings recommendations — not just a bill you scroll through.' },
+  { name: 'Cost Management', desc: 'Real spend data with anomaly detection, broken down by account and service — not just a bill you scroll through.' },
+  { name: 'Cost Optimization', desc: 'Specific savings recommendations with an exclusion workflow for what\'s intentional, plus one-click and Auto-PR remediation via your connected GitHub repos.' },
   { name: 'Vulnerability Management', desc: 'Findings from across your fleet, deduplicated and triaged by real severity, not just a raw scanner feed.' },
+  { name: 'Issues', desc: 'Cost, security, and alert items that need attention, unified into one severity-sorted list — instead of checking three modules to know what\'s actually urgent.' },
   { name: 'Clusters', desc: 'EKS and GKE in one view — workloads, node health, and cluster-level issues alongside everything else.' },
   { name: 'Monitoring & Alerts', desc: 'Resource-level metrics and alerting that already knows which account and org a resource belongs to.' },
   { name: 'Automation', desc: 'One-click and scheduled remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail.' },
+  { name: 'AI Copilot', desc: 'Ask about your environment in plain language and get answers grounded in your actual connected-account data, with cited sources — not a generic chatbot bolted on the side.' },
   { name: 'Reports & Dashboards', desc: 'Custom dashboards and scheduled reports built from the same data your team already sees day to day.' },
   { name: 'Users & RBAC', desc: 'Org-scoped roles down to the individual account — the same access model backing every module above.' },
 ];
@@ -33,6 +37,7 @@ const AI_FEATURES = [
   { title: 'Savings recommendations', desc: 'Idle and oversized resources are surfaced with a specific, actionable fix — not a generic "reduce costs" tip.' },
   { title: 'Finding prioritization', desc: 'Vulnerability and misconfiguration findings are ranked by real exposure, so triage starts with what actually matters.' },
   { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline, one click from being applied.' },
+  { title: 'AI Copilot chat', desc: 'A conversational assistant that answers questions using your live account data — not a static model with no idea what you\'ve actually got connected.' },
 ];
 
 const COMPLIANCE_BENCHMARKS = [
@@ -67,28 +72,20 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-3">{children}</div>;
 }
 
-// Sticky header height (MarketingNav is h-16) -- scrollIntoView alone would
-// land the section's top edge right under it, clipping the heading.
-const STICKY_HEADER_OFFSET = 64;
-
 export function MarketingHome() {
   const { hash } = useLocation();
 
+  // Covers loading /#security directly, and navigating in from a different
+  // page (e.g. the footer's Security link while on /pricing) -- Home mounts
+  // fresh with the hash already present. Does NOT handle a click while
+  // already on "/": MarketingNav/MarketingFooter intercept that case
+  // directly via scrollToSection, since relying on this hash-watching
+  // effect for a same-pathname hash-only change turned out to be exactly
+  // the case that didn't reliably fire.
   useEffect(() => {
     if (!hash) return;
     const id = hash.slice(1);
-    // React Router's client-side navigation doesn't reliably trigger the
-    // browser's native scroll-to-anchor -- it worked for #platform (near the
-    // top, laid out almost immediately) but not #security (much further
-    // down, past several sections whose images/layout may not have settled
-    // yet when a native scroll attempt would fire). Doing it explicitly,
-    // after a frame, makes it work regardless of how far down the target is.
-    const raf = requestAnimationFrame(() => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const top = el.getBoundingClientRect().top + window.scrollY - STICKY_HEADER_OFFSET;
-      window.scrollTo({ top, behavior: 'smooth' });
-    });
+    const raf = requestAnimationFrame(() => { scrollToSection(id); });
     return () => cancelAnimationFrame(raf);
   }, [hash]);
 
@@ -178,7 +175,7 @@ function PlatformCapabilities() {
       <div className="max-w-6xl mx-auto px-5">
         <div className="text-center max-w-2xl mx-auto mb-14">
           <Eyebrow>Platform capabilities</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Nine modules. One data model.</h2>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Twelve modules. One data model.</h2>
           <p className="text-slate-600 dark:text-slate-300 mt-4">Every module reads from the same connected accounts and the same org-scoped permissions — connect once, see everything.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
