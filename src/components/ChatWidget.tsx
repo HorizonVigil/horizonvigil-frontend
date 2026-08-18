@@ -1,18 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ChatMessage } from '../lib/api';
-
-/** Same minimal markdown renderer as the full AI Copilot page (pages/AiCopilot.tsx) — kept as a local copy since this widget's compact layout doesn't share enough else with that page to justify extracting a shared module yet. */
-function renderMarkdownLite(text: string) {
-  const blocks = text.split(/\n{2,}/);
-  return blocks.map((block, i) => {
-    if (block.startsWith('```')) {
-      const code = block.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '');
-      return <pre key={i} className="rounded-md bg-slate-100 dark:bg-slate-800 p-2 text-[11px] overflow-x-auto my-1.5"><code>{code}</code></pre>;
-    }
-    return <p key={i} className="text-xs leading-relaxed my-1.5 whitespace-pre-wrap">{block}</p>;
-  });
-}
+import { renderMarkdownLite } from '../lib/chatMarkdown';
 
 /**
  * Now backed by cloudops-ai-gateway (built alongside the full AI Copilot

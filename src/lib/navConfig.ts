@@ -107,7 +107,6 @@ const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
 const SUBSCRIPTION = '/subscription';
-const AI_COPILOT = '/ai-copilot';
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -115,12 +114,6 @@ function tabLink(base: string, tab: string): string {
 }
 
 export const NAV_MODULES: NavModule[] = [
-  {
-    label: 'AI Copilot',
-    icon: 'ai',
-    to: AI_COPILOT,
-    children: [],
-  },
   {
     label: 'Overview',
     icon: 'overview',

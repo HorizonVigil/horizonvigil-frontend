@@ -4,38 +4,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../lib/toast';
 import { api, friendlyErrorMessage, type ConversationSummary, type ChatMessage, type ChatSource } from '../lib/api';
-
-/** Minimal, dependency-free markdown for the small set of things the model
- * actually produces (paragraphs, **bold**, `code`, ```fenced blocks```,
- * "- "/"1. " lists) — no HTML parsing, so nothing here can inject markup. */
-function renderMarkdownLite(text: string): React.ReactNode[] {
-  const blocks = text.split(/\n{2,}/);
-  return blocks.map((block, i) => {
-    if (block.startsWith('```')) {
-      const code = block.replace(/^```[a-zA-Z]*\n?/, '').replace(/```$/, '');
-      return <pre key={i} className="rounded-md bg-slate-100 dark:bg-slate-800 p-3 text-xs overflow-x-auto my-2"><code>{code}</code></pre>;
-    }
-    const lines = block.split('\n');
-    const isList = lines.every((l) => /^(-|\d+\.)\s/.test(l.trim()) || l.trim() === '');
-    if (isList) {
-      return (
-        <ul key={i} className="list-disc list-inside space-y-1 my-2 text-sm">
-          {lines.filter((l) => l.trim()).map((l, j) => <li key={j}>{renderInline(l.replace(/^(-|\d+\.)\s/, ''))}</li>)}
-        </ul>
-      );
-    }
-    return <p key={i} className="text-sm leading-relaxed my-2 whitespace-pre-wrap">{renderInline(block)}</p>;
-  });
-}
-
-function renderInline(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
-    if (part.startsWith('`') && part.endsWith('`')) return <code key={i} className="rounded bg-slate-100 dark:bg-slate-800 px-1 py-0.5 text-xs">{part.slice(1, -1)}</code>;
-    return <span key={i}>{part}</span>;
-  });
-}
+import { renderMarkdownLite } from '../lib/chatMarkdown';
 
 function SourceTags({ sources }: { sources: ChatSource[] }) {
   if (sources.length === 0) return null;
@@ -58,6 +27,8 @@ export function AiCopilot() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function loadConversations() {
@@ -120,6 +91,18 @@ export function AiCopilot() {
     await loadConversations();
   }
 
+  async function handleRenameSubmit(id: string) {
+    const title = renameValue.trim();
+    setRenamingId(null);
+    if (!title || title === conversations.find((c) => c.id === id)?.title) return;
+    try {
+      await api.renameConversation(id, title);
+      await loadConversations();
+    } catch (err) {
+      toast(friendlyErrorMessage(err, 'Failed to rename conversation.'), 'error');
+    }
+  }
+
   return (
     <div>
       <FilterBar title="AI Copilot" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
@@ -135,17 +118,33 @@ export function AiCopilot() {
           <div className="flex-1 overflow-y-auto px-2 pb-2">
             {conversations.length === 0 && <p className="text-xs text-slate-400 px-2 py-4">No conversations yet.</p>}
             {conversations.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setActiveId(c.id)}
-                className={`w-full text-left rounded-md px-2 py-2 mb-1 text-sm group flex items-center justify-between gap-1 ${activeId === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-              >
-                <span className="truncate flex-1">{c.pinned ? '📌 ' : ''}{c.title}</span>
-                <span className="hidden group-hover:flex items-center gap-1 shrink-0">
-                  <span onClick={(e) => void handlePin(c.id, c.pinned, e)} className="text-slate-300 hover:text-brand-500 text-xs" title={c.pinned ? 'Unpin' : 'Pin'}>📌</span>
-                  <span onClick={(e) => void handleDelete(c.id, e)} className="text-slate-300 hover:text-red-500 text-xs" title="Delete">✕</span>
-                </span>
-              </button>
+              renamingId === c.id ? (
+                <input
+                  key={c.id}
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => void handleRenameSubmit(c.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); void handleRenameSubmit(c.id); }
+                    if (e.key === 'Escape') setRenamingId(null);
+                  }}
+                  className="w-full rounded-md px-2 py-2 mb-1 text-sm border border-brand-400 dark:border-brand-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              ) : (
+                <button
+                  key={c.id}
+                  onClick={() => setActiveId(c.id)}
+                  className={`w-full text-left rounded-md px-2 py-2 mb-1 text-sm group flex items-center justify-between gap-1 ${activeId === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                >
+                  <span className="truncate flex-1">{c.pinned ? '📌 ' : ''}{c.title}</span>
+                  <span className="hidden group-hover:flex items-center gap-1 shrink-0">
+                    <span onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameValue(c.title); }} className="text-slate-300 hover:text-brand-500 text-xs" title="Rename">✎</span>
+                    <span onClick={(e) => void handlePin(c.id, c.pinned, e)} className="text-slate-300 hover:text-brand-500 text-xs" title={c.pinned ? 'Unpin' : 'Pin'}>📌</span>
+                    <span onClick={(e) => void handleDelete(c.id, e)} className="text-slate-300 hover:text-red-500 text-xs" title="Delete">✕</span>
+                  </span>
+                </button>
+              )
             ))}
           </div>
         </div>

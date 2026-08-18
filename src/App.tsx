@@ -141,7 +141,8 @@ export default function App() {
                           <Route path="/organization" element={<ProtectedRoute module="Organization Management" minRole="admin"><OrganizationManagement /></ProtectedRoute>} />
                           <Route path="/settings" element={<ProtectedRoute module="Settings" minRole="editor"><Settings /></ProtectedRoute>} />
                           <Route path="/custom-dashboards" element={<ProtectedRoute module="Custom Dashboards"><CustomDashboards /></ProtectedRoute>} />
-                          <Route path="/ai-copilot" element={<ProtectedRoute module="AI Copilot"><AiCopilot /></ProtectedRoute>} />
+                          {/* No `module` check here on purpose: AI Copilot is no longer a top-level sidebar entry (see navConfig.ts), so there's nothing in NAV_MODULES to look up permissions against — reachable only via the floating ChatWidget's "Full view" link, available to any authenticated org member the same as the widget itself. */}
+                          <Route path="/ai-copilot" element={<ProtectedRoute><AiCopilot /></ProtectedRoute>} />
                           <Route path="/automation" element={<ProtectedRoute module="Automation" minRole="editor"><Automation /></ProtectedRoute>} />
                           <Route path="/subscription" element={<RequireBilling><ProtectedRoute module="Subscription"><Subscription /></ProtectedRoute></RequireBilling>} />
                           <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />
