@@ -28,4 +28,4 @@ Disallow: /ai-copilot
 Disallow: /subscription
 Disallow: /billing
 
-Sitemap: https://frontend-7yo5yw7xca-uc.a.run.app/sitemap.xml
+Sitemap: https://horizonvigil.com/sitemap.xml

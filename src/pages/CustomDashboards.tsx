@@ -7,9 +7,11 @@ import { EmptyState } from '../components/EmptyState';
 import { StatCard } from '../components/StatCard';
 import { Donut } from '../components/charts/Donut';
 import { BarChart } from '../components/charts/BarChart';
+import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
-import { api, type CustomDashboard, type DashboardWidgetCatalogEntry, type ActivityEntry, type MonitoringAlarm } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { api, friendlyErrorMessage, type CustomDashboard, type DashboardWidgetCatalogEntry, type ActivityEntry, type MonitoringAlarm } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
 function money(n: number): string {
@@ -85,6 +87,9 @@ const TAB_TO_NAV_LABEL: Record<Tab, string> = {
 export function CustomDashboards() {
   const { user } = useAuth();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { toast } = useToast();
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [everLoadedOk, setEverLoadedOk] = useState(false);
   const canSeeNavTab = useSubmenuAccess('dashboard');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
   const visibleTabs = TAB_KEYS.filter(canSeeTab);
@@ -101,17 +106,25 @@ export function CustomDashboards() {
   const [widgetData, setWidgetData] = useState<WidgetData | null>(null);
 
   const load = useCallback(async () => {
-    const [m, s, t, w] = await Promise.all([
-      api.getMyDashboards({ limit: 100 }),
-      api.getSharedDashboards({ limit: 100 }),
-      api.getDashboardTemplates({ limit: 100 }),
-      api.getWidgetLibrary(),
-    ]);
-    setMine(m.items);
-    setShared(s.items);
-    setTemplates(t.items);
-    setWidgets(w.widgets);
-  }, []);
+    setLoadError(null);
+    try {
+      const [m, s, t, w] = await Promise.all([
+        api.getMyDashboards({ limit: 100 }),
+        api.getSharedDashboards({ limit: 100 }),
+        api.getDashboardTemplates({ limit: 100 }),
+        api.getWidgetLibrary(),
+      ]);
+      setMine(m.items);
+      setShared(s.items);
+      setTemplates(t.items);
+      setWidgets(w.widgets);
+      setEverLoadedOk(true);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load dashboards.');
+      setLoadError(message);
+      toast(message, 'error');
+    }
+  }, [toast]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -156,6 +169,22 @@ export function CustomDashboards() {
   }
 
   const rows = tab === 'mine' ? mine : tab === 'shared' ? shared : tab === 'templates' ? templates : [];
+
+  if (loadError && !everLoadedOk) {
+    return (
+      <div>
+        <FilterBar title="Custom Dashboards" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+          <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load Custom Dashboards</p>
+            <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
+          </div>
+          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

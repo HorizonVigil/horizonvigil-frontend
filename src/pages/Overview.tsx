@@ -11,7 +11,8 @@ import { BarChart } from '../components/charts/BarChart';
 import { Icon } from '../components/icons';
 import { useOrg } from '../lib/orgContext';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
-import { api, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { api, friendlyErrorMessage, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -22,6 +23,7 @@ export function Overview() {
   const { region, dateRange, refreshToken } = useFilters();
   const navigate = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
   const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
   const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
   const [trendDays, setTrendDays] = useState(30);
@@ -31,9 +33,11 @@ export function Overview() {
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const days = dateRangeToDays(dateRange);
       const from = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -54,10 +58,14 @@ export function Overview() {
       setActivity(activityRes.items);
       setQuickActions(quickActionsRes.actions);
       setFavorites(favoritesRes.favorites);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load the Overview dashboard.');
+      setError(message);
+      toast(message, 'error');
     } finally {
       setLoading(false);
     }
-  }, [region, dateRange]);
+  }, [region, dateRange, toast]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -95,6 +103,26 @@ export function Overview() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <CardSkeleton lines={4} />
           <CardSkeleton lines={4} />
+        </div>
+      </div>
+    );
+  }
+
+  // A failed first load has nothing real to show underneath it — a zeroed-out
+  // dashboard would read as "genuinely nothing here yet" instead of "the
+  // request failed", so this replaces the whole page rather than layering a
+  // banner over empty-looking KPIs.
+  if (error && !dashboard) {
+    return (
+      <div>
+        <FilterBar title="Overview" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+          <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load the Overview dashboard</p>
+            <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{error}</p>
+          </div>
+          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
         </div>
       </div>
     );

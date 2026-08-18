@@ -6,8 +6,8 @@ import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
-import { useOrg } from '../lib/orgContext';
 import { useToast } from '../lib/toast';
+import { useAuth } from '../lib/auth';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
 import { MenuAccessTree } from '../components/MenuAccessTree';
 
@@ -59,7 +59,7 @@ type Tab = typeof TABS[number];
 export function UsersGroups() {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
-  const { projects } = useOrg();
+  const { user } = useAuth();
   const canSeeTab = useSubmenuAccess('users');
   const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Users');
@@ -76,7 +76,6 @@ export function UsersGroups() {
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('viewer');
-  const [inviteProjectAccess, setInviteProjectAccess] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState('');
   const [newKeyName, setNewKeyName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -223,10 +222,15 @@ export function UsersGroups() {
     e.preventDefault();
     setError(null);
     try {
-      await api.inviteMember(inviteEmail.trim(), inviteRole);
-      toast(`Invitation sent to ${inviteEmail.trim()} with role "${ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label ?? inviteRole}"${inviteProjectAccess.length > 0 ? ` and access to ${inviteProjectAccess.length} project(s)` : ''}`, 'success');
+      const result = await api.inviteMember(inviteEmail.trim(), inviteRole);
+      const roleLabel = ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label ?? inviteRole;
+      toast(
+        result.emailSent
+          ? `Invitation emailed to ${inviteEmail.trim()} with role "${roleLabel}".`
+          : `Invitation created for ${inviteEmail.trim()} with role "${roleLabel}", but the invite email couldn't be sent (email delivery isn't configured in this environment yet) — share the accept link with them directly for now.`,
+        result.emailSent ? 'success' : 'info',
+      );
       setInviteEmail('');
-      setInviteProjectAccess([]);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send this invite.');
@@ -247,6 +251,20 @@ export function UsersGroups() {
       // rejection was previously invisible unless you happened to scroll
       // all the way down after the dropdown silently reverted).
       const message = err instanceof Error ? err.message : 'Could not update this role.';
+      setError(message);
+      toast(message, 'error');
+    }
+  }
+
+  async function handleTransferOwnership(targetUserId: string, targetLabel: string) {
+    if (!(await confirm(`Transfer ownership to ${targetLabel}? You'll be moved to Organization Admin and lose the ability to undo this yourself — only they could transfer it back.`))) return;
+    setError(null);
+    try {
+      await api.transferOwnership(targetUserId);
+      toast(`Ownership transferred to ${targetLabel}.`, 'success');
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not transfer ownership.';
       setError(message);
       toast(message, 'error');
     }
@@ -351,9 +369,6 @@ export function UsersGroups() {
     try { await navigator.clipboard.writeText(key); toast('API key copied to clipboard', 'success'); } catch { /* clipboard unavailable */ }
   }
 
-  function toggleProjectAccess(projectId: string) {
-    setInviteProjectAccess(prev => prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]);
-  }
 
   return (
     <div>
@@ -394,6 +409,9 @@ export function UsersGroups() {
                     </td>
                     <td className="py-2 flex gap-2">
                       <button onClick={() => setSelectedMemberForPermissions(m)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Permissions</button>
+                      {myPermissions?.role === 'owner' && m.userId !== user?.id && (
+                        <button onClick={() => void handleTransferOwnership(m.userId, m.email ?? m.fullName ?? 'this member')} className="text-xs text-amber-600 dark:text-amber-400 hover:underline">Make owner</button>
+                      )}
                       <button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button>
                     </td>
                   </tr>
@@ -441,35 +459,10 @@ export function UsersGroups() {
                   <strong className="text-slate-700 dark:text-slate-200">{ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label}:</strong> {ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.description}
                 </p>
               </div>
-
-              {/* Project Access Selector */}
-              {projects.length > 0 && (
-                <div className="rounded-md border border-slate-200 dark:border-slate-700 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">Project Access (Optional)</span>
-                    <span className="text-xs text-slate-400">Limit access to specific projects</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {projects.map(p => (
-                      <label key={p.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={inviteProjectAccess.includes(p.id)}
-                          onChange={() => toggleProjectAccess(p.id)}
-                          className="rounded border-slate-300 dark:border-slate-600"
-                        />
-                        <span className="text-slate-600 dark:text-slate-300">{p.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {inviteProjectAccess.length > 0 && (
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2">
-                      ✓ User will only see {inviteProjectAccess.length} selected project(s)
-                    </p>
-                  )}
-                </div>
-              )}
             </form>
+            <p className="text-xs text-slate-400 mt-2">
+              Need to restrict which cloud accounts this person can see? Set that up for them after they join, from their row in the table above.
+            </p>
             {error && <p className="text-sm text-red-500 mt-2">{error}</p>}
           </div>
         </div>
@@ -611,38 +604,9 @@ export function UsersGroups() {
       {tab === 'Project Access' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Project-Level Access Control</h3>
-          <p className="text-xs text-slate-400 mb-4">Manage which projects each user can access. Users without project access will only see projects explicitly assigned to them.</p>
-          {projects.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">No projects created yet. Create projects under Organization Management to enable project-level access control.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-                  <th className="py-2">Member</th>
-                  <th className="py-2">Role</th>
-                  {projects.map(p => <th key={p.id} className="py-2 text-center text-xs">{p.name}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(m => (
-                  <tr key={m.roleGrantId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
-                    <td className="py-2 text-slate-700 dark:text-slate-200">{m.email ?? m.fullName ?? '—'}</td>
-                    <td className="py-2"><Badge tone="neutral">{ENTERPRISE_ROLES.find(r => r.value === m.role)?.label ?? m.role}</Badge></td>
-                    {projects.map(p => (
-                      <td key={p.id} className="py-2 text-center">
-                        {(m.role === 'owner' || m.role === 'admin') ? (
-                          <span className="text-emerald-600 dark:text-emerald-400" title="Full access (org-level role)">✓</span>
-                        ) : (
-                          <input type="checkbox" defaultChecked={false} className="rounded border-slate-300 dark:border-slate-600" title={`Grant access to ${p.name}`} />
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-                {members.length === 0 && <tr><td colSpan={projects.length + 2} className="py-4 text-center text-sm text-slate-400">No members yet.</td></tr>}
-              </tbody>
-            </table>
-          )}
+          <p className="text-sm text-slate-400 py-6 text-center max-w-md mx-auto">
+            Project-level access control isn't available yet — access today is scoped by cloud account (connection), not by project. Open a member's row on the Users tab to grant or revoke their access to specific connections.
+          </p>
         </div>
       )}
 
@@ -780,19 +744,6 @@ export function UsersGroups() {
                 </>
               )}
             </div>
-            {projects.length > 0 && (
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                <span className="text-xs text-slate-400 block mb-2">Project Access</span>
-                <div className="flex flex-wrap gap-2">
-                  {projects.map(p => (
-                    <label key={p.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                      <input type="checkbox" defaultChecked={selectedMemberForPermissions.role === 'owner' || selectedMemberForPermissions.role === 'admin'} className="rounded border-slate-300 dark:border-slate-600" />
-                      <span className="text-slate-600 dark:text-slate-300">{p.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </Modal>
       )}

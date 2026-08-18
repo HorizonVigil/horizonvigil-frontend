@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
 import { useAuth, mfaStepUpRequired, type OAuthProvider } from '../../lib/auth';
 import { AuthLayout, FormField } from './AuthLayout';
 import { OAuthButtons } from './OAuthButtons';
@@ -7,6 +7,12 @@ import { OAuthButtons } from './OAuthButtons';
 export function Login() {
   const { signIn, signInWithOAuth } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // RequireAuth redirects here with the original destination in router
+  // state -- fall back to /overview when there wasn't one (e.g. a direct
+  // visit to /login).
+  const from = (location.state as { from?: Location } | null)?.from;
+  const redirectTo = from ? `${from.pathname}${from.search}${from.hash}` : '/overview';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +27,13 @@ export function Login() {
       await signIn(email, password);
       // A password match alone doesn't finish sign-in for an MFA-enrolled
       // user -- Supabase issues an aal1 session and expects a separate
-      // TOTP step-up before treating them as fully authenticated.
-      navigate((await mfaStepUpRequired()) ? '/login/mfa' : '/overview');
+      // TOTP step-up before treating them as fully authenticated. Forward
+      // "from" so the deep link survives that extra step too.
+      if (await mfaStepUpRequired()) {
+        navigate('/login/mfa', { state: { from } });
+      } else {
+        navigate(redirectTo, { replace: true });
+      }
     } catch (err) {
       setError((err as Error).message || 'Could not sign in');
     } finally {

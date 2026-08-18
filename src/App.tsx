@@ -14,6 +14,7 @@ import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { ResetPassword } from './pages/auth/ResetPassword';
 import { MfaChallenge } from './pages/auth/MfaChallenge';
+import { AcceptInvite } from './pages/auth/AcceptInvite';
 import { Overview } from './pages/Overview';
 import { CloudAccounts } from './pages/CloudAccounts';
 import { CloudAccountDetail } from './pages/CloudAccountDetail';
@@ -47,6 +48,7 @@ import { Pricing } from './pages/marketing/Pricing';
 import { PrivacyPolicy } from './pages/marketing/PrivacyPolicy';
 import { TermsOfService } from './pages/marketing/TermsOfService';
 import { Docs } from './pages/marketing/Docs';
+import { NotFound } from './pages/marketing/NotFound';
 
 /** "/" is the public marketing homepage for logged-out visitors, and a straight redirect into the app for everyone else — never a login wall. */
 function RootRoute() {
@@ -101,6 +103,12 @@ export default function App() {
                         with a real aal1 session that hasn't reached aal2 yet. Fetching
                         org-scoped data before that step-up completes isn't appropriate. */}
                     <Route path="/login/mfa" element={<MfaChallenge />} />
+                    {/* Not behind RequireAuth/RequireOrg on purpose -- reachable
+                        logged-out (shows a preview + sign-in/signup prompt) or
+                        logged-in with zero orgs (RequireOrg would otherwise force
+                        a brand-new invitee into CreateFirstOrg before they can
+                        ever reach this page). */}
+                    <Route path="/accept-invite" element={<AcceptInvite />} />
 
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>
@@ -146,7 +154,7 @@ export default function App() {
                       </Route>
                     </Route>
 
-                    <Route path="*" element={<Navigate to="/" replace />} />
+                    <Route path="*" element={<NotFound />} />
                   </Routes>
                 </ToastProvider>
               </SyncProvider>

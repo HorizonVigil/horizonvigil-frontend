@@ -224,7 +224,12 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: 'AWS EKS', to: EKS_CONSOLE, real: true },
       { label: 'GCP GKE', to: GKE_CONSOLE, real: true },
-      { label: 'Azure AKS', to: AKS_CONSOLE, real: true },
+      // Unlike EKS/GKE, there's no Azure connector, schema support, or
+      // scanner behind this yet (see AksConsole.tsx) -- `to` stays set so the
+      // console is still reachable (it renders an honest RoadmapPanel, not a
+      // dead link), but `real: false` marks it as not-yet-built, consistent
+      // with every other planned-but-unbuilt item in this file.
+      { label: 'Azure AKS', to: AKS_CONSOLE, real: false },
     ],
   },
   {

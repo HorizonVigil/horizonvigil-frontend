@@ -33,6 +33,14 @@ interface HealthByConnection {
 
 interface NotIntegratedSection { key: string; label: string; reason: string }
 
+// getMetrics is server-paginated (unlike the rest of this page's data, it
+// isn't scoped by account/connectionId) -- the Metrics tab used to just
+// fetch a flat `limit: 200` with no way to reach anything past that, so
+// anything beyond the first 200 rows was simply unreachable. Paging keeps
+// the same per-request size and adds Prev/Next, matching the pager pattern
+// used on CloudAccounts.tsx's Account Inventory tab.
+const METRICS_PAGE_SIZE = 200;
+
 // Must match navConfig.ts's Monitoring children labels exactly — that file
 // links here via ?tab=<value>, not derived from this array.
 const TABS = ['CloudWatch', 'Metrics', 'Logs', 'Traces', 'Dashboards', 'Health', 'Service Map', 'Performance'] as const;
@@ -62,15 +70,15 @@ export function Monitoring() {
   const [alarms, setAlarms] = useState<MonitoringAlarm[]>([]);
   const [metrics, setMetrics] = useState<ResourceMetric[]>([]);
   const [metricsTotal, setMetricsTotal] = useState(0);
+  const [metricsPage, setMetricsPage] = useState(1);
   const [healthByConnection, setHealthByConnection] = useState<HealthByConnection[]>([]);
   const [notIntegrated, setNotIntegrated] = useState<Record<string, NotIntegratedSection>>({});
 
   const load = useCallback(async () => {
     const connectionId = account === 'all' ? undefined : account;
-    const [dashboardRes, alarmsRes, metricsRes, healthRes, logs, traces, serviceMap, performance, dashboards] = await Promise.all([
+    const [dashboardRes, alarmsRes, healthRes, logs, traces, serviceMap, performance, dashboards] = await Promise.all([
       api.getMonitoringDashboard(),
       api.getAlarms({ connectionId, limit: 200 }),
-      api.getMetrics({ limit: 200 }),
       api.getMonitoringHealth(),
       api.getLogs(),
       api.getTraces(),
@@ -80,8 +88,6 @@ export function Monitoring() {
     ]);
     setDashboard(dashboardRes);
     setAlarms(alarmsRes.items);
-    setMetrics(metricsRes.items);
-    setMetricsTotal(metricsRes.pagination.total);
     setHealthByConnection(healthRes.connections);
     setNotIntegrated({
       Logs: { key: 'logs', label: 'Logs', reason: logs.reason },
@@ -93,6 +99,18 @@ export function Monitoring() {
   }, [account]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+
+  // Metrics fetch is split out from the rest of the dashboard load so paging
+  // through it doesn't re-fetch alarms/health/etc. on every click.
+  const loadMetrics = useCallback(async (page: number) => {
+    const metricsRes = await api.getMetrics({ page, limit: METRICS_PAGE_SIZE });
+    setMetrics(metricsRes.items);
+    setMetricsTotal(metricsRes.pagination.total);
+  }, []);
+
+  useEffect(() => { void loadMetrics(metricsPage); }, [loadMetrics, metricsPage, refreshToken]);
+
+  const metricsTotalPages = Math.max(1, Math.ceil(metricsTotal / METRICS_PAGE_SIZE));
 
   const alarmColumns: Column<MonitoringAlarm>[] = [
     { key: 'name', header: 'Alarm', render: a => a.alarm_name, sortValue: a => a.alarm_name },
@@ -169,6 +187,15 @@ export function Monitoring() {
             rowKey={m => m.id}
             emptyMessage="No metrics collected yet — these populate automatically once a CloudWatch pull runs for a connected account."
           />
+          {metricsTotal > METRICS_PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-1 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
+              <span>Page {metricsPage} of {metricsTotalPages} · {metricsTotal.toLocaleString()} metrics total</span>
+              <div className="flex items-center gap-1">
+                <button disabled={metricsPage <= 1} onClick={() => setMetricsPage(p => Math.max(1, p - 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+                <button disabled={metricsPage >= metricsTotalPages} onClick={() => setMetricsPage(p => Math.min(metricsTotalPages, p + 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

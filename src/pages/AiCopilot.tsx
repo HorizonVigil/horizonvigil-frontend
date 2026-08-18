@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { EmptyState } from '../components/EmptyState';
-import { api, type ConversationSummary, type ChatMessage, type ChatSource } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { api, friendlyErrorMessage, type ConversationSummary, type ChatMessage, type ChatSource } from '../lib/api';
 
 /** Minimal, dependency-free markdown for the small set of things the model
  * actually produces (paragraphs, **bold**, `code`, ```fenced blocks```,
@@ -50,6 +51,7 @@ function SourceTags({ sources }: { sources: ChatSource[] }) {
 }
 
 export function AiCopilot() {
+  const { toast } = useToast();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -59,16 +61,28 @@ export function AiCopilot() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function loadConversations() {
-    const res = await api.getConversations();
-    setConversations(res.items);
+    try {
+      const res = await api.getConversations();
+      setConversations(res.items);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load conversations.');
+      setError(message);
+      toast(message, 'error');
+    }
   }
 
   useEffect(() => { void loadConversations(); }, []);
 
   useEffect(() => {
     if (!activeId) { setMessages([]); return; }
-    void api.getConversationMessages(activeId).then((res) => setMessages(res.items));
-  }, [activeId]);
+    api.getConversationMessages(activeId)
+      .then((res) => setMessages(res.items))
+      .catch((err) => {
+        const message = friendlyErrorMessage(err, 'Failed to load this conversation.');
+        setError(message);
+        toast(message, 'error');
+      });
+  }, [activeId, toast]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });

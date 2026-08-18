@@ -18,7 +18,7 @@ const REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1'
 // Profile/Appearance/Session aren't among the 8 org-wide settings the
 // sidebar names (those are all per-org; these are per-you) — grouped
 // under one Profile tab since none of the 8 is a natural home for them.
-const TABS = ['Profile', 'AWS Integrations', 'Billing', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Git Integration', 'Branding', 'License'] as const;
+const TABS = ['Profile', 'AWS Integrations', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Git Integration', 'Branding', 'License'] as const;
 type Tab = typeof TABS[number];
 
 const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
@@ -96,7 +96,6 @@ export function Settings() {
 
   // ── AWS integrations, billing, license, credentials, RBAC ──
   const [awsIntegrations, setAwsIntegrations] = useState<{ id: string; connection_name: string; status: string; environment: string; connection_method: string }[]>([]);
-  const [billing, setBilling] = useState<{ plan: string; seats: number; seatsUsed: number; invoices: []; notIntegrated: true; reason: string } | null>(null);
   const [license, setLicense] = useState<{ plan: string; seats: number; seatsUsed: number; planLimits: { connections: number | string; users: number | string } | null } | null>(null);
   const [credentials, setCredentials] = useState<{ connectionId: string; connectionName: string; connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; rotationOverdue: boolean }[]>([]);
   const [roleGrants, setRoleGrants] = useState<{ id: string; user_id: string; role: Role; created_at: string; profiles: { email: string; full_name: string | null } | null }[]>([]);
@@ -106,14 +105,13 @@ export function Settings() {
   const planLimits = license?.planLimits ?? null;
 
   const load = useCallback(async () => {
-    const [notif, sys, rec, git, brand, aws, bill, lic, creds, rbac] = await Promise.all([
+    const [notif, sys, rec, git, brand, aws, lic, creds, rbac] = await Promise.all([
       api.getNotificationSettings(),
       api.getSystemSettings(),
       api.getRecommendationRules(),
       api.getGitInstallations(),
       api.getBranding(),
       api.getAwsIntegrationsSummary(),
-      api.getBilling(),
       api.getLicense(),
       api.getSettingsCredentials(),
       api.getRbac(),
@@ -134,7 +132,6 @@ export function Settings() {
     setPrimaryColor(typeof brand.primaryColor === 'string' ? brand.primaryColor : '');
     setCompanyName(typeof brand.companyName === 'string' ? brand.companyName : '');
     setAwsIntegrations(aws.connections);
-    setBilling(bill);
     setLicense(lic);
     setCredentials(creds.credentials);
     setRoleGrants(rbac.roleGrants);
@@ -336,33 +333,6 @@ export function Settings() {
             ))}
             {awsIntegrations.length === 0 && <li className="py-2 text-sm text-slate-400">No AWS accounts connected yet.</li>}
           </ul>
-        </div>
-      )}
-
-      {tab === 'Billing' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Billing</h3>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-              <span className="text-xs text-slate-400 block">Plan</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100 capitalize">{billing?.plan ?? '—'}</span>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-              <span className="text-xs text-slate-400 block">Seats</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seats ?? '—'}</span>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
-              <span className="text-xs text-slate-400 block">Seats Used</span>
-              <span className="font-medium text-slate-800 dark:text-slate-100">{billing?.seatsUsed ?? '—'}</span>
-            </div>
-          </div>
-          <div>
-            <span className="text-xs text-slate-400 block mb-1">Invoices</span>
-            {billing && billing.invoices.length === 0 && !billing.notIntegrated && <p className="text-sm text-slate-400">No invoices yet.</p>}
-            {billing?.notIntegrated && (
-              <p className="text-xs text-slate-400 rounded-md bg-slate-50 dark:bg-slate-800/60 px-3 py-2">{billing.reason}</p>
-            )}
-          </div>
         </div>
       )}
 
@@ -611,7 +581,8 @@ export function Settings() {
               <span className="font-medium text-slate-800 dark:text-slate-100">{planLimits ? `${planLimits.connections} connections / ${planLimits.users} users` : '—'}</span>
             </div>
           </div>
-          <p className="text-xs text-slate-400 mt-3">Plan limits are informational — not enforced in this pass.</p>
+          <p className="text-xs text-slate-400 mt-3">The seat limit above is enforced — inviting past it is refused. The connection limit is informational only, not yet enforced.</p>
+          <Link to="/subscription" className="text-xs text-brand-600 dark:text-brand-400 hover:underline mt-2 inline-block">Manage plan and billing →</Link>
         </div>
       )}
     </div>

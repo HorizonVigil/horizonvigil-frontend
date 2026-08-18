@@ -44,20 +44,23 @@ export function Subscription() {
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
   const [subscribing, setSubscribing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [providerStatus, setProviderStatus] = useState<{ provider: string; configured: boolean; mode: 'test' | 'live' | 'none' } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [plansRes, subRes, usageRes, invoicesRes, referralsRes] = await Promise.all([
+      const [plansRes, subRes, usageRes, invoicesRes, referralsRes, providerRes] = await Promise.all([
         api.getBillingPlans(),
         api.getCurrentSubscription(),
         api.getBillingUsage().catch(() => null),
         api.getBillingInvoices({ limit: 50 }).catch(() => null),
         api.getReferrals().catch(() => null),
+        api.getPaymentProviderStatus().catch(() => null),
       ]);
       setPlans(plansRes.items);
       setSubscription(subRes.subscription);
       setCurrentPlan(subRes.plan);
+      setProviderStatus(providerRes);
       if (usageRes) setUsage(usageRes.metrics);
       if (invoicesRes) setInvoices(invoicesRes.items);
       if (referralsRes) {
@@ -134,6 +137,26 @@ export function Subscription() {
   return (
     <div>
       <FilterBar title="Subscription" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
+
+      {providerStatus && providerStatus.mode !== 'live' && (
+        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 px-4 py-2.5 mb-5 flex items-center gap-2.5">
+          <span className="text-amber-600 dark:text-amber-400 text-base leading-none" aria-hidden="true">&#9888;</span>
+          <p className="text-xs text-amber-800 dark:text-amber-300">
+            {providerStatus.mode === 'test' ? (
+              <>
+                <span className="font-semibold">Test mode &mdash; {providerStatus.provider} is connected with test credentials.</span>{' '}
+                Checkout goes through {providerStatus.provider}&apos;s real flow, but only test card numbers work &mdash; no real card is charged.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">Test mode &mdash; no real payment provider is connected yet.</span>{' '}
+                Subscribing here simulates a checkout and won&apos;t charge any card.
+              </>
+            )}
+            {' '}Plans, usage, and invoices below are otherwise fully real.
+          </p>
+        </div>
+      )}
 
       {subscription && currentPlan && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-5 flex items-center justify-between flex-wrap gap-3">

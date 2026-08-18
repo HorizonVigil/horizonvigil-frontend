@@ -5,9 +5,11 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { Icon } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type CloudResource } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { api, friendlyErrorMessage, type CloudResource } from '../lib/api';
 import {
   DetailField, DetailSection, RelatedList, RelatedRow, RawMetadata, ContainerSpecPanel,
   bytesFromK8sQuantity, formatAge, conditionTone, podHealthTone, containerStateSummary,
@@ -29,7 +31,10 @@ function costCell(c: CloudResource) {
 
 export function EksConsole() {
   const { account, refreshToken } = useFilters();
+  const { toast } = useToast();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'EKS Clusters');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [everLoadedOk, setEverLoadedOk] = useState(false);
 
   const [ecsClusters, setEcsClusters] = useState<CloudResource[]>([]);
   const [eksClusters, setEksClusters] = useState<CloudResource[]>([]);
@@ -59,38 +64,46 @@ export function EksConsole() {
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
-    const connectionId = account === 'all' ? undefined : account;
-    const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes, addonsRes] = await Promise.all([
-      api.getEksClusters({ connectionId, limit: 200 }),
-      api.getEcsClusters({ connectionId, limit: 200 }),
-      api.getEksNodes({ connectionId, limit: 500 }),
-      api.getEcsServices({ connectionId, limit: 500 }),
-      api.getEcsTasks({ connectionId, limit: 500 }),
-      api.getEksDeployments({ connectionId, limit: 500 }),
-      api.getEksPods({ connectionId, limit: 500 }),
-      api.getEksNamespaces({ connectionId, limit: 500 }),
-      api.getEksHelmReleases(),
-      api.getEksNodegroups({ connectionId, limit: 200 }),
-      api.getEksAccessEntries({ connectionId, limit: 200 }),
-      api.getEksAuthMappings({ connectionId, limit: 200 }),
-      api.getResourceInventory({ connectionId, service: 'iam', limit: 200 }),
-      api.getEksAddons({ connectionId, limit: 200 }),
-    ]);
-    setEksClusters(eksRes.items);
-    setEcsClusters(ecsClusterRes.items);
-    setEksNodes(nodesRes.items);
-    setEcsServices(svcRes.items);
-    setEcsTasks(taskRes.items);
-    setEksDeployments(eksDeployRes.items);
-    setEksPods(eksPodRes.items);
-    setEksNamespaces(namespaces.items);
-    setEksNodegroups(nodegroupsRes.items);
-    setHelmReleaseReason(helmReleases.reason);
-    setEksAccessEntries(accessEntriesRes.items);
-    setEksAuthMappings(authMappingsRes.items);
-    setIamOidcProviders(oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'));
-    setEksAddons(addonsRes.items);
-  }, [account]);
+    setLoadError(null);
+    try {
+      const connectionId = account === 'all' ? undefined : account;
+      const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes, addonsRes] = await Promise.all([
+        api.getEksClusters({ connectionId, limit: 200 }),
+        api.getEcsClusters({ connectionId, limit: 200 }),
+        api.getEksNodes({ connectionId, limit: 500 }),
+        api.getEcsServices({ connectionId, limit: 500 }),
+        api.getEcsTasks({ connectionId, limit: 500 }),
+        api.getEksDeployments({ connectionId, limit: 500 }),
+        api.getEksPods({ connectionId, limit: 500 }),
+        api.getEksNamespaces({ connectionId, limit: 500 }),
+        api.getEksHelmReleases(),
+        api.getEksNodegroups({ connectionId, limit: 200 }),
+        api.getEksAccessEntries({ connectionId, limit: 200 }),
+        api.getEksAuthMappings({ connectionId, limit: 200 }),
+        api.getResourceInventory({ connectionId, service: 'iam', limit: 200 }),
+        api.getEksAddons({ connectionId, limit: 200 }),
+      ]);
+      setEksClusters(eksRes.items);
+      setEcsClusters(ecsClusterRes.items);
+      setEksNodes(nodesRes.items);
+      setEcsServices(svcRes.items);
+      setEcsTasks(taskRes.items);
+      setEksDeployments(eksDeployRes.items);
+      setEksPods(eksPodRes.items);
+      setEksNamespaces(namespaces.items);
+      setEksNodegroups(nodegroupsRes.items);
+      setHelmReleaseReason(helmReleases.reason);
+      setEksAccessEntries(accessEntriesRes.items);
+      setEksAuthMappings(authMappingsRes.items);
+      setIamOidcProviders(oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'));
+      setEksAddons(addonsRes.items);
+      setEverLoadedOk(true);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load the EKS console.');
+      setLoadError(message);
+      toast(message, 'error');
+    }
+  }, [account, toast]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -173,6 +186,22 @@ export function EksConsole() {
   ];
 
   const totalClusters = ecsClusters.length + eksClusters.length;
+
+  if (loadError && !everLoadedOk) {
+    return (
+      <div>
+        <FilterBar title="AWS EKS Console" breadcrumb={<Breadcrumb />} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+          <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load the EKS console</p>
+            <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
+          </div>
+          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

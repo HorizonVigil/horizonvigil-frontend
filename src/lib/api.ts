@@ -50,6 +50,31 @@ export class ApiError extends Error {
   }
 }
 
+const HTTP_ERROR_MESSAGES: Record<number, string> = {
+  401: 'Your session has expired — please sign in again.',
+  403: "You don't have permission to do that.",
+  404: "That couldn't be found — it may have been moved or deleted.",
+  429: 'Too many requests — please wait a moment and try again.',
+  500: 'Something went wrong on our end. Please try again.',
+  503: 'This service is temporarily unavailable — please try again shortly.',
+};
+
+/**
+ * Maps a caught error to a short, user-facing message instead of whatever
+ * raw string the backend returned (a stack trace fragment, a Postgres
+ * constraint name, "Forbidden") for the handful of HTTP statuses common
+ * enough to deserve a friendly, consistent message everywhere they show up.
+ * Anything else -- an ApiError with an unrecognized status, or a non-ApiError
+ * throw -- falls back to the error's own message, and a non-Error throw
+ * falls back to `fallback`. Generalizes the 403-detection AdminBilling.tsx
+ * used to do inline; use this in any page's catch block instead.
+ */
+export function friendlyErrorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (err instanceof ApiError) return HTTP_ERROR_MESSAGES[err.status] ?? err.message ?? fallback;
+  if (err instanceof Error) return err.message || fallback;
+  return fallback;
+}
+
 export interface Pagination { page: number; limit: number; total: number; totalPages: number }
 export interface Paginated<T> { items: T[]; pagination: Pagination }
 export interface NotIntegrated { items: []; notIntegrated: true; reason: string }
@@ -521,9 +546,12 @@ class ApiClient {
   // ── users-api ────────────────────────────────────────────────────────────
 
   getMembers() { return this.get<{ members: Member[]; pendingInvites: PendingInvite[] }>('users', '/api/users/members'); }
-  inviteMember(email: string, role: Role) { return this.post<PendingInviteRow>('users', '/api/users/invite', { email, role }); }
+  inviteMember(email: string, role: Role) { return this.post<PendingInviteRow & { emailSent: boolean }>('users', '/api/users/invite', { email, role }); }
+  getInvitePreview(token: string) { return this.get<{ orgName: string; inviterName: string; role: Role; email: string }>('users', `/api/users/invites/${token}`); }
+  acceptInvite(token: string) { return this.post<{ orgId: string; role: Role }>('users', `/api/users/invites/${token}/accept`); }
   updateRoleGrant(id: string, role: Role) { return this.put<{ id: string; role: Role }>('users', `/api/users/role-grants/${id}`, { role }); }
   deleteRoleGrant(id: string) { return this.delete<{ removed: string }>('users', `/api/users/role-grants/${id}`); }
+  transferOwnership(newOwnerUserId: string) { return this.post<{ newOwnerUserId: string; previousOwnerRole: Role }>('users', '/api/users/transfer-ownership', { newOwnerUserId }); }
 
   getGroups() { return this.get<{ groups: UserGroup[] }>('users', '/api/users/groups'); }
   createGroup(name: string) { return this.post<{ id: string; org_id: string; name: string }>('users', '/api/users/groups', { name }); }
@@ -671,8 +699,7 @@ class ApiClient {
   // ── settings-api ─────────────────────────────────────────────────────────
 
   getAwsIntegrationsSummary() { return this.get<{ connections: { id: string; connection_name: string; status: string; environment: string; connection_method: string }[] }>('settings', '/api/settings/aws-integrations'); }
-  getBilling() { return this.get<{ plan: string; seats: number; seatsUsed: number; invoices: []; notIntegrated: true; reason: string }>('settings', '/api/settings/billing'); }
-  getLicense() { return this.get<{ plan: string; seats: number; seatsUsed: number; planLimits: { connections: number | string; users: number | string } | null; limitsEnforced: false }>('settings', '/api/settings/license'); }
+  getLicense() { return this.get<{ plan: string; seats: number; seatsUsed: number; planLimits: { connections: number | string; users: number | string } | null; seatsEnforced: true; connectionLimitEnforced: false }>('settings', '/api/settings/license'); }
   getSettingsCredentials() { return this.get<{ credentials: { connectionId: string; connectionName: string; connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; rotationOverdue: boolean }[] }>('settings', '/api/settings/credentials'); }
   getNotificationSettings() { return this.get<Record<string, unknown>>('settings', '/api/settings/notifications'); }
   updateNotificationSettings(data: Record<string, unknown>) { return this.put<Record<string, unknown>>('settings', '/api/settings/notifications', data); }
@@ -690,6 +717,7 @@ class ApiClient {
   getBillingPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/plans'); }
   getBillingAddons() { return this.get<{ items: BillingAddon[] }>('billing', '/api/billing/addons'); }
   getCurrentSubscription() { return this.get<{ subscription: BillingSubscription | null; plan: BillingPlan | null }>('billing', '/api/billing/subscriptions/current'); }
+  getPaymentProviderStatus() { return this.get<{ provider: string; configured: boolean; mode: 'test' | 'live' | 'none' }>('billing', '/api/billing/provider-status'); }
   /** idempotencyKey: pass the same value across a retry of the *same* attempt (network error, timeout) so the backend replays its original result instead of risking a second checkout session; omit it and a fresh one is generated, appropriate for a genuinely new attempt. */
   createSubscription(data: { planKey: string; billingInterval: 'monthly' | 'annual'; successPath?: string; cancelPath?: string }, idempotencyKey = crypto.randomUUID()) {
     return this.postIdempotent<{ subscription: BillingSubscription | null; checkoutUrl: string | null }>('billing', '/api/billing/subscriptions', data, idempotencyKey);

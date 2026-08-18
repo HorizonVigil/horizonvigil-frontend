@@ -5,9 +5,11 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { Icon } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
-import { api, type CloudResource } from '../lib/api';
+import { useToast } from '../lib/toast';
+import { api, friendlyErrorMessage, type CloudResource } from '../lib/api';
 import { RelatedList, RelatedRow, RawMetadata, podHealthTone } from '../components/k8s/DetailPrimitives';
 
 // GCP's Kubernetes offering — GKE — plus Cloud Run and Artifact Registry,
@@ -31,7 +33,10 @@ function costCell(c: CloudResource) {
 
 export function GkeConsole() {
   const { account, refreshToken } = useFilters();
+  const { toast } = useToast();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'GKE Clusters');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [everLoadedOk, setEverLoadedOk] = useState(false);
 
   const [gkeClusters, setGkeClusters] = useState<CloudResource[]>([]);
   const [gkeDeployments, setGkeDeployments] = useState<CloudResource[]>([]);
@@ -44,27 +49,35 @@ export function GkeConsole() {
   const [selectedRepo, setSelectedRepo] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
-    const connectionId = account === 'all' ? undefined : account;
-    const [gkeClusterRes, gkeDeployRes, gkePodRes, cloudRunRes, artifactRepoRes, artifactImageRes, helmReleases] = await Promise.all([
-      api.getGkeClusters({ connectionId, limit: 200 }),
-      api.getGkeDeployments({ connectionId, limit: 500 }),
-      api.getGkePods({ connectionId, limit: 500 }),
-      api.getGcpCloudRun({ connectionId, limit: 200 }),
-      api.getGcpArtifactRegistryRepos({ connectionId, limit: 200 }),
-      api.getGcpArtifactRegistryImages({ connectionId, limit: 500 }),
-      // Helm release tracking isn't built for either provider — this
-      // endpoint's "not built" reason is provider-agnostic, so it's reused
-      // here rather than standing up a duplicate GCP-specific stub route.
-      api.getEksHelmReleases(),
-    ]);
-    setGkeClusters(gkeClusterRes.items);
-    setGkeDeployments(gkeDeployRes.items);
-    setGkePods(gkePodRes.items);
-    setCloudRun(cloudRunRes.items);
-    setArtifactRepos(artifactRepoRes.items);
-    setArtifactImages(artifactImageRes.items);
-    setHelmReleaseReason(helmReleases.reason);
-  }, [account]);
+    setLoadError(null);
+    try {
+      const connectionId = account === 'all' ? undefined : account;
+      const [gkeClusterRes, gkeDeployRes, gkePodRes, cloudRunRes, artifactRepoRes, artifactImageRes, helmReleases] = await Promise.all([
+        api.getGkeClusters({ connectionId, limit: 200 }),
+        api.getGkeDeployments({ connectionId, limit: 500 }),
+        api.getGkePods({ connectionId, limit: 500 }),
+        api.getGcpCloudRun({ connectionId, limit: 200 }),
+        api.getGcpArtifactRegistryRepos({ connectionId, limit: 200 }),
+        api.getGcpArtifactRegistryImages({ connectionId, limit: 500 }),
+        // Helm release tracking isn't built for either provider — this
+        // endpoint's "not built" reason is provider-agnostic, so it's reused
+        // here rather than standing up a duplicate GCP-specific stub route.
+        api.getEksHelmReleases(),
+      ]);
+      setGkeClusters(gkeClusterRes.items);
+      setGkeDeployments(gkeDeployRes.items);
+      setGkePods(gkePodRes.items);
+      setCloudRun(cloudRunRes.items);
+      setArtifactRepos(artifactRepoRes.items);
+      setArtifactImages(artifactImageRes.items);
+      setHelmReleaseReason(helmReleases.reason);
+      setEverLoadedOk(true);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load the GKE console.');
+      setLoadError(message);
+      toast(message, 'error');
+    }
+  }, [account, toast]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -112,6 +125,22 @@ export function GkeConsole() {
     { key: 'images', header: 'Images', render: r => artifactImages.filter(i => i.relationships?.repositoryName === r.resource_name).length },
     { key: 'region', header: 'Region', render: r => r.region ?? '—', sortValue: r => r.region ?? '' },
   ];
+
+  if (loadError && !everLoadedOk) {
+    return (
+      <div>
+        <FilterBar title="GCP GKE Console" breadcrumb={<Breadcrumb />} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+          <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load the GKE console</p>
+            <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
+          </div>
+          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

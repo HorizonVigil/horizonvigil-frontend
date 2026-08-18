@@ -7,11 +7,21 @@ export function ForgotPassword() {
   const { resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await resetPassword(email);
-    setSent(true);
+    setError(null);
+    setLoading(true);
+    try {
+      await resetPassword(email);
+      setSent(true);
+    } catch (err) {
+      setError((err as Error).message || 'Could not send a reset link. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -21,7 +31,10 @@ export function ForgotPassword() {
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <FormField label="Email" type="email" required value={email} onChange={e => setEmail(e.target.value)} />
-          <button type="submit" className="mt-1 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2">Send reset link</button>
+          {error && <p className="text-sm text-red-500">{error}</p>}
+          <button type="submit" disabled={loading} className="mt-1 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">
+            {loading ? 'Sending…' : 'Send reset link'}
+          </button>
         </form>
       )}
       <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">

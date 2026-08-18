@@ -21,6 +21,13 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
       { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
       { label: 'Documentation', href: '/docs' },
+      // No status-page service is wired up yet (nothing in marketingContent.ts
+      // or the env-style API URL constants points at one) -- this is a
+      // placeholder path, not a real status page. See navConfig.ts's
+      // real:false convention for the equivalent "planned, not built" signal
+      // on in-app nav; there's no such route here yet, so this just links
+      // through rather than rendering a disabled item.
+      { label: 'Status', href: '/status' },
     ],
   },
   {

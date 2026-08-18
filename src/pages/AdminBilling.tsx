@@ -6,7 +6,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
-import { api, type BillingPlan, type AdminCoupon, type EnterpriseContract, type AdminRevenue } from '../lib/api';
+import { api, ApiError, friendlyErrorMessage, type BillingPlan, type AdminCoupon, type EnterpriseContract, type AdminRevenue } from '../lib/api';
 
 const TABS = ['Overview', 'Plans', 'Coupons', 'Enterprise'] as const;
 type Tab = typeof TABS[number];
@@ -51,9 +51,11 @@ export function AdminBilling() {
       setCoupons(couponsRes.items);
       setContracts(contractsRes.items);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load';
-      if (message.includes('403') || message.toLowerCase().includes('restricted')) setForbidden(true);
-      else toast(message, 'error');
+      // The dedicated "Restricted" full-page view (below) is specifically
+      // for a 403 -- everything else routes through the shared friendly-
+      // message helper (src/lib/api.ts) instead of a raw toast string.
+      if (err instanceof ApiError && err.status === 403) setForbidden(true);
+      else toast(friendlyErrorMessage(err, 'Failed to load'), 'error');
     } finally {
       setLoading(false);
     }

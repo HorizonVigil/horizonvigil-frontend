@@ -7,11 +7,13 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
+import { useToast } from '../lib/toast';
 import {
-  api,
+  api, friendlyErrorMessage,
   type AlertRow, type AlertRule, type NotificationChannel, type EscalationPolicy, type MaintenanceWindow,
 } from '../lib/api';
 
@@ -55,6 +57,7 @@ function buildChannelConfig(type: string, target: string): unknown {
 export function Alerts() {
   const { account, connections, refreshToken } = useFilters();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { toast } = useToast();
 
   const canSeeNavTab = useSubmenuAccess('alerts');
   const canSeeTab = useCallback((k: Tab) => canSeeNavTab(TABS.find(t => t.key === k)?.label ?? k), [canSeeNavTab]);
@@ -73,24 +76,34 @@ export function Alerts() {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [everLoadedOk, setEverLoadedOk] = useState(false);
 
   const load = useCallback(async () => {
-    const connectionId = account === 'all' ? undefined : account;
-    const [activeRes, historyRes, rulesRes, channelsRes, escalationsRes, maintenanceRes] = await Promise.all([
-      api.getActiveAlerts({ connection_id: connectionId, limit: 200 }),
-      api.getAlertHistory({ connection_id: connectionId, limit: 200 }),
-      api.getAlertRules({ limit: 200 }),
-      api.getNotificationChannels({ limit: 200 }),
-      api.getEscalationPolicies({ limit: 200 }),
-      api.getMaintenanceWindows({ limit: 200 }),
-    ]);
-    setActiveAlerts(activeRes.items);
-    setHistoryAlerts(historyRes.items);
-    setRules(rulesRes.items);
-    setChannels(channelsRes.items);
-    setEscalations(escalationsRes.items);
-    setMaintenanceWindows(maintenanceRes.items);
-  }, [account]);
+    setLoadError(null);
+    try {
+      const connectionId = account === 'all' ? undefined : account;
+      const [activeRes, historyRes, rulesRes, channelsRes, escalationsRes, maintenanceRes] = await Promise.all([
+        api.getActiveAlerts({ connection_id: connectionId, limit: 200 }),
+        api.getAlertHistory({ connection_id: connectionId, limit: 200 }),
+        api.getAlertRules({ limit: 200 }),
+        api.getNotificationChannels({ limit: 200 }),
+        api.getEscalationPolicies({ limit: 200 }),
+        api.getMaintenanceWindows({ limit: 200 }),
+      ]);
+      setActiveAlerts(activeRes.items);
+      setHistoryAlerts(historyRes.items);
+      setRules(rulesRes.items);
+      setChannels(channelsRes.items);
+      setEscalations(escalationsRes.items);
+      setMaintenanceWindows(maintenanceRes.items);
+      setEverLoadedOk(true);
+    } catch (err) {
+      const message = friendlyErrorMessage(err, 'Failed to load alerts.');
+      setLoadError(message);
+      toast(message, 'error');
+    }
+  }, [account, toast]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -116,11 +129,23 @@ export function Alerts() {
 
   // No dedicated bulk-status endpoint exists yet — this drives the same
   // single-alert PATCH the per-row buttons use, once per selected id. Real
-  // requests, real results; just not a single round trip.
+  // requests, real results; just not a single round trip. allSettled (not
+  // all) so one failing update doesn't hide the outcome of every other
+  // selected alert -- each gets its own real result, reported honestly.
   async function bulkUpdateStatus(status: AlertRow['status']) {
     setBulkBusy(true);
     try {
-      await Promise.all([...selectedIds].map(id => api.updateAlertStatus(id, status)));
+      const ids = [...selectedIds];
+      const results = await Promise.allSettled(ids.map(id => api.updateAlertStatus(id, status)));
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      const succeeded = results.length - failed.length;
+      if (failed.length === 0) {
+        toast(`${succeeded} alert${succeeded === 1 ? '' : 's'} updated.`, 'success');
+      } else if (succeeded === 0) {
+        toast(`Failed to update ${failed.length} alert${failed.length === 1 ? '' : 's'}: ${friendlyErrorMessage(failed[0].reason, 'unknown error')}`, 'error');
+      } else {
+        toast(`${succeeded} of ${results.length} alerts updated — ${failed.length} failed: ${friendlyErrorMessage(failed[0].reason, 'unknown error')}`, 'error');
+      }
       setSelectedIds(new Set());
       await load();
     } finally {
@@ -354,6 +379,22 @@ export function Alerts() {
       ),
     },
   ];
+
+  if (loadError && !everLoadedOk) {
+    return (
+      <div>
+        <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} />
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+          <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load alerts</p>
+            <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
+          </div>
+          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

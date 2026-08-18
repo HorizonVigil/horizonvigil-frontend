@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useOrg } from '../../lib/orgContext';
 import { useState } from 'react';
@@ -6,8 +6,11 @@ import { api } from '../../lib/api';
 
 export function RequireAuth() {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <FullScreenSpinner />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Preserves the URL the user was headed to so Login/Signup/MfaChallenge
+  // can send them back there instead of always landing on /overview.
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: location }} />;
   return <Outlet />;
 }
 
@@ -78,7 +81,8 @@ function CreateFirstOrg({ onCreated }: { onCreated: () => void }) {
           </button>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <input value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Acme Corporation" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+          <label htmlFor="org-name" className="sr-only">Organization name</label>
+          <input id="org-name" value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Acme Corporation" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
           {error && <p className="text-sm text-red-500">{error}</p>}
           {success && <p className="text-sm text-green-500">{success}</p>}
           <button type="submit" disabled={loading || !name.trim()} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">

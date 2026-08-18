@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface Column<T> {
   key: string;
@@ -8,6 +8,37 @@ export interface Column<T> {
   defaultHidden?: boolean;
   /** Keeps this column pinned to the left edge while the rest of a wide table scrolls horizontally — use on the one column (usually Name) a reader needs as a constant reference point. */
   sticky?: boolean;
+}
+
+/**
+ * Opt-in server-driven mode: `rows` passed to DataTable is just the current
+ * page (already filtered/sorted/paginated by the caller's own API call) —
+ * DataTable renders it as-is instead of slicing its own copy of a big
+ * client-side array. Every callback is how DataTable hands control back to
+ * the page that owns the real fetch.
+ *
+ * `onSortChange`/`onSearchChange` are optional because not every backend
+ * list endpoint accepts `sort`/`search` query params yet (see api.ts) — when
+ * omitted, DataTable simply disables that affordance (no dead click that
+ * silently no-ops, no search box that quietly only searches the current
+ * page) rather than falling back to a client-side operation that would only
+ * ever see the one page already in memory.
+ */
+export interface ServerMode {
+  /** 1-indexed, matching api.ts's `page` query param. */
+  page: number;
+  pageSize: number;
+  /** Total row count across every page, from the API response's `pagination.total`. */
+  total: number;
+  sortKey?: string | null;
+  sortDir?: 'asc' | 'desc';
+  search?: string;
+  /** Shows a lightweight "Loading…" cue in the footer without blanking the table between page fetches. */
+  loading?: boolean;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onSortChange?: (key: string, dir: 'asc' | 'desc') => void;
+  onSearchChange?: (query: string) => void;
 }
 
 interface DataTableProps<T> {
@@ -23,6 +54,8 @@ interface DataTableProps<T> {
   selectable?: boolean;
   selectedKeys?: Set<string>;
   onSelectionChange?: (keys: Set<string>) => void;
+  /** See ServerMode's doc comment. Omit entirely for the original all-client behavior — every existing caller keeps working unchanged. */
+  server?: ServerMode;
 }
 
 function toCsv<T>(columns: Column<T>[], rows: T[]): string {
@@ -49,7 +82,7 @@ function pageWindow(current: number, total: number): (number | 'ellipsis')[] {
 
 export function DataTable<T>({
   columns, rows, rowKey, pageSize: initialPageSize = 20, pageSizeOptions = [10, 20, 50, 100],
-  onRowClick, emptyMessage = 'No results.', selectable = false, selectedKeys, onSelectionChange,
+  onRowClick, emptyMessage = 'No results.', selectable = false, selectedKeys, onSelectionChange, server,
 }: DataTableProps<T>) {
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set(columns.filter(c => c.defaultHidden).map(c => c.key)));
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -59,6 +92,19 @@ export function DataTable<T>({
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [query, setQuery] = useState('');
 
+  // Server mode's search box is debounced locally so every keystroke doesn't
+  // fire a request — the parent only hears about it 350ms after typing stops.
+  const [serverSearchText, setServerSearchText] = useState(server?.search ?? '');
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { setServerSearchText(server?.search ?? ''); }, [server?.search]);
+  useEffect(() => () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); }, []);
+
+  function handleServerSearchChange(next: string) {
+    setServerSearchText(next);
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => server?.onSearchChange?.(next), 350);
+  }
+
   const visibleColumns = columns.filter(c => !hiddenCols.has(c.key));
   // Reuses each column's existing sortValue as its searchable projection —
   // every column already worth sorting on (name, status, region, ...) is
@@ -66,7 +112,13 @@ export function DataTable<T>({
   // needs no separate per-page config. Columns without sortValue (e.g. an
   // actions column) are simply not searched.
   const searchableColumns = useMemo(() => columns.filter(c => c.sortValue), [columns]);
+  const showSearchBox = searchableColumns.length > 0 && (!server || !!server.onSearchChange);
 
+  // In server mode `rows` is already the current page, pre-filtered and
+  // pre-sorted server-side — `query`/`sortKey` stay at their initial no-op
+  // values below (nothing here ever calls their setters in server mode), so
+  // this pipeline is a harmless passthrough rather than a second, wrong
+  // client-side filter/sort layered on top of the server's.
   const searchedRows = useMemo(() => {
     if (!query.trim() || searchableColumns.length === 0) return rows;
     const q = query.trim().toLowerCase();
@@ -86,14 +138,20 @@ export function DataTable<T>({
     return copy;
   }, [searchedRows, sortKey, sortDir, columns]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const pageRows = server ? rows : sortedRows;
+  const totalCount = server ? server.total : sortedRows.length;
+  const effectivePageSize = server ? server.pageSize : pageSize;
+  const totalPages = Math.max(1, Math.ceil(totalCount / Math.max(effectivePageSize, 1)));
   // Clamped rather than stored — if an upstream filter shrinks `rows` while
   // sitting on page 5, this snaps back to a real page instead of rendering
-  // an empty table that looks broken.
-  const safePage = Math.min(page, totalPages - 1);
-  const pageRows = sortedRows.slice(safePage * pageSize, (safePage + 1) * pageSize);
-  const rangeStart = sortedRows.length === 0 ? 0 : safePage * pageSize + 1;
-  const rangeEnd = Math.min(sortedRows.length, (safePage + 1) * pageSize);
+  // an empty table that looks broken. 0-indexed internally either way; server
+  // mode's `page` is 1-indexed (matching api.ts), converted at this boundary.
+  const safePage = server ? Math.min(server.page - 1, totalPages - 1) : Math.min(page, totalPages - 1);
+  const rangeStart = totalCount === 0 ? 0 : safePage * effectivePageSize + 1;
+  const rangeEnd = Math.min(totalCount, (safePage + 1) * effectivePageSize);
+
+  const effectiveSortKey = server ? (server.sortKey ?? null) : sortKey;
+  const effectiveSortDir = server ? (server.sortDir ?? 'asc') : sortDir;
 
   const allOnPageSelected = selectable && pageRows.length > 0 && pageRows.every(r => selectedKeys?.has(rowKey(r)));
 
@@ -103,6 +161,12 @@ export function DataTable<T>({
   }
 
   function toggleSort(key: string) {
+    if (server) {
+      if (!server.onSortChange) return;
+      const dir = server.sortKey === key && server.sortDir === 'asc' ? 'desc' : 'asc';
+      server.onSortChange(key, dir);
+      return;
+    }
     if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
   }
@@ -123,7 +187,9 @@ export function DataTable<T>({
   }
 
   function exportCsv() {
-    const csv = toCsv(visibleColumns, sortedRows);
+    // Server mode only has the current page in memory — exports that page,
+    // not the full remote result set.
+    const csv = toCsv(visibleColumns, pageRows);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -131,15 +197,30 @@ export function DataTable<T>({
     URL.revokeObjectURL(url);
   }
 
+  function goToPage(zeroIndexedPage: number) {
+    if (server) server.onPageChange(zeroIndexedPage + 1);
+    else setPage(zeroIndexedPage);
+  }
+
+  function changePageSize(next: number) {
+    if (server) server.onPageSizeChange(next);
+    else { setPageSize(next); setPage(0); }
+  }
+
+  const currentSearchText = server ? serverSearchText : query;
+
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{sortedRows.length.toLocaleString()} rows</span>
-          {searchableColumns.length > 0 && (
+          <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            {totalCount.toLocaleString()} rows
+            {server?.loading && <span className="ml-1.5 text-slate-400 dark:text-slate-500">· loading…</span>}
+          </span>
+          {showSearchBox && (
             <input
-              value={query}
-              onChange={e => updateQuery(e.target.value)}
+              value={currentSearchText}
+              onChange={e => (server ? handleServerSearchChange(e.target.value) : updateQuery(e.target.value))}
               placeholder="Search…"
               className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-slate-700 dark:text-slate-200 w-40 focus:w-56 transition-[width]"
             />
@@ -147,7 +228,7 @@ export function DataTable<T>({
         </div>
         <div className="flex items-center gap-2 relative">
           <button onClick={() => setShowColumnMenu(v => !v)} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Columns</button>
-          <button onClick={exportCsv} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Export CSV</button>
+          <button onClick={exportCsv} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" title={server ? 'Exports only the currently loaded page' : undefined}>Export CSV</button>
           {showColumnMenu && (
             <div className="absolute right-0 top-8 z-10 w-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-2 flex flex-col gap-1">
               {columns.map(c => (
@@ -173,14 +254,17 @@ export function DataTable<T>({
                   <input type="checkbox" checked={allOnPageSelected} onChange={togglePageSelection} aria-label="Select all rows on this page" />
                 </th>
               )}
-              {visibleColumns.map(c => (
-                <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
-                  <button className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100" onClick={() => c.sortValue && toggleSort(c.key)} disabled={!c.sortValue}>
-                    {c.header}
-                    {sortKey === c.key && <span>{sortDir === 'asc' ? '▲' : '▼'}</span>}
-                  </button>
-                </th>
-              ))}
+              {visibleColumns.map(c => {
+                const sortDisabled = !c.sortValue || (!!server && !server.onSortChange);
+                return (
+                  <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
+                    <button className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100 disabled:hover:text-slate-500 dark:disabled:hover:text-slate-400" onClick={() => c.sortValue && toggleSort(c.key)} disabled={sortDisabled}>
+                      {c.header}
+                      {effectiveSortKey === c.key && <span>{effectiveSortDir === 'asc' ? '▲' : '▼'}</span>}
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -200,19 +284,19 @@ export function DataTable<T>({
               );
             })}
             {pageRows.length === 0 && (
-              <tr><td colSpan={visibleColumns.length + (selectable ? 1 : 0)} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">{query.trim() && rows.length > 0 ? 'No rows match your search.' : emptyMessage}</td></tr>
+              <tr><td colSpan={visibleColumns.length + (selectable ? 1 : 0)} className="px-3 py-8 text-center text-slate-400 dark:text-slate-500">{currentSearchText.trim() ? (server ? 'No rows match your search.' : (rows.length > 0 ? 'No rows match your search.' : emptyMessage)) : emptyMessage}</td></tr>
             )}
           </tbody>
         </table>
       </div>
-      {sortedRows.length > 0 && (
+      {totalCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-3">
-            <span>Showing {rangeStart}–{rangeEnd} of {sortedRows.length.toLocaleString()}</span>
+            <span>Showing {rangeStart}–{rangeEnd} of {totalCount.toLocaleString()}</span>
             <label className="flex items-center gap-1.5">
               <select
-                value={pageSize}
-                onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }}
+                value={effectivePageSize}
+                onChange={e => changePageSize(Number(e.target.value))}
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-slate-600 dark:text-slate-300"
               >
                 {pageSizeOptions.map(n => <option key={n} value={n}>{n}</option>)}
@@ -222,14 +306,14 @@ export function DataTable<T>({
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
-              <button disabled={safePage === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+              <button disabled={safePage === 0} onClick={() => goToPage(safePage - 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
               {pageWindow(safePage, totalPages).map((p, i) =>
                 p === 'ellipsis'
                   ? <span key={`e${i}`} className="px-1.5">…</span>
                   : (
                     <button
                       key={p}
-                      onClick={() => setPage(p)}
+                      onClick={() => goToPage(p)}
                       aria-current={p === safePage ? 'page' : undefined}
                       className={`min-w-[26px] px-2 py-1 rounded-md border tabular-nums ${p === safePage ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                     >
@@ -237,7 +321,7 @@ export function DataTable<T>({
                     </button>
                   )
               )}
-              <button disabled={safePage >= totalPages - 1} onClick={() => setPage(p => p + 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+              <button disabled={safePage >= totalPages - 1} onClick={() => goToPage(safePage + 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
             </div>
           )}
         </div>

@@ -6,6 +6,7 @@ import { Badge } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useToast } from '../lib/toast';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution, type RemediationRequest } from '../lib/api';
@@ -27,6 +28,7 @@ const TAB_TO_NAV_LABEL: Record<Tab, string> = {
 
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { toast } = useToast();
   const canSeeNavTab = useSubmenuAccess('automation');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
   const visibleTabs = TAB_KEYS.filter(canSeeTab);
@@ -142,7 +144,7 @@ export function Automation() {
     setJiraError(null);
     try {
       const res = await api.testJiraConnection();
-      alert(res.verified ? `Verified — connected as ${res.verifiedAs ?? 'unknown user'}` : 'Verification failed');
+      toast(res.verified ? `Verified — connected as ${res.verifiedAs ?? 'unknown user'}` : 'Verification failed', res.verified ? 'success' : 'error');
       await loadJira();
     } catch (err) {
       setJiraError((err as Error).message);
@@ -233,7 +235,7 @@ export function Automation() {
     },
     { key: 'actions', header: '', render: w => (
       <div className="flex gap-2 text-xs">
-        <button onClick={async e => { e.stopPropagation(); const res = await api.triggerTestWebhook(w.id); alert(res.delivered ? `Delivered (HTTP ${res.httpStatus})` : `Failed: ${res.error ?? 'unknown error'}`); }} className="text-brand-600 dark:text-brand-400 hover:underline">Test</button>
+        <button onClick={async e => { e.stopPropagation(); const res = await api.triggerTestWebhook(w.id); toast(res.delivered ? `Delivered (HTTP ${res.httpStatus})` : `Failed: ${res.error ?? 'unknown error'}`, res.delivered ? 'success' : 'error'); }} className="text-brand-600 dark:text-brand-400 hover:underline">Test</button>
         <button onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
         <button onClick={e => { e.stopPropagation(); void handleDeleteWebhook(w.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
