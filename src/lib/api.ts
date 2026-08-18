@@ -733,23 +733,6 @@ class ApiClient {
   getReferrals() { return this.get<{ code: string; redemptions: BillingReferral[]; totalCreditedCents: number; creditPerReferralCents: number }>('billing', '/api/billing/referrals'); }
   redeemReferral(code: string) { return this.post<{ redeemed: true; creditedCents: number }>('billing', '/api/billing/referrals/redeem', { code }); }
 
-  // ── billing admin console (platform staff only — PLATFORM_ADMIN_EMAILS allowlist, enforced server-side) ──
-  getAdminPlans() { return this.get<{ items: BillingPlan[] }>('billing', '/api/billing/admin/plans'); }
-  updateAdminPlan(id: string, data: Partial<BillingPlan>) { return this.put<BillingPlan>('billing', `/api/billing/admin/plans/${id}`, data); }
-  archiveAdminPlan(id: string) { return this.post<BillingPlan>('billing', `/api/billing/admin/plans/${id}/archive`, {}); }
-  getAdminCoupons() { return this.get<{ items: AdminCoupon[] }>('billing', '/api/billing/admin/coupons'); }
-  createAdminCoupon(data: { code: string; discount_type: 'percent' | 'fixed'; discount_value: number; max_redemptions?: number | null; valid_until?: string | null }) {
-    return this.post<AdminCoupon>('billing', '/api/billing/admin/coupons', data);
-  }
-  getAdminEnterpriseContracts() { return this.get<{ items: EnterpriseContract[] }>('billing', '/api/billing/admin/enterprise-contracts'); }
-  createAdminEnterpriseContract(data: { org_id: string; contract_number: string; annual_value_cents: number; start_date: string; end_date: string }) {
-    return this.post<EnterpriseContract>('billing', '/api/billing/admin/enterprise-contracts', data);
-  }
-  getAdminRevenue() { return this.get<AdminRevenue>('billing', '/api/billing/admin/revenue'); }
-  getAdminOrganizations() { return this.get<{ items: AdminOrganization[]; summary: AdminOrgSummary }>('billing', '/api/billing/admin/organizations'); }
-  getAdminUsers() { return this.get<{ items: AdminUser[]; summary: AdminUserSummary }>('billing', '/api/billing/admin/users'); }
-  getAdminBillingIssues() { return this.get<AdminBillingIssues>('billing', '/api/billing/admin/billing-issues'); }
-
   // ── ai-copilot ────────────────────────────────────────────────────────────
 
   sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
@@ -791,38 +774,6 @@ export interface BillingInvoice {
 export interface BillingUsageMetric { used: number | null; included: number | null; tracked: boolean; reason?: string }
 export interface BillingCoupon { id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number }
 export interface BillingReferral { id: string; referred_org_id: string | null; referral_code: string; status: 'pending' | 'credited' | 'expired'; discount_credited_cents: number; created_at: string }
-export interface AdminCoupon {
-  id: string; code: string; discount_type: 'percent' | 'fixed'; discount_value: number; currency: string | null;
-  max_redemptions: number | null; times_redeemed: number; valid_from: string; valid_until: string | null; is_active: boolean;
-}
-export interface EnterpriseContract {
-  id: string; org_id: string; contract_number: string; annual_value_cents: number; start_date: string; end_date: string; created_at: string;
-}
-export interface AdminRevenue {
-  mrrCents: number; arrCents: number; activeCustomers: number; trialCustomers: number; paidCustomers: number;
-  conversionRate: number; churnRateLast30d: number; totalSubscriptionsEver: number;
-}
-export interface AdminOrganization {
-  id: string; name: string; slug: string; seatsLimit: number; createdAt: string;
-  memberCount: number; pendingInviteCount: number; seatsUsed: number;
-  subscriptionStatus: string; planKey: string; planName: string | null; billingInterval: string | null;
-}
-export interface AdminOrgSummary { totalOrganizations: number; totalSeatsPurchased: number; totalMembersAcrossOrgs: number; totalPendingInvites: number }
-export interface AdminUser {
-  id: string; email: string; fullName: string | null; createdAt: string; lastSignInAt: string | null; emailConfirmed: boolean;
-  memberships: { orgId: string; orgName: string; role: string }[];
-}
-export interface AdminUserSummary { totalUsers: number; activeLast24h: number; activeLast7d: number; activeLast30d: number; neverSignedIn: number }
-export interface AdminFailedPayment { id: string; org_id: string; orgName: string; amount_cents: number; currency: string; payment_provider: string; failure_reason: string | null; created_at: string }
-export interface AdminWebhookFailure { id: string; provider: string; event_id: string; event_type: string; error_message: string; created_at: string }
-export interface AdminPastDueSubscription { id: string; org_id: string; orgName: string; status: string; billing_interval: string; plan_id: string; created_at: string; canceled_at: string | null }
-export interface AdminOverdueInvoice { id: string; org_id: string; orgName: string; invoice_number: string; status: string; amount_due_cents: number; currency: string; due_date: string | null; created_at: string }
-export interface AdminBillingIssues {
-  failedPayments: AdminFailedPayment[]; webhookFailures: AdminWebhookFailure[];
-  pastDueSubscriptions: AdminPastDueSubscription[]; overdueInvoices: AdminOverdueInvoice[];
-  summary: { totalIssues: number; failedPaymentCount: number; webhookFailureCount: number; pastDueSubscriptionCount: number; overdueInvoiceCount: number };
-}
-
 export interface OverviewDashboard {
   connections: { total: number; connected: number; error: number; pending: number; disconnected: number };
   resources: { total: number; byCategory: Record<string, number> };

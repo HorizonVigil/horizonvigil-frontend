@@ -40,7 +40,6 @@ import { Automation } from './pages/Automation';
 import { Subscription } from './pages/Subscription';
 import { BillingSuccess } from './pages/BillingSuccess';
 import { BillingCanceled } from './pages/BillingCanceled';
-import { AdminBilling } from './pages/AdminBilling';
 import { MockCheckout } from './pages/MockCheckout';
 import { isBillingEnabled } from './lib/featureFlags';
 import { MarketingHome } from './pages/marketing/Home';
@@ -148,8 +147,6 @@ export default function App() {
                           <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />
                           <Route path="/billing/canceled" element={<RequireBilling><BillingCanceled /></RequireBilling>} />
                           <Route path="/billing/mock-checkout" element={<RequireBilling><MockCheckout /></RequireBilling>} />
-                          {/* Not in nav on purpose — platform-staff only, enforced server-side by PLATFORM_ADMIN_EMAILS. Reachable by direct URL for the handful of people who need it. */}
-                          <Route path="/platform-admin/billing" element={<RequireBilling><AdminBilling /></RequireBilling>} />
                         </Route>
                       </Route>
                     </Route>
