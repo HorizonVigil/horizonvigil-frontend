@@ -105,6 +105,25 @@ export function DataTable<T>({
     searchDebounce.current = setTimeout(() => server?.onSearchChange?.(next), 350);
   }
 
+  // Belt-and-suspenders beyond onChange/onInput: some automation/extension
+  // tooling sets an <input>'s value via the DOM without dispatching any
+  // event React's delegated listeners see at all (not even a raw 'input'
+  // event) — in that specific case there's no event handler on earth that
+  // fires, because none exists to catch. Polling the live DOM value directly
+  // is the only thing that's correct regardless of how the value got there
+  // (typing, paste, autofill, or scripted assignment).
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const live = searchInputRef.current?.value;
+      if (live === undefined) return;
+      if (server) { if (live !== serverSearchText) handleServerSearchChange(live); }
+      else if (live !== query) updateQuery(live);
+    }, 400);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server, serverSearchText, query]);
+
   const visibleColumns = columns.filter(c => !hiddenCols.has(c.key));
   // Reuses each column's existing sortValue as its searchable projection —
   // every column already worth sorting on (name, status, region, ...) is
@@ -138,7 +157,6 @@ export function DataTable<T>({
     return copy;
   }, [searchedRows, sortKey, sortDir, columns]);
 
-  const pageRows = server ? rows : sortedRows;
   const totalCount = server ? server.total : sortedRows.length;
   const effectivePageSize = server ? server.pageSize : pageSize;
   const totalPages = Math.max(1, Math.ceil(totalCount / Math.max(effectivePageSize, 1)));
@@ -149,6 +167,13 @@ export function DataTable<T>({
   const safePage = server ? Math.min(server.page - 1, totalPages - 1) : Math.min(page, totalPages - 1);
   const rangeStart = totalCount === 0 ? 0 : safePage * effectivePageSize + 1;
   const rangeEnd = Math.min(totalCount, (safePage + 1) * effectivePageSize);
+  // Server mode's `rows` is already just the current page from the API;
+  // client mode has the full filtered/sorted set in memory and must slice
+  // it itself here — this was missing, so every client-mode table (the vast
+  // majority of tables in this app) rendered every filtered/sorted row
+  // regardless of which page was selected, with the pager UI just lying
+  // about what was actually on screen.
+  const pageRows = server ? rows : sortedRows.slice(safePage * effectivePageSize, (safePage + 1) * effectivePageSize);
 
   const effectiveSortKey = server ? (server.sortKey ?? null) : sortKey;
   const effectiveSortDir = server ? (server.sortDir ?? 'asc') : sortDir;
@@ -221,6 +246,13 @@ export function DataTable<T>({
             <input
               value={currentSearchText}
               onChange={e => (server ? handleServerSearchChange(e.target.value) : updateQuery(e.target.value))}
+              // Belt-and-suspenders alongside onChange: a value set via
+              // script/autofill/some automation tools fires a native
+              // `input` event without the `change` React normally listens
+              // for on a controlled text field, which would otherwise leave
+              // `query` stale while the DOM shows the typed text.
+              onInput={e => (server ? handleServerSearchChange(e.currentTarget.value) : updateQuery(e.currentTarget.value))}
+              ref={searchInputRef}
               placeholder="Search…"
               className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-slate-700 dark:text-slate-200 w-40 focus:w-56 transition-[width]"
             />
