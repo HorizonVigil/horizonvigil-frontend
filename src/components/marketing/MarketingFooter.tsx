@@ -4,22 +4,21 @@ import { CONTACT_SALES_HREF, BOOK_DEMO_HREF } from '../../lib/marketingContent';
 import { scrollToSection } from '../../lib/scrollToSection';
 
 // Same fix as MarketingNav's handleSectionLinkClick -- see that component
-// for why a plain <Link> can't be trusted for a same-page hash change.
-function handleSectionLinkClick(e: React.MouseEvent, href: string) {
-  if (!href.startsWith('/#') || window.location.pathname !== '/') return;
+// for why these render as plain <a> tags, not <Link>.
+function handleSectionLinkClick(e: React.MouseEvent, id: string) {
+  if (window.location.pathname !== '/') return;
   e.preventDefault();
-  const id = href.slice(2);
   if (scrollToSection(id)) {
     window.history.pushState(null, '', `/#${id}`);
   }
 }
 
-const COLUMNS: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
+const COLUMNS: { title: string; links: { label: string; href: string; external?: boolean; section?: boolean }[] }[] = [
   {
     title: 'Product',
     links: [
-      { label: 'Platform', href: '/#platform' },
-      { label: 'Security', href: '/#security' },
+      { label: 'Platform', href: '/#platform', section: true },
+      { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
       { label: 'Documentation', href: '/docs' },
     ],
@@ -60,8 +59,10 @@ export function MarketingFooter() {
                 <li key={l.label}>
                   {l.external ? (
                     <a href={l.href} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</a>
+                  ) : l.section ? (
+                    <a href={l.href} onClick={e => handleSectionLinkClick(e, l.href.slice(2))} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</a>
                   ) : (
-                    <Link to={l.href} onClick={e => handleSectionLinkClick(e, l.href)} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</Link>
+                    <Link to={l.href} className="text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">{l.label}</Link>
                   )}
                 </li>
               ))}
