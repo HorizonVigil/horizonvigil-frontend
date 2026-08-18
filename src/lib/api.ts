@@ -746,6 +746,9 @@ class ApiClient {
     return this.post<EnterpriseContract>('billing', '/api/billing/admin/enterprise-contracts', data);
   }
   getAdminRevenue() { return this.get<AdminRevenue>('billing', '/api/billing/admin/revenue'); }
+  getAdminOrganizations() { return this.get<{ items: AdminOrganization[]; summary: AdminOrgSummary }>('billing', '/api/billing/admin/organizations'); }
+  getAdminUsers() { return this.get<{ items: AdminUser[]; summary: AdminUserSummary }>('billing', '/api/billing/admin/users'); }
+  getAdminBillingIssues() { return this.get<AdminBillingIssues>('billing', '/api/billing/admin/billing-issues'); }
 
   // ── ai-copilot ────────────────────────────────────────────────────────────
 
@@ -798,6 +801,26 @@ export interface EnterpriseContract {
 export interface AdminRevenue {
   mrrCents: number; arrCents: number; activeCustomers: number; trialCustomers: number; paidCustomers: number;
   conversionRate: number; churnRateLast30d: number; totalSubscriptionsEver: number;
+}
+export interface AdminOrganization {
+  id: string; name: string; slug: string; seatsLimit: number; createdAt: string;
+  memberCount: number; pendingInviteCount: number; seatsUsed: number;
+  subscriptionStatus: string; planKey: string; planName: string | null; billingInterval: string | null;
+}
+export interface AdminOrgSummary { totalOrganizations: number; totalSeatsPurchased: number; totalMembersAcrossOrgs: number; totalPendingInvites: number }
+export interface AdminUser {
+  id: string; email: string; fullName: string | null; createdAt: string; lastSignInAt: string | null; emailConfirmed: boolean;
+  memberships: { orgId: string; orgName: string; role: string }[];
+}
+export interface AdminUserSummary { totalUsers: number; activeLast24h: number; activeLast7d: number; activeLast30d: number; neverSignedIn: number }
+export interface AdminFailedPayment { id: string; org_id: string; orgName: string; amount_cents: number; currency: string; payment_provider: string; failure_reason: string | null; created_at: string }
+export interface AdminWebhookFailure { id: string; provider: string; event_id: string; event_type: string; error_message: string; created_at: string }
+export interface AdminPastDueSubscription { id: string; org_id: string; orgName: string; status: string; billing_interval: string; plan_id: string; created_at: string; canceled_at: string | null }
+export interface AdminOverdueInvoice { id: string; org_id: string; orgName: string; invoice_number: string; status: string; amount_due_cents: number; currency: string; due_date: string | null; created_at: string }
+export interface AdminBillingIssues {
+  failedPayments: AdminFailedPayment[]; webhookFailures: AdminWebhookFailure[];
+  pastDueSubscriptions: AdminPastDueSubscription[]; overdueInvoices: AdminOverdueInvoice[];
+  summary: { totalIssues: number; failedPaymentCount: number; webhookFailureCount: number; pastDueSubscriptionCount: number; overdueInvoiceCount: number };
 }
 
 export interface OverviewDashboard {

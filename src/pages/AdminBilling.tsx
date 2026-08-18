@@ -6,9 +6,14 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
-import { api, ApiError, friendlyErrorMessage, type BillingPlan, type AdminCoupon, type EnterpriseContract, type AdminRevenue } from '../lib/api';
+import {
+  api, ApiError, friendlyErrorMessage,
+  type BillingPlan, type AdminCoupon, type EnterpriseContract, type AdminRevenue,
+  type AdminOrganization, type AdminOrgSummary, type AdminUser, type AdminUserSummary, type AdminBillingIssues,
+  type AdminFailedPayment, type AdminWebhookFailure, type AdminPastDueSubscription, type AdminOverdueInvoice,
+} from '../lib/api';
 
-const TABS = ['Overview', 'Plans', 'Coupons', 'Enterprise'] as const;
+const TABS = ['Overview', 'Organizations', 'Users', 'Issues', 'Plans', 'Coupons', 'Enterprise'] as const;
 type Tab = typeof TABS[number];
 
 function formatCents(cents: number, currency = 'usd'): string {
@@ -16,6 +21,18 @@ function formatCents(cents: number, currency = 'usd'): string {
 }
 function formatPct(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
+}
+function timeAgo(iso: string | null): string {
+  if (!iso) return 'Never';
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 /**
@@ -35,21 +52,34 @@ export function AdminBilling() {
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [coupons, setCoupons] = useState<AdminCoupon[]>([]);
   const [contracts, setContracts] = useState<EnterpriseContract[]>([]);
+  const [orgs, setOrgs] = useState<AdminOrganization[]>([]);
+  const [orgSummary, setOrgSummary] = useState<AdminOrgSummary | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [userSummary, setUserSummary] = useState<AdminUserSummary | null>(null);
+  const [issues, setIssues] = useState<AdminBillingIssues | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setForbidden(false);
     try {
-      const [rev, plansRes, couponsRes, contractsRes] = await Promise.all([
+      const [rev, plansRes, couponsRes, contractsRes, orgsRes, usersRes, issuesRes] = await Promise.all([
         api.getAdminRevenue(),
         api.getAdminPlans(),
         api.getAdminCoupons(),
         api.getAdminEnterpriseContracts(),
+        api.getAdminOrganizations(),
+        api.getAdminUsers(),
+        api.getAdminBillingIssues(),
       ]);
       setRevenue(rev);
       setPlans(plansRes.items);
       setCoupons(couponsRes.items);
       setContracts(contractsRes.items);
+      setOrgs(orgsRes.items);
+      setOrgSummary(orgsRes.summary);
+      setUsers(usersRes.items);
+      setUserSummary(usersRes.summary);
+      setIssues(issuesRes);
     } catch (err) {
       // The dedicated "Restricted" full-page view (below) is specifically
       // for a 403 -- everything else routes through the shared friendly-
@@ -87,7 +117,10 @@ export function AdminBilling() {
         ))}
       </div>
 
-      {tab === 'Overview' && <OverviewTab revenue={revenue} loading={loading} />}
+      {tab === 'Overview' && <OverviewTab revenue={revenue} orgSummary={orgSummary} userSummary={userSummary} issues={issues} loading={loading} />}
+      {tab === 'Organizations' && <OrganizationsTab orgs={orgs} summary={orgSummary} loading={loading} />}
+      {tab === 'Users' && <UsersTab users={users} summary={userSummary} loading={loading} />}
+      {tab === 'Issues' && <IssuesTab issues={issues} loading={loading} />}
       {tab === 'Plans' && <PlansTab plans={plans} loading={loading} onChanged={load} />}
       {tab === 'Coupons' && <CouponsTab coupons={coupons} loading={loading} onChanged={load} />}
       {tab === 'Enterprise' && <EnterpriseTab contracts={contracts} loading={loading} onChanged={load} />}
@@ -95,19 +128,172 @@ export function AdminBilling() {
   );
 }
 
-function OverviewTab({ revenue, loading }: { revenue: AdminRevenue | null; loading: boolean }) {
+function OverviewTab({ revenue, orgSummary, userSummary, issues, loading }: {
+  revenue: AdminRevenue | null; orgSummary: AdminOrgSummary | null; userSummary: AdminUserSummary | null; issues: AdminBillingIssues | null; loading: boolean;
+}) {
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>;
   if (!revenue) return <p className="text-sm text-slate-400">No data.</p>;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <StatCard label="MRR" value={formatCents(revenue.mrrCents)} />
-      <StatCard label="ARR" value={formatCents(revenue.arrCents)} />
-      <StatCard label="Active customers" value={String(revenue.activeCustomers)} />
-      <StatCard label="Trialing" value={String(revenue.trialCustomers)} />
-      <StatCard label="Paid customers" value={String(revenue.paidCustomers)} />
-      <StatCard label="Conversion rate" value={formatPct(revenue.conversionRate)} />
-      <StatCard label="Churn (30d)" value={formatPct(revenue.churnRateLast30d)} />
-      <StatCard label="Subscriptions ever" value={String(revenue.totalSubscriptionsEver)} />
+    <div className="flex flex-col gap-5">
+      <div>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Revenue</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="MRR" value={formatCents(revenue.mrrCents)} />
+          <StatCard label="ARR" value={formatCents(revenue.arrCents)} />
+          <StatCard label="Paid customers" value={String(revenue.paidCustomers)} />
+          <StatCard label="Trialing" value={String(revenue.trialCustomers)} />
+          <StatCard label="Conversion rate" value={formatPct(revenue.conversionRate)} />
+          <StatCard label="Churn (30d)" value={formatPct(revenue.churnRateLast30d)} />
+          <StatCard label="Subscriptions ever" value={String(revenue.totalSubscriptionsEver)} />
+          <StatCard label="Active subscriptions" value={String(revenue.activeCustomers)} />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Organizations &amp; seats</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Organizations" value={String(orgSummary?.totalOrganizations ?? 0)} />
+          <StatCard label="Seats purchased" value={String(orgSummary?.totalSeatsPurchased ?? 0)} />
+          <StatCard label="Members across orgs" value={String(orgSummary?.totalMembersAcrossOrgs ?? 0)} />
+          <StatCard label="Pending invites" value={String(orgSummary?.totalPendingInvites ?? 0)} />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Users &amp; logins</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Total users" value={String(userSummary?.totalUsers ?? 0)} />
+          <StatCard label="Active (24h)" value={String(userSummary?.activeLast24h ?? 0)} />
+          <StatCard label="Active (7d)" value={String(userSummary?.activeLast7d ?? 0)} />
+          <StatCard label="Never signed in" value={String(userSummary?.neverSignedIn ?? 0)} icon={userSummary && userSummary.neverSignedIn > 0 ? 'alert-triangle' : undefined} iconTone={userSummary && userSummary.neverSignedIn > 0 ? 'warning' : undefined} />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wide">Billing issues</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Open issues" value={String(issues?.summary.totalIssues ?? 0)} icon={issues && issues.summary.totalIssues > 0 ? 'alert-triangle' : 'check-circle'} iconTone={issues && issues.summary.totalIssues > 0 ? 'critical' : 'good'} />
+          <StatCard label="Failed payments" value={String(issues?.summary.failedPaymentCount ?? 0)} />
+          <StatCard label="Past due subs" value={String(issues?.summary.pastDueSubscriptionCount ?? 0)} />
+          <StatCard label="Overdue invoices" value={String(issues?.summary.overdueInvoiceCount ?? 0)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrganizationsTab({ orgs, summary, loading }: { orgs: AdminOrganization[]; summary: AdminOrgSummary | null; loading: boolean }) {
+  const columns: Column<AdminOrganization>[] = [
+    { key: 'name', header: 'Organization', render: o => <span className="font-medium text-slate-900 dark:text-white">{o.name}</span>, sortValue: o => o.name },
+    { key: 'plan', header: 'Plan', render: o => o.planName ?? o.planKey, sortValue: o => o.planName ?? o.planKey },
+    { key: 'sub_status', header: 'Subscription', render: o => <Badge tone={o.subscriptionStatus === 'active' ? 'good' : o.subscriptionStatus === 'trialing' ? 'neutral' : o.subscriptionStatus === 'past_due' ? 'critical' : 'neutral'}>{o.subscriptionStatus}</Badge> },
+    { key: 'seats', header: 'Seats used / purchased', render: o => `${o.seatsUsed} / ${o.seatsLimit === -1 ? 'Unlimited' : o.seatsLimit}`, sortValue: o => o.seatsUsed },
+    { key: 'members', header: 'Members', render: o => String(o.memberCount), sortValue: o => o.memberCount },
+    { key: 'pending', header: 'Pending invites', render: o => String(o.pendingInviteCount), sortValue: o => o.pendingInviteCount },
+    { key: 'created', header: 'Created', render: o => new Date(o.createdAt).toLocaleDateString(), sortValue: o => o.createdAt },
+  ];
+  return (
+    <div className="flex flex-col gap-4">
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Organizations" value={String(summary.totalOrganizations)} />
+          <StatCard label="Seats purchased" value={String(summary.totalSeatsPurchased)} />
+          <StatCard label="Members" value={String(summary.totalMembersAcrossOrgs)} />
+          <StatCard label="Pending invites" value={String(summary.totalPendingInvites)} />
+        </div>
+      )}
+      <DataTable columns={columns} rows={orgs} rowKey={o => o.id} emptyMessage={loading ? 'Loading…' : 'No organizations yet.'} />
+    </div>
+  );
+}
+
+function UsersTab({ users, summary, loading }: { users: AdminUser[]; summary: AdminUserSummary | null; loading: boolean }) {
+  const columns: Column<AdminUser>[] = [
+    { key: 'email', header: 'User', render: u => (
+      <div className="flex flex-col">
+        <span className="font-medium text-slate-900 dark:text-white">{u.fullName || u.email}</span>
+        {u.fullName && <span className="text-xs text-slate-500 dark:text-slate-400">{u.email}</span>}
+      </div>
+    ), sortValue: u => u.email },
+    { key: 'orgs', header: 'Organizations', render: u => u.memberships.length === 0 ? <span className="text-slate-400">None</span> : (
+      <div className="flex flex-wrap gap-1">
+        {u.memberships.map(m => <Badge key={m.orgId} tone="neutral">{m.orgName} · {m.role}</Badge>)}
+      </div>
+    ) },
+    { key: 'confirmed', header: 'Verified', render: u => <Badge tone={u.emailConfirmed ? 'good' : 'warning'}>{u.emailConfirmed ? 'Verified' : 'Unverified'}</Badge> },
+    { key: 'last_login', header: 'Last login', render: u => <span className={!u.lastSignInAt ? 'text-amber-600 dark:text-amber-400' : undefined}>{timeAgo(u.lastSignInAt)}</span>, sortValue: u => u.lastSignInAt ?? '' },
+    { key: 'created', header: 'Joined', render: u => new Date(u.createdAt).toLocaleDateString(), sortValue: u => u.createdAt },
+  ];
+  return (
+    <div className="flex flex-col gap-4">
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <StatCard label="Total users" value={String(summary.totalUsers)} />
+          <StatCard label="Active (24h)" value={String(summary.activeLast24h)} />
+          <StatCard label="Active (7d)" value={String(summary.activeLast7d)} />
+          <StatCard label="Active (30d)" value={String(summary.activeLast30d)} />
+          <StatCard label="Never signed in" value={String(summary.neverSignedIn)} />
+        </div>
+      )}
+      <DataTable columns={columns} rows={users} rowKey={u => u.id} emptyMessage={loading ? 'Loading…' : 'No users yet.'} />
+    </div>
+  );
+}
+
+function IssuesTab({ issues, loading }: { issues: AdminBillingIssues | null; loading: boolean }) {
+  if (loading) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!issues) return <p className="text-sm text-slate-400">No data.</p>;
+
+  const paymentColumns: Column<AdminFailedPayment>[] = [
+    { key: 'org', header: 'Organization', render: p => p.orgName },
+    { key: 'amount', header: 'Amount', render: p => formatCents(p.amount_cents, p.currency) },
+    { key: 'provider', header: 'Provider', render: p => p.payment_provider },
+    { key: 'reason', header: 'Reason', render: p => p.failure_reason ?? '—' },
+    { key: 'when', header: 'When', render: p => timeAgo(p.created_at), sortValue: p => p.created_at },
+  ];
+  const webhookColumns: Column<AdminWebhookFailure>[] = [
+    { key: 'provider', header: 'Provider', render: w => w.provider },
+    { key: 'event_type', header: 'Event', render: w => w.event_type },
+    { key: 'error', header: 'Error', render: w => <span className="font-mono text-xs">{w.error_message}</span> },
+    { key: 'when', header: 'When', render: w => timeAgo(w.created_at), sortValue: w => w.created_at },
+  ];
+  const subColumns: Column<AdminPastDueSubscription>[] = [
+    { key: 'org', header: 'Organization', render: s => s.orgName },
+    { key: 'status', header: 'Status', render: s => <Badge tone="critical">{s.status}</Badge> },
+    { key: 'interval', header: 'Billing interval', render: s => s.billing_interval },
+    { key: 'when', header: 'Since', render: s => timeAgo(s.created_at), sortValue: s => s.created_at },
+  ];
+  const invoiceColumns: Column<AdminOverdueInvoice>[] = [
+    { key: 'org', header: 'Organization', render: i => i.orgName },
+    { key: 'invoice', header: 'Invoice #', render: i => i.invoice_number },
+    { key: 'amount', header: 'Amount due', render: i => formatCents(i.amount_due_cents, i.currency) },
+    { key: 'due', header: 'Due date', render: i => i.due_date ? new Date(i.due_date).toLocaleDateString() : '—', sortValue: i => i.due_date ?? '' },
+  ];
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <StatCard label="Open issues" value={String(issues.summary.totalIssues)} icon={issues.summary.totalIssues > 0 ? 'alert-triangle' : 'check-circle'} iconTone={issues.summary.totalIssues > 0 ? 'critical' : 'good'} />
+        <StatCard label="Failed payments" value={String(issues.summary.failedPaymentCount)} />
+        <StatCard label="Webhook failures" value={String(issues.summary.webhookFailureCount)} />
+        <StatCard label="Past due subs" value={String(issues.summary.pastDueSubscriptionCount)} />
+        <StatCard label="Overdue invoices" value={String(issues.summary.overdueInvoiceCount)} />
+      </div>
+
+      <div>
+        <div className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Failed payments</div>
+        <DataTable columns={paymentColumns} rows={issues.failedPayments} rowKey={p => p.id} emptyMessage="No failed payments." />
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Past-due / unpaid subscriptions</div>
+        <DataTable columns={subColumns} rows={issues.pastDueSubscriptions} rowKey={s => s.id} emptyMessage="No past-due subscriptions." />
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Overdue invoices</div>
+        <DataTable columns={invoiceColumns} rows={issues.overdueInvoices} rowKey={i => i.id} emptyMessage="No overdue invoices." />
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Webhook processing failures</div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">A payment provider sent an event this platform failed to process — the provider was still told "received" so it won't retry forever, but the underlying record was never applied. Worth reviewing manually.</p>
+        <DataTable columns={webhookColumns} rows={issues.webhookFailures} rowKey={w => w.id} emptyMessage="No webhook processing failures." />
+      </div>
     </div>
   );
 }
