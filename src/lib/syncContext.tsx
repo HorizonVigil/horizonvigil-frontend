@@ -91,6 +91,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         // success even if this fails. GCP has no recommendations engine yet
         // (Phase 1 scope, see the plan doc), so this is AWS-only for now.
         if (service === 'awsAccounts') await api.generateRecommendations(connectionId).catch(() => {});
+        // Alert-rule evaluation is provider-agnostic (resource_state
+        // conditions can match any provider's cloud_resources), unlike
+        // recommendations above -- only the alarm-state condition type is
+        // AWS-only in practice, since monitoring_alarms is only populated
+        // by connector-aws's cloudwatch sync today.
+        await api.evaluateAlertRules(connectionId).catch(() => {});
         const realErrors = stepErrors.filter(e => e.severity !== 'info');
         setSyncStates(prev => ({
           ...prev,

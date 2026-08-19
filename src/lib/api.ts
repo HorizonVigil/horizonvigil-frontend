@@ -541,6 +541,10 @@ class ApiClient {
   createAlertRule(data: { name: string; condition?: unknown; severity?: string; notificationChannels?: unknown[]; enabled?: boolean }) { return this.post<AlertRule>('alerts', '/api/alerts/rules', data); }
   updateAlertRule(id: string, data: Partial<{ name: string; condition: unknown; severity: string; notificationChannels: unknown[]; enabled: boolean }>) { return this.put<AlertRule>('alerts', `/api/alerts/rules/${id}`, data); }
   deleteAlertRule(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/rules/${id}`); }
+  // Evaluates enabled alert_rules against monitoring_alarms/cloud_resources and inserts real alerts rows -- called automatically after a Discover Resources scan finishes (see syncContext.tsx, mirroring generateRecommendations) and from a manual "Evaluate Now" button.
+  evaluateAlertRules(connectionId?: string) {
+    return this.post<{ evaluated: number; created: number }>('alerts', '/api/alerts/evaluate', connectionId ? { connectionId } : {});
+  }
 
   getNotificationChannels(params: { channel_type?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<NotificationChannel>>('alerts', `/api/alerts/channels${qs(params)}`); }
   createNotificationChannel(data: { channelType: string; name: string; config?: unknown; enabled?: boolean }) { return this.post<NotificationChannel>('alerts', '/api/alerts/channels', data); }

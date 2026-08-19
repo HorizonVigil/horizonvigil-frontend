@@ -192,6 +192,19 @@ export function Alerts() {
   const [ruleChannelIds, setRuleChannelIds] = useState<string[]>([]);
   const [ruleConditionText, setRuleConditionText] = useState('{}');
   const [ruleError, setRuleError] = useState('');
+  const [evaluating, setEvaluating] = useState(false);
+
+  async function evaluateNow() {
+    setEvaluating(true);
+    try {
+      const result = await api.evaluateAlertRules();
+      toast(result.created > 0 ? `Evaluated ${result.evaluated} rule${result.evaluated === 1 ? '' : 's'} — ${result.created} new alert${result.created === 1 ? '' : 's'} created` : `Evaluated ${result.evaluated} rule${result.evaluated === 1 ? '' : 's'} — no new matches`, 'success');
+    } catch (err) {
+      toast(friendlyErrorMessage(err, 'Could not evaluate alert rules.'), 'error');
+    } finally {
+      setEvaluating(false);
+    }
+  }
 
   function resetRuleForm() {
     setRuleName(''); setRuleSeverity('medium'); setRuleEnabled(true); setRuleChannelIds([]); setRuleConditionText('{}'); setRuleError('');
@@ -471,7 +484,10 @@ export function Alerts() {
 
       {activeTab === 'rules' && (
         <div>
-          <div className="flex justify-end mb-3">
+          <div className="flex justify-end gap-2 mb-3">
+            <button onClick={() => void evaluateNow()} disabled={evaluating} title="Evaluates every enabled rule against current CloudWatch alarm state and resource state right now, instead of waiting for the next Discover Resources run" className="rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+              {evaluating ? 'Evaluating…' : 'Evaluate Now'}
+            </button>
             <button onClick={() => setRuleModalOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ Create Alert Rule</button>
           </div>
           <DataTable columns={ruleColumns} rows={rules} rowKey={r => r.id} emptyMessage="No alert rules yet — create one to define when an alert should fire." />
@@ -539,6 +555,11 @@ export function Alerts() {
           </div>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-600 dark:text-slate-300">Condition (JSON, optional)</span>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              Two real, evaluated shapes — anything else saves fine but never fires:{' '}
+              <code className="font-mono">{'{"type":"cloudwatch_alarm_state","state":"ALARM"}'}</code> (matches any CloudWatch alarm in this state; optionally add <code className="font-mono">namespace</code> or <code className="font-mono">alarmNameContains</code>), or{' '}
+              <code className="font-mono">{'{"type":"resource_state","status":"stopped"}'}</code> (matches cloud_resources; combine with <code className="font-mono">resourceTypeKey</code>/<code className="font-mono">category</code>/<code className="font-mono">state</code> to narrow it — at least one field is required).
+            </p>
             <textarea rows={3} value={ruleConditionText} onChange={e => { setRuleConditionText(e.target.value); setRuleError(''); }} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs" />
             {ruleError && <span className="text-xs text-red-500">{ruleError}</span>}
           </label>
