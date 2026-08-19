@@ -800,6 +800,9 @@ class ApiClient {
   updateIncidentStatus(id: string, status: string) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/status`, { status }); }
   addIncidentComment(id: string, comment: string) { return this.post<IncidentEvent>('incidents', `/api/incidents/incidents/${id}/comment`, { comment }); }
   assignIncident(id: string, assigneeId: string | null) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/assign`, { assigneeId }); }
+  // Real checks (CloudWatch alarms, resource status, latest deployment, optional synthetic HTTP request) -- never a fabricated pass.
+  verifyIncident(id: string, url?: string) { return this.post<VerificationRun>('incidents', `/api/incidents/incidents/${id}/verify`, url ? { url } : {}); }
+  getIncidentVerifications(id: string) { return this.get<{ runs: VerificationRun[] }>('incidents', `/api/incidents/incidents/${id}/verifications`); }
 }
 
 export const api = new ApiClient();
@@ -1007,10 +1010,12 @@ export interface Incident {
   created_at: string; acknowledged_at: string | null; resolved_at: string | null; closed_at: string | null; updated_at: string;
 }
 export interface IncidentEvent {
-  id: string; event_type: 'created' | 'status_changed' | 'comment' | 'assigned';
+  id: string; event_type: 'created' | 'status_changed' | 'comment' | 'assigned' | 'verified';
   actor_id: string | null; comment: string | null; metadata: Record<string, unknown>; created_at: string;
 }
 export interface IncidentDetail extends Incident { events: IncidentEvent[] }
+export interface VerificationCheck { name: string; status: 'pass' | 'fail' | 'skipped'; detail: string }
+export interface VerificationRun { id: string; connection_id: string | null; checks: VerificationCheck[]; overall_status: 'passed' | 'failed'; run_by: string; run_at: string }
 
 // cloudops360-scanner-* microservices (Prowler, Trivy, Semgrep, Gitleaks,
 // Checkov, Grype, Syft, TruffleHog, Nuclei, Dependency-Check) — see each
