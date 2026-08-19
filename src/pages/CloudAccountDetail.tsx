@@ -5,26 +5,28 @@ import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { api, ApiError } from '../lib/api';
 import { AwsAccountDetail } from './AwsAccountDetail';
 import { GcpProjectDetail } from './GcpProjectDetail';
+import { AzureAccountDetail } from './AzureAccountDetail';
 
 /**
- * One route (`/cloud-accounts/:id`) for both providers — the merged
+ * One route (`/cloud-accounts/:id`) for all three providers — the merged
  * Inventory table (CloudAccounts.tsx) no longer tells you up front which
  * kind of row you clicked, and account IDs are unique across the whole
  * cloud_connections table regardless of provider, so this probes AWS first
- * (the far more common case) and falls back to GCP on a 404 rather than
- * needing a ?provider= query param or a second URL segment.
+ * (the far more common case), then GCP, then Azure on successive 404s
+ * rather than needing a ?provider= query param or a second URL segment.
  *
- * Delegates to the existing AwsAccountDetail/GcpProjectDetail components
- * unchanged rather than merging their ~750 combined lines of provider-
- * specific tabs (Cost, CUR, Permissions, Sync History, Recommendations —
- * none of which gcp-accounts-api has an equivalent of yet) into one file.
- * Both already read `id` via their own useParams, which still resolves
+ * Delegates to the existing AwsAccountDetail/GcpProjectDetail/
+ * AzureAccountDetail components unchanged rather than merging their
+ * combined lines of provider-specific tabs (Cost, CUR, Permissions,
+ * Sync History, Recommendations — most of which gcp-accounts-api and
+ * azure-accounts-api have no equivalent of yet) into one file. All three
+ * already read `id` via their own useParams, which still resolves
  * correctly rendered as plain children here since no extra <Route> is
  * introduced between this component and the router.
  */
 export function CloudAccountDetail() {
   const { id } = useParams<{ id: string }>();
-  const [provider, setProvider] = useState<'aws' | 'gcp' | null>(null);
+  const [provider, setProvider] = useState<'aws' | 'gcp' | 'azure' | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -44,8 +46,17 @@ export function CloudAccountDetail() {
         try {
           await api.getGcpAccount(id);
           if (!cancelled) setProvider('gcp');
-        } catch {
-          if (!cancelled) setNotFound(true);
+        } catch (gcpErr) {
+          if (gcpErr instanceof ApiError && gcpErr.status !== 404) {
+            if (!cancelled) setNotFound(true);
+            return;
+          }
+          try {
+            await api.getAzureAccount(id);
+            if (!cancelled) setProvider('azure');
+          } catch {
+            if (!cancelled) setNotFound(true);
+          }
         }
       }
     })();
@@ -70,5 +81,7 @@ export function CloudAccountDetail() {
     );
   }
 
-  return provider === 'gcp' ? <GcpProjectDetail /> : <AwsAccountDetail />;
+  if (provider === 'gcp') return <GcpProjectDetail />;
+  if (provider === 'azure') return <AzureAccountDetail />;
+  return <AwsAccountDetail />;
 }

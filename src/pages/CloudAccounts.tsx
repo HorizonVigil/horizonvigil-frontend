@@ -79,10 +79,11 @@ export function CloudAccounts() {
   const { toast } = useToast();
   const { syncStates, startDiscovery } = useSync();
 
-  /** Same "Discover Resources" (+ "Sync Cost from AWS" for AWS rows) the account detail page's buttons trigger, exposed here as a one-click row action. */
+  /** Same "Discover Resources" (+ "Sync Cost" for AWS/Azure rows) the account detail page's buttons trigger, exposed here as a one-click row action. */
   function syncNow(row: UnifiedAccountRow) {
     startDiscovery(row.id, row.provider === 'gcp' ? 'gcpAccounts' : row.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
     if (row.provider === 'aws') void api.syncAccountCost(row.id).catch(() => {});
+    else if (row.provider === 'azure') void api.syncAzureAccountCost(row.id).catch(() => {});
     toast('Sync started — resources will update as it completes.', 'success');
   }
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());

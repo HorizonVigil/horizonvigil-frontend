@@ -53,7 +53,7 @@ export function FilterBar({ title, subtitle, breadcrumb, showAccountFilter = tru
               className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 disabled:opacity-60 disabled:cursor-not-allowed ${account !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}
             >
               <option value="all">{connections.length === 0 ? 'No accounts connected' : 'All Accounts'}</option>
-              {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : 'AWS'} — {c.name}</option>)}
+              {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : c.provider === 'azure' ? 'Azure' : 'AWS'} — {c.name}</option>)}
             </select>
           </label>
         )}

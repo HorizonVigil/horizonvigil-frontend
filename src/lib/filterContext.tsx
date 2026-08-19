@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api } from './api';
 import { useAuth } from './auth';
-import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from './unifiedAccounts';
+import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from './unifiedAccounts';
 
 export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd' | 'custom';
 
@@ -10,7 +10,7 @@ export interface GlobalFilters {
   account: string; // 'all' or a specific connection id
   dateRange: DateRangePreset;
   refreshToken: number;
-  /** Every connected AWS account AND GCP project, merged — was AWS-only until this fix, which meant the app-wide Account dropdown (FilterBar, budget/maintenance-window scope pickers, ...) could never even show a GCP project, let alone filter by one. */
+  /** Every connected AWS account, GCP project, AND Azure subscription, merged — was AWS-only until an earlier fix (then AWS+GCP), which meant the app-wide Account dropdown (FilterBar, budget/maintenance-window scope pickers, ...) could never even show a GCP project or Azure subscription, let alone filter by one. */
   connections: UnifiedAccountRow[];
 }
 
@@ -49,10 +49,11 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     // these two authenticated-only calls and ate a 401, for no purpose
     // (there's no connections list to show until someone's logged in).
     if (!isAuthenticated) { setConnections([]); return; }
-    void Promise.allSettled([api.getAccounts({ limit: 200 }), api.getGcpAccounts({ limit: 200 })]).then(([aws, gcp]) => {
+    void Promise.allSettled([api.getAccounts({ limit: 200 }), api.getGcpAccounts({ limit: 200 }), api.getAzureAccounts({ limit: 200 })]).then(([aws, gcp, azure]) => {
       const awsRows = aws.status === 'fulfilled' ? aws.value.items.map(toUnifiedRow) : [];
       const gcpRows = gcp.status === 'fulfilled' ? gcp.value.items.map(toUnifiedGcpRow) : [];
-      setConnections([...awsRows, ...gcpRows]);
+      const azureRows = azure.status === 'fulfilled' ? azure.value.items.map(toUnifiedAzureRow) : [];
+      setConnections([...awsRows, ...gcpRows, ...azureRows]);
     });
   }, [refreshToken, isAuthenticated]);
 

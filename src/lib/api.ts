@@ -258,6 +258,9 @@ class ApiClient {
     return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}/credentials`, data);
   }
 
+  getAzureAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost`); }
+  syncAzureAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost/sync`); }
+
   getAwsAccountsDashboard() {
     return this.get<AwsAccountsDashboard>('awsAccounts', '/api/aws-accounts/dashboard');
   }

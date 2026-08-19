@@ -131,7 +131,7 @@ export function CostManagement() {
   }
 
   async function handleDeleteBudget(b: Budget) {
-    if (!(await confirm(`Delete the "${b.name}" budget? This doesn't affect any AWS resources or spend, only this tracker.`))) return;
+    if (!(await confirm(`Delete the "${b.name}" budget? This doesn't affect any cloud resources or spend, only this tracker.`))) return;
     await api.deleteBudget(b.id);
     await loadBudgets();
   }
@@ -201,7 +201,7 @@ export function CostManagement() {
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} caption="real AWS Cost Explorer spend" />
+        <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} caption="real AWS + Azure cost spend" />
         <StatCard label="Forecasted Cost" value={money(forecast?.projectedTotal ?? 0)} caption="Forecast (linear estimate)" />
         <StatCard label="Avg Daily Cost" value={money(avgDailyCost)} caption="selected range" />
         <StatCard label="Active Budgets" value={String(budgets.length)} />
@@ -209,7 +209,7 @@ export function CostManagement() {
 
       {byServiceEntries.length > 0 && totalCost === 0 && (
         <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 mb-4">
-          This is real, synced AWS Cost Explorer data — it's genuinely $0 for the selected range (common for a new or low-usage account; Cost Explorer can also lag ~24–48h behind very recent usage). This is a different metric from Cost Optimization's "potential savings," which are list-price rightsizing estimates, not billed spend — the two can legitimately disagree.
+          This is real, synced cost data (AWS Cost Explorer / Azure Cost Management) — it's genuinely $0 for the selected range (common for a new or low-usage account; both can also lag ~24–48h behind very recent usage). This is a different metric from Cost Optimization's "potential savings," which are list-price rightsizing estimates, not billed spend — the two can legitimately disagree.
         </div>
       )}
 
@@ -247,7 +247,7 @@ export function CostManagement() {
             </table>
             {byServiceEntries.length === 0 && (
               <p className="text-sm text-slate-400 mt-3">
-                No cost data yet — open an AWS account's detail page (Cloud Accounts → Account Inventory) and click "Sync Cost."
+                No cost data yet — open an AWS or Azure account's detail page (Cloud Accounts → Account Inventory) and click "Sync Cost."
                 {connections.some(c => c.provider === 'gcp') && ' GCP cost tracking isn’t built yet — GCP projects won’t show cost here regardless of sync.'}
               </p>
             )}
@@ -306,7 +306,7 @@ export function CostManagement() {
             <button onClick={openCreateBudget} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">New Budget</button>
           </div>
           {budgets.length === 0 ? (
-            <p className="text-sm text-slate-400">No budgets yet — set a monthly limit on your whole org, a folder, a project, or a single AWS account, and get an early warning before you go over.</p>
+            <p className="text-sm text-slate-400">No budgets yet — set a monthly limit on your whole org, a folder, a project, or a single AWS/Azure account, and get an early warning before you go over.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {budgets.map(b => {
@@ -410,7 +410,7 @@ export function CostManagement() {
                   <option value="org">Entire organization</option>
                   <option value="folder">A folder</option>
                   <option value="project">A project</option>
-                  <option value="connection">A single AWS account</option>
+                  <option value="connection">A single AWS/Azure account</option>
                 </select>
               </label>
               {budgetScopeType === 'folder' && (
@@ -431,11 +431,11 @@ export function CostManagement() {
               )}
               {budgetScopeType === 'connection' && (
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-slate-600 dark:text-slate-300">AWS Account</span>
-                  {/* AWS-only, deliberately: GCP cost sync doesn't exist yet (see Cost Explorer's empty state), so a budget scoped to a GCP project could never actually track spend — offering it here would be a dead, misleading option, not just an empty one. */}
+                  <span className="text-slate-600 dark:text-slate-300">AWS/Azure Account</span>
+                  {/* AWS + Azure only, deliberately: GCP cost sync doesn't exist yet (see Cost Explorer's empty state), so a budget scoped to a GCP project could never actually track spend — offering it here would be a dead, misleading option, not just an empty one. */}
                   <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
                     <option value="">Choose an account…</option>
-                    {connections.filter(c => c.provider === 'aws').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {connections.filter(c => c.provider === 'aws' || c.provider === 'azure').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </label>
               )}
