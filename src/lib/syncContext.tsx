@@ -122,12 +122,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     setAutoSyncStatus('checking');
     setAutoSyncMessage('Checking for accounts that need syncing…');
     try {
-      // Fetch all connected accounts (AWS + GCP)
-      const [awsRes, gcpRes] = await Promise.allSettled([
+      // Fetch all connected accounts (AWS + GCP + Azure)
+      const [awsRes, gcpRes, azureRes] = await Promise.allSettled([
         api.getAccounts({ limit: 200 }),
         api.getGcpAccounts({ limit: 200 }),
+        api.getAzureAccounts({ limit: 200 }),
       ]);
-      const accounts: { id: string; lastSync: string | null; provider: 'aws' | 'gcp'; name: string }[] = [];
+      const accounts: { id: string; lastSync: string | null; provider: 'aws' | 'gcp' | 'azure'; name: string }[] = [];
       if (awsRes.status === 'fulfilled') {
         for (const a of awsRes.value.items) {
           accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'aws', name: a.connection_name ?? a.aws_account_id });
@@ -136,6 +137,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (gcpRes.status === 'fulfilled') {
         for (const a of gcpRes.value.items) {
           accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'gcp', name: a.connection_name ?? a.gcp_project_id });
+        }
+      }
+      if (azureRes.status === 'fulfilled') {
+        for (const a of azureRes.value.items) {
+          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'azure', name: a.connection_name ?? a.azure_subscription_id });
         }
       }
 
@@ -164,7 +170,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       let synced = 0;
       for (const account of staleAccounts) {
         try {
-          startDiscovery(account.id, account.provider === 'gcp' ? 'gcpAccounts' : 'awsAccounts');
+          startDiscovery(account.id, account.provider === 'gcp' ? 'gcpAccounts' : account.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
           synced++;
         } catch (err) {
           // Continue with other accounts even if one fails

@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.workers.dev';
 
 type Service =
-  | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'resources' | 'customDashboards' | 'costManagement'
+  | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'azureAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
   | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing' | 'aiCopilot';
 
@@ -15,6 +15,7 @@ const SERVICE_URLS: Record<Service, string> = {
   overview: import.meta.env.VITE_OVERVIEW_API_URL || `https://cloudops360-1-overview-api.${SUBDOMAIN}`,
   awsAccounts: import.meta.env.VITE_AWS_ACCOUNTS_API_URL || `https://cloudops360-1-aws-accounts-api.${SUBDOMAIN}`,
   gcpAccounts: import.meta.env.VITE_GCP_ACCOUNTS_API_URL || `https://cloudops360-1-gcp-accounts-api.${SUBDOMAIN}`,
+  azureAccounts: import.meta.env.VITE_AZURE_ACCOUNTS_API_URL || '',
   resources: import.meta.env.VITE_RESOURCES_API_URL || `https://cloudops360-1-resources-api.${SUBDOMAIN}`,
   customDashboards: import.meta.env.VITE_CUSTOM_DASHBOARDS_API_URL || `https://cloudops360-1-custom-dashboards-api.${SUBDOMAIN}`,
   costManagement: import.meta.env.VITE_COST_MANAGEMENT_API_URL || `https://cloudops360-1-cost-management-api.${SUBDOMAIN}`,
@@ -32,10 +33,12 @@ const SERVICE_URLS: Record<Service, string> = {
   aiCopilot: import.meta.env.VITE_AI_COPILOT_API_URL || '',
 };
 
-/** The two services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
-export type CloudAccountService = 'awsAccounts' | 'gcpAccounts';
+/** The three services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
+export type CloudAccountService = 'awsAccounts' | 'gcpAccounts' | 'azureAccounts';
 function accountsPathPrefix(service: CloudAccountService): string {
-  return service === 'gcpAccounts' ? '/api/gcp-accounts' : '/api/aws-accounts';
+  if (service === 'gcpAccounts') return '/api/gcp-accounts';
+  if (service === 'azureAccounts') return '/api/azure-accounts';
+  return '/api/aws-accounts';
 }
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
@@ -231,6 +234,30 @@ class ApiClient {
     return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/credentials`, data);
   }
 
+  // ── azure-accounts-api ────────────────────────────────────────────────────
+  // Same one-service-principal-connects-a-subscription shape as GCP's service
+  // account, kept as its own method set for the same reason GCP's is separate
+  // from AWS's.
+
+  getAzureAccounts(params: { status?: string; environment?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<AzureConnection>>('azureAccounts', `/api/azure-accounts/accounts${qs(params)}`);
+  }
+  getAzureAccount(id: string) { return this.get<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
+  createAzureAccount(data: {
+    connectionName: string; azureSubscriptionId: string; azureTenantId: string; azureClientId: string; azureClientSecret: string;
+    environment?: string; projectId?: string;
+  }) {
+    return this.post<AzureConnection>('azureAccounts', '/api/azure-accounts/accounts', data);
+  }
+  updateAzureAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null }) {
+    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`, data);
+  }
+  disconnectAzureAccount(id: string) { return this.delete<{ disconnected: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
+  deleteAzureAccountPermanently(id: string) { return this.delete<{ deleted: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permanently`); }
+  updateAzureAccountCredentials(id: string, data: { azureClientSecret: string }) {
+    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}/credentials`, data);
+  }
+
   getAwsAccountsDashboard() {
     return this.get<AwsAccountsDashboard>('awsAccounts', '/api/aws-accounts/dashboard');
   }
@@ -331,7 +358,7 @@ class ApiClient {
   bulkTagResources(data: { resourceIds: string[]; operation: 'add_tag' | 'remove_tag'; tagKey: string; tagValue?: string }) {
     return this.post<{ operation: string; requestedCount: number; matchedCount: number; updatedCount: number; skipped: string[] }>('resources', '/api/resources/bulk-operations', data);
   }
-  getResourceCatalog(params: { category?: string; scannerStatus?: string; provider?: 'aws' | 'gcp' } = {}) {
+  getResourceCatalog(params: { category?: string; scannerStatus?: string; provider?: 'aws' | 'gcp' | 'azure' } = {}) {
     return this.get<{ items: ResourceCatalogEntry[] }>('resources', `/api/resources/catalog${qs(params)}`);
   }
 
@@ -816,6 +843,16 @@ export interface GcpConnection {
   resource_summary: { totalResources?: number; categoryCounts?: Record<string, number> } | null;
   last_discovery_at: string | null; last_full_scan_at: string | null; last_sync_at: string | null;
   error_message: string | null; scan_regions: string[]; created_at: string; updated_at: string;
+}
+/** azure-accounts-api's equivalent of CloudConnection/GcpConnection — a service-principal-scoped subscription connection. No default_region/scan_regions: every Azure scanner is a subscription-wide ARM list call, not per-region. */
+export interface AzureConnection {
+  id: string; org_id: string; project_id: string | null; provider: 'azure'; connection_method: 'service_principal';
+  azure_subscription_id: string; azure_tenant_id: string; azure_client_id: string; connection_name: string | null; masked_access_key: string | null;
+  status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired';
+  environment: Environment;
+  resource_summary: { totalResources?: number; categoryCounts?: Record<string, number> } | null;
+  last_discovery_at: string | null; last_full_scan_at: string | null; last_sync_at: string | null;
+  error_message: string | null; created_at: string; updated_at: string;
 }
 export interface CrossAccountRole { id: string; connection_name: string; aws_account_id: string; role_arn: string; external_id: string; status: string; created_at: string }
 

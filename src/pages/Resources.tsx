@@ -182,7 +182,7 @@ export function Resources() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [service, setService] = useState('');
-  const [providerFilter, setProviderFilter] = useState<'all' | 'aws' | 'gcp'>('all');
+  const [providerFilter, setProviderFilter] = useState<'all' | 'aws' | 'gcp' | 'azure'>('all');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -443,7 +443,7 @@ export function Resources() {
     const c = connections.find(c => c.id === connectionId);
     return c ? c.name : connectionId;
   }, [connections]);
-  const providerFor = useCallback((connectionId: string): 'aws' | 'gcp' | null => {
+  const providerFor = useCallback((connectionId: string): 'aws' | 'gcp' | 'azure' | null => {
     return connections.find(c => c.id === connectionId)?.provider ?? null;
   }, [connections]);
 
@@ -728,10 +728,11 @@ export function Resources() {
           <div className="flex flex-wrap items-end gap-3 mb-3">
             <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Cloud Provider</span>
-              <select value={providerFilter} onChange={e => setProviderFilter(e.target.value as 'all' | 'aws' | 'gcp')} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${providerFilter !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
+              <select value={providerFilter} onChange={e => setProviderFilter(e.target.value as 'all' | 'aws' | 'gcp' | 'azure')} className={`text-sm rounded-md border px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 ${providerFilter !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
                 <option value="all">All Providers</option>
                 <option value="aws">AWS</option>
                 <option value="gcp">GCP</option>
+                <option value="azure">Azure</option>
               </select>
             </label>
             <label className="flex flex-col gap-1">

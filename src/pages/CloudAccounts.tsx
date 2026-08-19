@@ -8,6 +8,7 @@ import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
 import { ConnectGcpProjectWizard } from '../components/ConnectGcpProjectWizard';
+import { ConnectAzureSubscriptionWizard } from '../components/ConnectAzureSubscriptionWizard';
 import { AddAccountChooser } from '../components/AddAccountChooser';
 import { useConfirm } from '../components/ConfirmDialog';
 import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
@@ -19,8 +20,8 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
-import { api, ApiError, type CloudConnection, type GcpConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
-import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow } from '../lib/unifiedAccounts';
+import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
+import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -55,7 +56,7 @@ const TAB_TO_NAV_LABEL: Record<Tab, string> = {
 };
 
 const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
-const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }] as const;
+const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }, { value: 'azure', label: 'Azure' }] as const;
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 const PAGE_SIZES = [25, 50, 100];
 const REPORT_KINDS = [
@@ -80,7 +81,7 @@ export function CloudAccounts() {
 
   /** Same "Discover Resources" (+ "Sync Cost from AWS" for AWS rows) the account detail page's buttons trigger, exposed here as a one-click row action. */
   function syncNow(row: UnifiedAccountRow) {
-    startDiscovery(row.id, row.provider === 'gcp' ? 'gcpAccounts' : 'awsAccounts');
+    startDiscovery(row.id, row.provider === 'gcp' ? 'gcpAccounts' : row.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
     if (row.provider === 'aws') void api.syncAccountCost(row.id).catch(() => {});
     toast('Sync started — resources will update as it completes.', 'success');
   }
@@ -94,9 +95,11 @@ export function CloudAccounts() {
   }, [tab, canSeeTab, visibleTabs, setTab]);
   const [awsConnections, setAwsConnections] = useState<CloudConnection[]>([]);
   const [gcpConnections, setGcpConnections] = useState<GcpConnection[]>([]);
+  const [azureConnections, setAzureConnections] = useState<AzureConnection[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [awsWizardOpen, setAwsWizardOpen] = useState(false);
   const [gcpWizardOpen, setGcpWizardOpen] = useState(false);
+  const [azureWizardOpen, setAzureWizardOpen] = useState(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
 
   useEffect(() => { void api.getFavorites().then(r => setFavorites(r.favorites)); }, [refreshToken]);
@@ -152,12 +155,14 @@ export function CloudAccounts() {
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
     try {
-      const [awsRes, gcpRes] = await Promise.all([
+      const [awsRes, gcpRes, azureRes] = await Promise.all([
         api.getAccounts({ limit: 1000 }),
         api.getGcpAccounts({ limit: 1000 }),
+        api.getAzureAccounts({ limit: 1000 }),
       ]);
       setAwsConnections(awsRes.items);
       setGcpConnections(gcpRes.items);
+      setAzureConnections(azureRes.items);
     } finally {
       setInventoryLoading(false);
       setInventoryLoadedOnce(true);
@@ -168,7 +173,7 @@ export function CloudAccounts() {
   // Test-connection state keeps running in the background (see syncContext.tsx)
   // even if you navigate away mid-request — this refreshes the table once it
   // finishes, whether that happens while you're on this page or you come back later.
-  useSyncCompletion([...awsConnections.map(c => c.id), ...gcpConnections.map(c => c.id)], loadInventory);
+  useSyncCompletion([...awsConnections.map(c => c.id), ...gcpConnections.map(c => c.id), ...azureConnections.map(c => c.id)], loadInventory);
 
   // Each secondary tab's data is only fetched once you actually open it, and
   // re-fetched on refreshToken while that tab is active.
@@ -187,7 +192,7 @@ export function CloudAccounts() {
     }
   }, [tab, refreshToken]);
 
-  const allRows = useMemo(() => [...awsConnections.map(toUnifiedRow), ...gcpConnections.map(toUnifiedGcpRow)], [awsConnections, gcpConnections]);
+  const allRows = useMemo(() => [...awsConnections.map(toUnifiedRow), ...gcpConnections.map(toUnifiedGcpRow), ...azureConnections.map(toUnifiedAzureRow)], [awsConnections, gcpConnections, azureConnections]);
 
   const filtered = useMemo(() => allRows.filter(r => {
     if (statusFilter && r.status !== statusFilter) return false;
@@ -207,9 +212,21 @@ export function CloudAccounts() {
     return allRows.find(r => r.id === id);
   }
 
+  /** Three providers, three separate backends, identical Disconnect/Delete contract — one dispatch point instead of the same 3-way branch repeated at every call site. */
+  function disconnectFor(row: UnifiedAccountRow) {
+    if (row.provider === 'gcp') return api.disconnectGcpAccount(row.id);
+    if (row.provider === 'azure') return api.disconnectAzureAccount(row.id);
+    return api.disconnectAccount(row.id);
+  }
+  function deletePermanentlyFor(row: UnifiedAccountRow) {
+    if (row.provider === 'gcp') return api.deleteGcpAccountPermanently(row.id);
+    if (row.provider === 'azure') return api.deleteAzureAccountPermanently(row.id);
+    return api.deleteAccountPermanently(row.id);
+  }
+
   async function handleDisconnect(row: UnifiedAccountRow) {
     if (!(await confirm(`Disconnect "${row.name}"? It will be marked disconnected — discovered resources${row.provider === 'aws' ? ' and cost history are' : ' are'} kept.`))) return;
-    await (row.provider === 'gcp' ? api.disconnectGcpAccount(row.id) : api.disconnectAccount(row.id));
+    await disconnectFor(row);
     toast(`Disconnected "${row.name}"`, 'success');
     await loadInventory();
   }
@@ -218,7 +235,7 @@ export function CloudAccounts() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
     const n = rows.length;
     if (!(await confirm(`Disconnect ${n} selected account(s)? They'll be marked disconnected — discovered resources are kept.`))) return;
-    await Promise.all(rows.map(r => r.provider === 'gcp' ? api.disconnectGcpAccount(r.id) : api.disconnectAccount(r.id)));
+    await Promise.all(rows.map(disconnectFor));
     toast(`Disconnected ${n} account${n === 1 ? '' : 's'}`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
@@ -226,7 +243,7 @@ export function CloudAccounts() {
 
   async function handleDeletePermanently(row: UnifiedAccountRow) {
     if (!(await confirm(`Permanently delete "${row.name}"? This is irreversible — its discovered resources and history are deleted too, not just this connection. Use Disconnect instead if you might reconnect it later.`))) return;
-    await (row.provider === 'gcp' ? api.deleteGcpAccountPermanently(row.id) : api.deleteAccountPermanently(row.id));
+    await deletePermanentlyFor(row);
     toast(`Deleted "${row.name}" permanently`, 'success');
     await loadInventory();
   }
@@ -235,7 +252,7 @@ export function CloudAccounts() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
     const n = rows.length;
     if (!(await confirm(`Permanently delete ${n} selected account(s)? This is irreversible — their discovered resources and history are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
-    await Promise.all(rows.map(r => r.provider === 'gcp' ? api.deleteGcpAccountPermanently(r.id) : api.deleteAccountPermanently(r.id)));
+    await Promise.all(rows.map(deletePermanentlyFor));
     toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
@@ -373,9 +390,11 @@ export function CloudAccounts() {
     });
   }, [syncStatus, permissionsSummary]);
 
-  function openWizard(provider: 'aws' | 'gcp') {
+  function openWizard(provider: 'aws' | 'gcp' | 'azure') {
     setChooserOpen(false);
-    if (provider === 'aws') setAwsWizardOpen(true); else setGcpWizardOpen(true);
+    if (provider === 'aws') setAwsWizardOpen(true);
+    else if (provider === 'gcp') setGcpWizardOpen(true);
+    else setAzureWizardOpen(true);
   }
 
   return (
@@ -776,6 +795,7 @@ export function CloudAccounts() {
       <AddAccountChooser open={chooserOpen} onClose={() => setChooserOpen(false)} onChoose={openWizard} />
       <ConnectAwsAccountWizard open={awsWizardOpen} onClose={() => setAwsWizardOpen(false)} onConnected={loadInventory} projects={projects} />
       <ConnectGcpProjectWizard open={gcpWizardOpen} onClose={() => setGcpWizardOpen(false)} onConnected={loadInventory} projects={projects} />
+      <ConnectAzureSubscriptionWizard open={azureWizardOpen} onClose={() => setAzureWizardOpen(false)} onConnected={loadInventory} projects={projects} />
       {updateCredsFor && (
         <UpdateCredentialsModal
           row={updateCredsFor}
