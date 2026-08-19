@@ -346,6 +346,10 @@ class ApiClient {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/inventory${qs(params)}`);
   }
   getResource(id: string) { return this.get<CloudResource>('resources', `/api/resources/inventory/${id}`); }
+  // Real, on-demand CloudWatch Logs pull -- Lambda functions only for now (see connector-aws's logs.ts). Nothing is stored; this calls FilterLogEvents live each time.
+  getResourceLogs(connectionId: string, resourceId: string, params: { from?: string; to?: string } = {}) {
+    return this.get<{ logGroupName: string; events: { timestamp: string | null; message: string; logStream: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${connectionId}/resources/${resourceId}/logs${qs(params)}`);
+  }
   getResourceExplorer(params: { connectionId?: string; region?: string } = {}) { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', `/api/resources/explorer${qs(params)}`); }
   getResourceExplorerCategory(category: string, params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/explorer/${encodeURIComponent(category)}${qs(params)}`);
@@ -406,6 +410,10 @@ class ApiClient {
   }
   getMetrics(params: { resourceId?: string; metricName?: string; namespace?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ResourceMetric>>('monitoring', `/api/monitoring/metrics${qs(params)}`);
+  }
+  // Real deployment history -- AWS CloudFormation stack events only for now (see connector-aws's cloudformation.ts scanner).
+  getDeploymentEvents(params: { connectionId?: string; deploymentName?: string; from?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<DeploymentEvent>>('monitoring', `/api/monitoring/deployments${qs(params)}`);
   }
   getLogs() { return this.get<NotIntegrated>('monitoring', '/api/monitoring/logs'); }
   getTraces() { return this.get<NotIntegrated>('monitoring', '/api/monitoring/traces'); }
@@ -932,6 +940,12 @@ export interface ResourceLifecycleEvent { id: string; connection_id: string; res
 export type ContainerListParams = { connectionId?: string; region?: string; status?: string; search?: string; page?: number; limit?: number }
 
 export interface MonitoringAlarm { id: string; connection_id: string; resource_id: string | null; alarm_name: string; metric_name: string; namespace: string; region: string; state: 'OK' | 'ALARM' | 'INSUFFICIENT_DATA'; threshold: number | null; comparison_operator: string | null; updated_at: string; created_at: string }
+export interface DeploymentEvent {
+  id: string; connection_id: string; resource_id: string | null; provider: 'aws' | 'gcp' | 'azure';
+  deployment_name: string; status: string; reason: string | null; resource_type: string | null;
+  logical_resource_id: string | null; physical_resource_id: string | null; region: string;
+  occurred_at: string; metadata: Record<string, unknown>;
+}
 export interface ResourceMetric { id: string; connection_id: string; resource_id: string | null; resource_type_key: string; metric_name: string; namespace: string; unit: string | null; region: string; ts: string; value: number; created_at: string }
 
 export interface CostSnapshot { id: string; connection_id: string; account_id: string; usage_date: string; service: string; region: string | null; unblended_cost: string; usage_quantity: string | null; usage_unit: string | null; currency: string }
