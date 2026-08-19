@@ -595,7 +595,7 @@ export function Resources() {
     } as Column<CloudResource>] : []),
     {
       key: 'provider', header: 'Provider',
-      render: r => { const p = providerFor(r.connection_id); return p ? <Badge tone="neutral">{p === 'gcp' ? 'GCP' : 'AWS'}</Badge> : '—'; },
+      render: r => { const p = providerFor(r.connection_id); return p ? <Badge tone="neutral">{p === 'gcp' ? 'GCP' : p === 'azure' ? 'Azure' : 'AWS'}</Badge> : '—'; },
       sortValue: r => providerFor(r.connection_id) ?? '',
     },
     { key: 'displayName', header: 'Service', render: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key, sortValue: r => catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key },
@@ -770,7 +770,7 @@ export function Resources() {
             {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
           </div>
 
-          <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : 'AWS'} resources discovered yet. Connect a ${providerFilter === 'gcp' ? 'GCP' : 'AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS or GCP account and run a sync from Cloud Accounts."} />
+          <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
         </>
       )}
 

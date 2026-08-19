@@ -41,6 +41,7 @@ export function AzureAccountDetail() {
   const [resourceStatus, setResourceStatus] = useState('');
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
+  const [costSyncError, setCostSyncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -83,12 +84,18 @@ export function AzureAccountDetail() {
   async function syncCost() {
     if (!id) return;
     setSyncingCost(true);
+    setCostSyncError(null);
     try {
       const result = await api.syncAzureAccountCost(id);
       toast(result.synced > 0 ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from Azure` : 'Synced — no cost data found for this subscription this month', 'success');
       setAccountCost(await api.getAzureAccountCost(id));
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Cost sync failed', 'error');
+      // A toast alone auto-dismisses and is easy to miss -- this also
+      // pins a persistent banner in the Cost tab, matching the Overview
+      // tab's sync-error banner pattern below.
+      const message = err instanceof ApiError ? err.message : 'Cost sync failed';
+      setCostSyncError(message);
+      toast(message, 'error');
     } finally {
       setSyncingCost(false);
     }
@@ -241,6 +248,11 @@ export function AzureAccountDetail() {
               {syncingCost ? 'Syncing…' : 'Sync Cost from Azure'}
             </button>
           </div>
+          {costSyncError && (
+            <div className="rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+              {costSyncError}
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Month to Date</h3>

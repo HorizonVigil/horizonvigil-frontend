@@ -247,7 +247,10 @@ class ApiClient {
     connectionName: string; azureSubscriptionId: string; azureTenantId: string; azureClientId: string; azureClientSecret: string;
     environment?: string; projectId?: string;
   }) {
-    return this.post<AzureConnection>('azureAccounts', '/api/azure-accounts/accounts', data);
+    // `_reconnected: true` means this subscription id was already connected
+    // (active or disconnected) and the backend updated that row's
+    // credentials/status in place instead of inserting a duplicate.
+    return this.post<AzureConnection & { _reconnected?: boolean }>('azureAccounts', '/api/azure-accounts/accounts', data);
   }
   updateAzureAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null }) {
     return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`, data);

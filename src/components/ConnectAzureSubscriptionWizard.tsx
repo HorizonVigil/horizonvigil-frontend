@@ -20,7 +20,12 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
     setNotice(null);
     setLoading(true);
     try {
-      await api.createAzureAccount({
+      // The backend upserts: reconnecting a subscription id already
+      // connected to this org (active or previously disconnected) updates
+      // that row's credentials/status in place and returns `_reconnected:
+      // true`, rather than rejecting a duplicate insert -- so there's
+      // nothing here to catch or retry, just a notice to show either way.
+      const result = await api.createAzureAccount({
         azureSubscriptionId: form.azureSubscriptionId.trim(),
         azureTenantId: form.azureTenantId.trim(),
         azureClientId: form.azureClientId.trim(),
@@ -29,35 +34,11 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
         connectionName: form.connectionName.trim() || form.azureSubscriptionId.trim(),
         environment: form.environment,
       });
+      if (result._reconnected) setNotice('This subscription was already connected — its credentials were updated instead of creating a duplicate.');
       onConnected();
       onClose();
     } catch (err) {
-      const message = (err as Error).message;
-      const isDuplicateSubscription = message.includes('cloud_connections_org_azure') || message.toLowerCase().includes('already exists');
-      if (!isDuplicateSubscription) {
-        setError(message);
-        setLoading(false);
-        return;
-      }
-
-      // Same "update in place" fallback as ConnectGcpProjectWizard — a row
-      // for this subscription already exists (Disconnect is a soft status
-      // flip, not a row delete, so it collides with the unique index on
-      // re-add regardless of status).
-      try {
-        const { items } = await api.getAzureAccounts({ search: form.azureSubscriptionId.trim(), limit: 5 });
-        const existing = items.find((c) => c.azure_subscription_id === form.azureSubscriptionId.trim());
-        if (!existing) {
-          setError(`Azure subscription ${form.azureSubscriptionId.trim()} is already connected to this org, but its existing connection couldn't be found to update automatically.`);
-          return;
-        }
-        await api.updateAzureAccountCredentials(existing.id, { azureClientSecret: form.azureClientSecret.trim() });
-        setNotice('This subscription was already connected — its client secret was rotated instead of creating a duplicate.');
-        onConnected();
-        onClose();
-      } catch (fallbackErr) {
-        setError(`This Azure subscription is already connected, and updating it also failed: ${(fallbackErr as Error).message}`);
-      }
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }

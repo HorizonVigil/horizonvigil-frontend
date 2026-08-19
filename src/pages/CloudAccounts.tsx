@@ -332,7 +332,7 @@ export function CloudAccounts() {
       ),
     } as Column<UnifiedAccountRow>] : []),
     { key: 'name', header: 'Name', sticky: true, render: r => r.name, sortValue: r => r.name },
-    { key: 'provider', header: 'Provider', render: r => <Badge tone="neutral">{r.provider === 'gcp' ? 'GCP' : 'AWS'}</Badge>, sortValue: r => r.provider },
+    { key: 'provider', header: 'Provider', render: r => <Badge tone="neutral">{r.provider === 'gcp' ? 'GCP' : r.provider === 'azure' ? 'Azure' : 'AWS'}</Badge>, sortValue: r => r.provider },
     { key: 'accountId', header: 'Account / Project ID', render: r => <span className="font-mono text-xs">{r.identifier}</span>, sortValue: r => r.identifier },
     { key: 'environment', header: 'Environment', render: r => <Badge tone="neutral">{r.environment}</Badge>, sortValue: r => r.environment },
     {
@@ -642,7 +642,7 @@ export function CloudAccounts() {
           </div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Connect a New Cloud Account</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
-            Connect an AWS account (via a cross-account IAM role or access keys) or a GCP project (via a service account key or impersonation). Each wizard walks through least-privilege permissions, region selection, and an initial connection check.
+            Connect an AWS account (via a cross-account IAM role or access keys), a GCP project (via a service account key or impersonation), or an Azure subscription (via a service principal). Each wizard walks through least-privilege permissions, region selection, and an initial connection check.
           </p>
           <button onClick={() => setChooserOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2.5">Start Onboarding</button>
           {filtered.length > 0 && (
@@ -709,7 +709,7 @@ export function CloudAccounts() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Is discovery and validation working?</h3>
             <p className="text-xs text-slate-400">
-              One row per AWS account: connection status, last sync time, and permission validation results — sts:GetCallerIdentity plus real checks against IAM, Organizations, CloudWatch, CloudTrail, the Resource Groups Tagging API, and Cost Explorer. Click a row to see individual checks. Click "Validate" to run a fresh check. For GCP projects, use Sync Now on their Inventory row.
+              One row per AWS account: connection status, last sync time, and permission validation results — sts:GetCallerIdentity plus real checks against IAM, Organizations, CloudWatch, CloudTrail, the Resource Groups Tagging API, and Cost Explorer. Click a row to see individual checks. Click "Validate" to run a fresh check. For GCP projects or Azure subscriptions, use Sync Now on their Inventory row instead — neither has a permission-validation endpoint built yet.
             </p>
           </div>
 
