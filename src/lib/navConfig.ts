@@ -329,7 +329,7 @@ export const NAV_MODULES: NavModule[] = [
     minRole: 'editor',
     children: [
       { label: 'Profile', to: SETTINGS, real: true },
-      { label: 'AWS Integrations', to: tabLink(SETTINGS, 'AWS Integrations'), real: true, minRole: 'editor' },
+      { label: 'Cloud Integrations', to: tabLink(SETTINGS, 'Cloud Integrations'), real: true, minRole: 'editor' },
       { label: 'Billing', to: tabLink(SETTINGS, 'Billing'), real: true, roles: ['billing_admin', 'admin', 'owner'] },
       { label: 'Notifications', to: tabLink(SETTINGS, 'Notifications'), real: true },
       { label: 'Credentials', to: tabLink(SETTINGS, 'Credentials'), real: true, minRole: 'admin' },

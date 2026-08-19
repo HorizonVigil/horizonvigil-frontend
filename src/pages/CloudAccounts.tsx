@@ -143,6 +143,7 @@ export function CloudAccounts() {
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
   const [gcpProjectCount, setGcpProjectCount] = useState<number | null>(null);
+  const [azureAccountCount, setAzureAccountCount] = useState<number | null>(null);
   const [awsOrgs, setAwsOrgs] = useState<{ awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[]>([]);
   const [syncStatus, setSyncStatus] = useState<AccountSummary[]>([]);
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
@@ -182,6 +183,7 @@ export function CloudAccounts() {
     if (tab === 'Dashboard') {
       void api.getAwsAccountsDashboard().then(setDashboard);
       void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total));
+      void api.getAzureAccounts({ limit: 1 }).then(r => setAzureAccountCount(r.pagination.total));
     } else if (tab === 'Organizations') void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts));
     else if (tab === 'Regions') void api.getAwsAccountsRegions().then(r => setRegions(r.regions));
     else if (tab === 'Sync Center') {
@@ -424,6 +426,7 @@ export function CloudAccounts() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard label="AWS Accounts" value={String(dashboard.totalAccounts)} />
               <StatCard label="GCP Projects" value={gcpProjectCount === null ? '…' : String(gcpProjectCount)} />
+              <StatCard label="Azure Subscriptions" value={azureAccountCount === null ? '…' : String(azureAccountCount)} />
               <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} />
               <StatCard label="Failed" value={String(dashboard.failedAccounts)} />
               <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} />
@@ -431,7 +434,7 @@ export function CloudAccounts() {
               <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
               <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} />
             </div>
-            <p className="text-xs text-slate-400 -mt-3">Dashboard aggregates reflect AWS accounts. GCP projects appear in Inventory alongside AWS accounts.</p>
+            <p className="text-xs text-slate-400 -mt-3">Dashboard aggregates (Healthy/Failed/Disconnected/Needing Attention/Rotation Due) reflect AWS accounts only. GCP projects and Azure subscriptions appear in Inventory alongside AWS accounts.</p>
 
             {dashboard.accountsNeedingAttentionList.length > 0 && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">

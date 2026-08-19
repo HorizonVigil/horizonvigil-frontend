@@ -17,12 +17,13 @@ export function ResourcesCategory() {
   const navigate = useNavigate();
   const location = useLocation();
   useResourcesUrlFilters();
-  // The catalog is a shared reference table across both providers -- with no
-  // account selected there's no single provider to filter to, so every
-  // catalogued service shows (mixed AWS+GCP). With one account selected, its
-  // provider is known and the grid narrows to just that cloud's services --
-  // otherwise a GCP-filtered user sees a wall of AWS tiles (all correctly
-  // empty, but indistinguishable from a real leak without clicking through).
+  // The catalog is a shared reference table across all three providers --
+  // with no account selected there's no single provider to filter to, so
+  // every catalogued service shows (mixed AWS+GCP+Azure). With one account
+  // selected, its provider is known and the grid narrows to just that
+  // cloud's services -- otherwise e.g. a GCP-filtered user sees a wall of
+  // AWS tiles (all correctly empty, but indistinguishable from a real leak
+  // without clicking through).
   const selectedProvider = account === 'all' ? undefined : connections.find(c => c.id === account)?.provider;
   const [catalog, setCatalog] = useState<ResourceCatalogEntry[]>([]);
   // getResourceExplorer() has no per-category variant, but it's a small,
@@ -89,7 +90,7 @@ export function ResourcesCategory() {
               <EmptyState
                 icon="cloud"
                 title={`No ${category} services yet`}
-                description="Connect an AWS account or GCP project to start discovering resources — this list fills in automatically after your first sync."
+                description="Connect an AWS account, GCP project, or Azure subscription to start discovering resources — this list fills in automatically after your first sync."
                 action={{ label: 'Connect a cloud account', onClick: () => navigate('/cloud-accounts?tab=Onboarding') }}
               />
             ) : (

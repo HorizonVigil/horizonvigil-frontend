@@ -18,8 +18,20 @@ const REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'eu-west-1'
 // Profile/Appearance/Session aren't among the 8 org-wide settings the
 // sidebar names (those are all per-org; these are per-you) — grouped
 // under one Profile tab since none of the 8 is a natural home for them.
-const TABS = ['Profile', 'AWS Integrations', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Git Integration', 'Branding', 'License'] as const;
+const TABS = ['Profile', 'Cloud Integrations', 'Notifications', 'Credentials', 'RBAC', 'System Settings', 'Recommendation Rules', 'Git Integration', 'Branding', 'License'] as const;
 type Tab = typeof TABS[number];
+
+// cloud_connections.connection_method values across all three providers --
+// was a binary cross_account_role/"Access key" check that defaulted every
+// non-AWS-role method (including GCP's and Azure's, which aren't access
+// keys at all) to the wrong label.
+const CONNECTION_METHOD_LABELS: Record<string, string> = {
+  access_key: 'Access key',
+  cross_account_role: 'Cross-account role',
+  service_account_key: 'Service account key',
+  service_account_impersonation: 'Service account impersonation',
+  service_principal: 'Service principal',
+};
 
 const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
 
@@ -318,9 +330,9 @@ export function Settings() {
         </div>
       )}
 
-      {tab === 'AWS Integrations' && (
+      {tab === 'Cloud Integrations' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">AWS Integrations</h3>
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cloud Integrations</h3>
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
             {awsIntegrations.map(c => (
               <li key={c.id} className="flex items-center justify-between py-2 text-sm">
@@ -331,7 +343,7 @@ export function Settings() {
                 </div>
               </li>
             ))}
-            {awsIntegrations.length === 0 && <li className="py-2 text-sm text-slate-400">No AWS accounts connected yet.</li>}
+            {awsIntegrations.length === 0 && <li className="py-2 text-sm text-slate-400">No cloud accounts connected yet.</li>}
           </ul>
         </div>
       )}
@@ -370,7 +382,7 @@ export function Settings() {
               {credentials.map(c => (
                 <tr key={c.connectionId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{c.connectionName}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{c.connectionMethod === 'cross_account_role' ? 'Cross-account role' : 'Access key'}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{CONNECTION_METHOD_LABELS[c.connectionMethod] ?? c.connectionMethod}</td>
                   <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{c.maskedAccessKey ?? '—'}</td>
                   <td className="py-2 text-slate-500 dark:text-slate-400">{c.keyRotatedAt ? new Date(c.keyRotatedAt).toLocaleDateString() : '—'}</td>
                   <td className="py-2">
