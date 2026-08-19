@@ -1004,7 +1004,7 @@ export interface AlertRow { id: string; org_id: string; connection_id: string | 
 export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type IncidentStatus = 'open' | 'acknowledged' | 'investigating' | 'resolved' | 'closed';
 export interface Incident {
-  id: string; org_id: string; connection_id: string | null; resource_id: string | null;
+  id: string; incident_number: string; org_id: string; connection_id: string | null; resource_id: string | null;
   title: string; description: string | null; severity: IncidentSeverity; status: IncidentStatus;
   environment: string | null; created_by: string; assigned_to: string | null;
   created_at: string; acknowledged_at: string | null; resolved_at: string | null; closed_at: string | null; updated_at: string;

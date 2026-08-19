@@ -131,7 +131,7 @@ export function IncidentDetail() {
 
   return (
     <div>
-      <FilterBar title={incident.title} breadcrumb={<Link to="/incidents" className="text-xs text-slate-400 hover:underline">← Incidents</Link>} showAccountFilter={false} />
+      <FilterBar title={`${incident.incident_number} — ${incident.title}`} breadcrumb={<Link to="/incidents" className="text-xs text-slate-400 hover:underline">← Incidents</Link>} showAccountFilter={false} />
 
       <div className="flex items-center gap-2 mb-5 flex-wrap">
         <Badge tone={SEVERITY_TONE[incident.severity]}>{incident.severity}</Badge>

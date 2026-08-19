@@ -49,6 +49,7 @@ export function Incidents() {
   const connectionName = (id: string | null) => id ? (connections.find(c => c.id === id)?.name ?? id) : '—';
 
   const columns: Column<Incident>[] = [
+    { key: 'number', header: 'Number', render: i => <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{i.incident_number}</span>, sortValue: i => i.incident_number },
     { key: 'title', header: 'Title', render: i => <span className="truncate max-w-md inline-block font-medium text-slate-800 dark:text-slate-100">{i.title}</span>, sortValue: i => i.title },
     { key: 'severity', header: 'Severity', render: i => <Badge tone={SEVERITY_TONE[i.severity]}>{i.severity}</Badge>, sortValue: i => i.severity },
     { key: 'status', header: 'Status', render: i => <Badge tone={STATUS_TONE[i.status]}>{i.status}</Badge>, sortValue: i => i.status },
