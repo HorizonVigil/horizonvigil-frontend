@@ -31,7 +31,7 @@ export type IconName =
   | 'cloud-off' | 'log-out' | 'sun' | 'moon' | 'arrow-right' | 'arrow-up-right'
   | 'inbox' | 'cloud-download' | 'sliders' | 'refresh-cw' | 'target' | 'gauge'
   | 'shield-check-2' | 'alert-triangle' | 'life-buoy' | 'compass' | 'hammer'
-  | 'scroll-text' | 'check-square' | 'square' | 'upload-cloud' | 'settings-3';
+  | 'scroll-text' | 'check-square' | 'square' | 'upload-cloud' | 'settings-3' | 'incidents';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: IconName;
@@ -53,6 +53,7 @@ const PATHS: Record<IconName, ReactNode> = {
   monitoring: <><path d="M3 3v18h18" /><path d="M7 14l3-4 3 3 4-6" /></>,
   alerts: <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a2 2 0 0 0 3.4 0" /></>,
   issues: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5h.01" /></>,
+  incidents: <><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8Z" /><path d="M12 8v5M12 16.5h.01" /></>,
   reports: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" /><path d="M14 2v6h6M8 13h8M8 17h5" /></>,
   users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 21a6.5 6.5 0 0 1 13 0" /><circle cx="17.5" cy="9" r="2.5" /><path d="M17.5 14.5c2.8 0 4.5 2.5 4.5 5.5" /></>,
   organization: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -214,6 +215,7 @@ export const NAV_ICON_MAP: Record<string, IconName> = {
   'Monitoring': 'monitoring',
   'Alerts': 'alerts',
   'Issues': 'issues',
+  'Incidents': 'incidents',
   'Reports': 'reports',
   'Users & Groups': 'users',
   'Organization Management': 'organization',

@@ -30,6 +30,8 @@ import { AksConsole } from './pages/AksConsole';
 import { Monitoring } from './pages/Monitoring';
 import { Alerts } from './pages/Alerts';
 import { Issues } from './pages/Issues';
+import { Incidents } from './pages/Incidents';
+import { IncidentDetail } from './pages/IncidentDetail';
 import { Reports } from './pages/Reports';
 import { UsersGroups } from './pages/UsersGroups';
 import { OrganizationManagement } from './pages/OrganizationManagement';
@@ -135,6 +137,8 @@ export default function App() {
                           <Route path="/monitoring" element={<ProtectedRoute module="Monitoring"><Monitoring /></ProtectedRoute>} />
                           <Route path="/alerts" element={<ProtectedRoute module="Alerts"><Alerts /></ProtectedRoute>} />
                           <Route path="/issues" element={<ProtectedRoute module="Issues"><Issues /></ProtectedRoute>} />
+                          <Route path="/incidents" element={<ProtectedRoute module="Incidents"><Incidents /></ProtectedRoute>} />
+                          <Route path="/incidents/:id" element={<ProtectedRoute module="Incidents"><IncidentDetail /></ProtectedRoute>} />
                           <Route path="/reports" element={<ProtectedRoute module="Reports"><Reports /></ProtectedRoute>} />
                           <Route path="/integrations" element={<Navigate to="/automation" replace />} />
                           <Route path="/users-groups" element={<ProtectedRoute module="Users & Groups" minRole="admin"><UsersGroups /></ProtectedRoute>} />

@@ -7,7 +7,7 @@ const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.work
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'azureAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
-  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing' | 'aiCopilot';
+  | 'reports' | 'users' | 'organizationManagement' | 'automation' | 'settings' | 'billing' | 'aiCopilot' | 'incidents';
 
 export { isBillingEnabled } from './featureFlags';
 
@@ -31,6 +31,7 @@ const SERVICE_URLS: Record<Service, string> = {
   settings: import.meta.env.VITE_SETTINGS_API_URL || `https://cloudops360-1-settings-api.${SUBDOMAIN}`,
   billing: import.meta.env.VITE_BILLING_API_URL || '',
   aiCopilot: import.meta.env.VITE_AI_COPILOT_API_URL || '',
+  incidents: import.meta.env.VITE_INCIDENTS_API_URL || '',
 };
 
 /** The three services that expose the identical account-connect + stepped-discovery contract — see getDiscoverySteps/runDiscoveryStep/finalizeDiscovery/testAccount below. */
@@ -774,6 +775,19 @@ class ApiClient {
   renameConversation(id: string, title: string) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { title }); }
   pinConversation(id: string, pinned: boolean) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { pinned }); }
   deleteConversation(id: string) { return this.delete<{ deleted: boolean }>('aiCopilot', `/api/ai-copilot/conversations/${id}`); }
+
+  // ── incidents ────────────────────────────────────────────────────────────
+
+  getIncidents(params: { status?: string; severity?: string; connectionId?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<Incident>>('incidents', `/api/incidents/incidents${qs(params)}`);
+  }
+  getIncident(id: string) { return this.get<IncidentDetail>('incidents', `/api/incidents/incidents/${id}`); }
+  createIncident(data: { title: string; severity: string; description?: string; connectionId?: string; resourceId?: string; environment?: string }) {
+    return this.post<Incident>('incidents', '/api/incidents/incidents', data);
+  }
+  updateIncidentStatus(id: string, status: string) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/status`, { status }); }
+  addIncidentComment(id: string, comment: string) { return this.post<IncidentEvent>('incidents', `/api/incidents/incidents/${id}/comment`, { comment }); }
+  assignIncident(id: string, assigneeId: string | null) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/assign`, { assigneeId }); }
 }
 
 export const api = new ApiClient();
@@ -965,6 +979,20 @@ export interface VulnerabilityFinding {
 export interface ComplianceBenchmark { id: string; connection_id: string; framework: 'cis_aws_foundations' | 'pci_dss' | 'iso_27001'; passed_checks: number; total_checks: number; last_evaluated_at: string; passRate: number | null }
 
 export interface AlertRow { id: string; org_id: string; connection_id: string | null; resource_id: string | null; rule_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low'; alert_name: string; status: 'open' | 'acknowledged' | 'in_progress' | 'resolved'; triggered_at: string; acknowledged_at: string | null; resolved_at: string | null; metadata: Record<string, unknown> }
+
+export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low';
+export type IncidentStatus = 'open' | 'acknowledged' | 'investigating' | 'resolved' | 'closed';
+export interface Incident {
+  id: string; org_id: string; connection_id: string | null; resource_id: string | null;
+  title: string; description: string | null; severity: IncidentSeverity; status: IncidentStatus;
+  environment: string | null; created_by: string; assigned_to: string | null;
+  created_at: string; acknowledged_at: string | null; resolved_at: string | null; closed_at: string | null; updated_at: string;
+}
+export interface IncidentEvent {
+  id: string; event_type: 'created' | 'status_changed' | 'comment' | 'assigned';
+  actor_id: string | null; comment: string | null; metadata: Record<string, unknown>; created_at: string;
+}
+export interface IncidentDetail extends Incident { events: IncidentEvent[] }
 
 // cloudops360-scanner-* microservices (Prowler, Trivy, Semgrep, Gitleaks,
 // Checkov, Grype, Syft, TruffleHog, Nuclei, Dependency-Check) — see each

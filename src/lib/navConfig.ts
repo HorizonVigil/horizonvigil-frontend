@@ -100,6 +100,7 @@ const AKS_CONSOLE = '/clusters/azure';
 const MON = '/monitoring';
 const ALERTS = '/alerts';
 const ISSUES = '/issues';
+const INCIDENTS = '/incidents';
 const REPORTS = '/reports';
 const USERS = '/users-groups';
 const ORG = '/organization';
@@ -260,6 +261,17 @@ export const NAV_MODULES: NavModule[] = [
     to: ISSUES,
     children: [
       { label: 'All Issues', to: ISSUES, real: true },
+    ],
+  },
+  {
+    label: 'Incidents',
+    icon: 'incidents',
+    to: INCIDENTS,
+    children: [
+      { label: 'All Incidents', to: INCIDENTS, real: true },
+      { label: 'Open', to: tabLink(INCIDENTS, 'Open'), real: true },
+      { label: 'Investigating', to: tabLink(INCIDENTS, 'Investigating'), real: true },
+      { label: 'Resolved', to: tabLink(INCIDENTS, 'Resolved'), real: true },
     ],
   },
   {
