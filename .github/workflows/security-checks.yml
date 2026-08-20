@@ -42,11 +42,18 @@ jobs:
         if: steps.has-dockerfile.outputs.exists == 'true'
         run: docker build -t local-scan-target:${{ github.sha }} .
 
+      # scanners: vuln only -- secret detection is gitleaks' job (above).
+      # Running both here flagged UI placeholder copy (a GCP-key JSON
+      # example in an account-connect form) as a "leaked" credential
+      # purely from key-name shape, with no way to allowlist it cleanly
+      # since the bundled JS filename is content-hashed and changes every
+      # build.
       - name: Container scan
         if: steps.has-dockerfile.outputs.exists == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: local-scan-target:${{ github.sha }}
+          scanners: vuln
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
