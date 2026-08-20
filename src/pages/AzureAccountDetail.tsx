@@ -9,9 +9,9 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../lib/toast';
-import { api, ApiError, type AzureConnection, type CloudResource } from '../lib/api';
+import { api, ApiError, type AzureConnection, type CloudResource, type ValidationRun, type PermissionCheckResult, type AzureIdentitySummary } from '../lib/api';
 
-const TABS = ['Overview', 'Resources', 'Cost'] as const;
+const TABS = ['Overview', 'Resources', 'Cost', 'Permissions'] as const;
 type Tab = typeof TABS[number];
 
 function money(n: number): string {
@@ -19,13 +19,17 @@ function money(n: number): string {
 }
 
 /**
- * Three tabs, not AwsAccountDetail.tsx's eight — azure-accounts-api has no
- * permissions/sync-history/recommendations/activity endpoints yet (only
- * accounts + discovery + cost), same "only show what's real" reasoning as
- * GcpProjectDetail.tsx. No remediation actions either: connector-azure has
- * no remediation routes built. The Cost tab is real — Azure Cost Management
- * gives per-service granularity directly, no CUR-equivalent ingestion step
- * needed the way AWS's does.
+ * Four tabs, not AwsAccountDetail.tsx's eight — azure-accounts-api still has
+ * no sync-history/recommendations/activity endpoints (only accounts +
+ * discovery + cost + permissions), same "only show what's real" reasoning as
+ * GcpProjectDetail.tsx. Permissions is real (routes/permissions.ts — ARM Get
+ * Subscription identity check plus Virtual Machines/Storage/SQL/AKS/Key
+ * Vault/Role Assignments read probes), mirroring GcpProjectDetail.tsx's tab
+ * exactly except for AzureIdentitySummary's subscription id+name shape. No
+ * remediation actions either: connector-azure has no remediation routes
+ * built. The Cost tab is real — Azure Cost Management gives per-service
+ * granularity directly, no CUR-equivalent ingestion step needed the way
+ * AWS's does.
  */
 export function AzureAccountDetail() {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +46,10 @@ export function AzureAccountDetail() {
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
   const [costSyncError, setCostSyncError] = useState<string | null>(null);
+  const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
+  const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
+  const [azureIdentity, setAzureIdentity] = useState<AzureIdentitySummary | null>(null);
+  const [validating, setValidating] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -60,6 +68,34 @@ export function AzureAccountDetail() {
     if (!id || tab !== 'Cost') return;
     void api.getAzureAccountCost(id).then(setAccountCost);
   }, [tab, id]);
+
+  const loadPermissions = useCallback(async () => {
+    if (!id) return;
+    const res = await api.getAzureAccountPermissions(id);
+    setPermissionRun(res.run);
+    setPermissionChecks(res.checks);
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || tab !== 'Permissions') return;
+    void loadPermissions();
+  }, [tab, id, loadPermissions]);
+
+  async function runValidation() {
+    if (!id) return;
+    setValidating(true);
+    try {
+      const result = await api.validateAzureAccountPermissions(id);
+      setAzureIdentity(result.identity);
+      toast(result.status === 'succeeded' ? 'Validated — identity confirmed' : 'Validation failed', result.status === 'succeeded' ? 'success' : 'error');
+      await loadPermissions();
+      await load();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Validation failed', 'error');
+    } finally {
+      setValidating(false);
+    }
+  }
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -124,6 +160,9 @@ export function AzureAccountDetail() {
         <div className="flex-1" />
         <button onClick={() => id && startDiscovery(id, 'azureAccounts')} disabled={syncing} title="Scans this subscription for VMs, storage accounts, SQL/Cosmos DBs, AKS clusters, networking, Key Vault, and more" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
+        </button>
+        <button onClick={() => void runValidation()} disabled={validating} title="Runs a real ARM Get Subscription identity check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role Assignments read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+          {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
       {sync?.status === 'running' && sync.total > 1 && (
@@ -270,6 +309,36 @@ export function AzureAccountDetail() {
                 {(!accountCost || Object.keys(accountCost.byService).length === 0) && <li className="py-1.5 text-sm text-slate-400">No cost data synced yet — click "Sync Cost from Azure" above.</li>}
               </ul>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'Permissions' && (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Latest Validation Run</h3>
+              {permissionRun && <Badge tone={permissionRun.status === 'succeeded' ? 'good' : permissionRun.status === 'running' ? 'warning' : 'critical'}>{permissionRun.status}</Badge>}
+            </div>
+            {permissionRun ? (
+              <div className="text-xs text-slate-400 flex flex-col gap-0.5">
+                {(azureIdentity?.subscriptionName ?? permissionRun.identity_arn) && <span className="font-mono">{azureIdentity?.subscriptionName ?? permissionRun.identity_arn}</span>}
+                <span>Started {new Date(permissionRun.started_at).toLocaleString()}{permissionRun.finished_at ? ` · Finished ${new Date(permissionRun.finished_at).toLocaleString()}` : ''}</span>
+                {permissionRun.error_message && <span className="text-red-500">{permissionRun.error_message}</span>}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">No validation run yet — click "Validate Permissions" above.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {permissionChecks.map(check => (
+              <div key={check.service} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 flex items-center gap-2 text-sm" title={check.detail}>
+                <span className={`h-2 w-2 rounded-full ${check.status === 'granted' ? 'bg-emerald-500' : check.status === 'not_applicable' ? 'bg-slate-400' : check.status === 'denied' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                <span className="text-slate-700 dark:text-slate-200">{check.label}</span>
+                {!check.verified && <span className="text-slate-400 text-xs" title="This check's exact Azure API shape hasn't been confirmed against a live subscription yet">unverified</span>}
+              </div>
+            ))}
+            {permissionChecks.length === 0 && <p className="text-sm text-slate-400">No permission checks recorded yet.</p>}
           </div>
         </div>
       )}

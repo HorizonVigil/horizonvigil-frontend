@@ -279,6 +279,17 @@ class ApiClient {
   getAzureAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost`); }
   syncAzureAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost/sync`); }
 
+  // Real Azure permission/connection validation (ARM Get Subscription identity
+  // check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role Assignments read
+  // probes) — same shape as validateGcpProjectPermissions/getGcpProjectPermissions
+  // above, Azure's own IdentitySummary since its identity is a subscription, not an ARN.
+  validateAzureAccountPermissions(id: string) {
+    return this.post<{ status: 'succeeded' | 'failed'; identity: AzureIdentitySummary | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permissions/validate`);
+  }
+  getAzureAccountPermissions(id: string) {
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permissions`);
+  }
+
   getAwsAccountsDashboard() {
     return this.get<AwsAccountsDashboard>('awsAccounts', '/api/aws-accounts/dashboard');
   }
@@ -935,6 +946,7 @@ export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
 export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }
 export interface IdentitySummary { arn: string | null; accountId: string | null; userId: string | null }
 export interface GcpIdentitySummary { email: string | null; scopes: string[] | null }
+export interface AzureIdentitySummary { subscriptionId: string | null; subscriptionName: string | null }
 export interface ValidationRun { id: string; run_type?: 'permission_validation' | 'discovery'; status: 'running' | 'succeeded' | 'failed'; identity_arn?: string | null; identity_account_id?: string | null; started_at: string; finished_at: string | null; error_message: string | null; triggered_by?: string | null }
 /** A step that's failed on at least half of the last 10 discovery runs — surfaced separately because a run with a step this consistently broken still legitimately shows "succeeded" overall (see discovery.ts's runFinalize: a small, stable failure rate isn't allowed to flip every run to a scary "error" badge), so this is the only place the pattern is visible without reading error_message on every row by hand. */
 export interface RecurringFailure { step: string; failureCount: number; runsChecked: number; lastMessage: string }
