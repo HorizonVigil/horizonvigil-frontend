@@ -37,7 +37,7 @@ export function toUnifiedAzureRow(c: AzureConnection): UnifiedAccountRow {
   return {
     id: c.id, provider: 'azure', name: c.connection_name ?? c.azure_subscription_id, identifier: c.azure_subscription_id,
     environment: c.environment, status: c.status, errorMessage: c.error_message,
-    connectionMethod: c.connection_method, connectionMethodLabel: 'Service principal',
+    connectionMethod: c.connection_method, connectionMethodLabel: c.azure_auth_type === 'client_certificate' ? 'Service principal (certificate)' : 'Service principal (secret)',
     // Azure has no per-connection default region -- every scanner is subscription-wide (see connector-azure's discovery.ts).
     region: 'global', resources: c.resource_summary?.totalResources ?? null, lastSync: c.last_sync_at, raw: c,
   };

@@ -259,7 +259,8 @@ class ApiClient {
   }
   getAzureAccount(id: string) { return this.get<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
   createAzureAccount(data: {
-    connectionName: string; azureSubscriptionId: string; azureTenantId: string; azureClientId: string; azureClientSecret: string;
+    connectionName: string; azureSubscriptionId: string; azureTenantId: string; azureClientId: string;
+    azureAuthType?: 'client_secret' | 'client_certificate'; azureClientSecret?: string; azureCertificatePem?: string; azurePrivateKeyPem?: string;
     environment?: string; projectId?: string;
   }) {
     // `_reconnected: true` means this subscription id was already connected
@@ -272,7 +273,7 @@ class ApiClient {
   }
   disconnectAzureAccount(id: string) { return this.delete<{ disconnected: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
   deleteAzureAccountPermanently(id: string) { return this.delete<{ deleted: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permanently`); }
-  updateAzureAccountCredentials(id: string, data: { azureClientSecret: string }) {
+  updateAzureAccountCredentials(id: string, data: { azureAuthType?: 'client_secret' | 'client_certificate'; azureClientSecret?: string; azureCertificatePem?: string; azurePrivateKeyPem?: string }) {
     return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}/credentials`, data);
   }
 
@@ -907,7 +908,7 @@ export interface GcpConnection {
 /** azure-accounts-api's equivalent of CloudConnection/GcpConnection — a service-principal-scoped subscription connection. No default_region/scan_regions: every Azure scanner is a subscription-wide ARM list call, not per-region. */
 export interface AzureConnection {
   id: string; org_id: string; project_id: string | null; provider: 'azure'; connection_method: 'service_principal';
-  azure_subscription_id: string; azure_tenant_id: string; azure_client_id: string; connection_name: string | null; masked_access_key: string | null;
+  azure_subscription_id: string; azure_tenant_id: string; azure_client_id: string; azure_auth_type: 'client_secret' | 'client_certificate'; connection_name: string | null; masked_access_key: string | null;
   status: 'pending' | 'connected' | 'error' | 'disconnected' | 'expired';
   environment: Environment;
   resource_summary: { totalResources?: number; categoryCounts?: Record<string, number> } | null;

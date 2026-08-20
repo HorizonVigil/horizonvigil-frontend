@@ -942,7 +942,12 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
   const [accessKeyId, setAccessKeyId] = useState('');
   const [secretAccessKey, setSecretAccessKey] = useState('');
   const [serviceAccountKeyJson, setServiceAccountKeyJson] = useState('');
+  const [azureAuthType, setAzureAuthType] = useState<'client_secret' | 'client_certificate'>(
+    row.provider === 'azure' && (row.raw as AzureConnection).azure_auth_type === 'client_certificate' ? 'client_certificate' : 'client_secret',
+  );
   const [azureClientSecret, setAzureClientSecret] = useState('');
+  const [azureCertificatePem, setAzureCertificatePem] = useState('');
+  const [azurePrivateKeyPem, setAzurePrivateKeyPem] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -954,7 +959,12 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
       if (row.provider === 'gcp') {
         await api.updateGcpAccountCredentials(row.id, { serviceAccountKeyJson });
       } else if (row.provider === 'azure') {
-        await api.updateAzureAccountCredentials(row.id, { azureClientSecret: azureClientSecret.trim() });
+        await api.updateAzureAccountCredentials(row.id, {
+          azureAuthType,
+          ...(azureAuthType === 'client_certificate'
+            ? { azureCertificatePem: azureCertificatePem.trim(), azurePrivateKeyPem: azurePrivateKeyPem.trim() }
+            : { azureClientSecret: azureClientSecret.trim() }),
+        });
       } else {
         await api.updateAccountCredentials(row.id, { accessKeyId, secretAccessKey });
       }
@@ -967,7 +977,11 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
     }
   }
 
-  const canSubmit = row.provider === 'gcp' ? !!serviceAccountKeyJson.trim() : row.provider === 'azure' ? !!azureClientSecret.trim() : !!accessKeyId && !!secretAccessKey;
+  const canSubmit = row.provider === 'gcp'
+    ? !!serviceAccountKeyJson.trim()
+    : row.provider === 'azure'
+      ? (azureAuthType === 'client_certificate' ? !!azureCertificatePem.trim() && !!azurePrivateKeyPem.trim() : !!azureClientSecret.trim())
+      : !!accessKeyId && !!secretAccessKey;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
@@ -985,11 +999,34 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
             <textarea value={serviceAccountKeyJson} onChange={e => setServiceAccountKeyJson(e.target.value)} rows={5} placeholder='{"type": "service_account", "project_id": "...", ...}' className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
           </label>
         ) : row.provider === 'azure' ? (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-500 dark:text-slate-400">Client Secret</span>
-            <input type="password" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="The secret's Value, not its Secret ID" />
+          <>
+            <div className="flex gap-1 text-sm">
+              {(['client_secret', 'client_certificate'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setAzureAuthType(t)} className={`px-3 py-1.5 rounded-md ${azureAuthType === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>
+                  {t === 'client_secret' ? 'Client Secret' : 'Client Certificate'}
+                </button>
+              ))}
+            </div>
+            {azureAuthType === 'client_secret' ? (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-500 dark:text-slate-400">Client Secret</span>
+                <input type="password" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="The secret's Value, not its Secret ID" />
+              </label>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-slate-500 dark:text-slate-400">Certificate (PEM)</span>
+                  <textarea value={azureCertificatePem} onChange={e => setAzureCertificatePem(e.target.value)} rows={4} placeholder="-----BEGIN CERTIFICATE-----" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-slate-500 dark:text-slate-400">Private Key (PEM)</span>
+                  <textarea value={azurePrivateKeyPem} onChange={e => setAzurePrivateKeyPem(e.target.value)} rows={4} placeholder="-----BEGIN PRIVATE KEY-----" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
+                  <span className="text-[11px] text-slate-400">PKCS8 format ("BEGIN PRIVATE KEY") — convert with `openssl pkcs8 -topk8 -nocrypt` if needed.</span>
+                </label>
+              </>
+            )}
             <span className="text-[11px] text-slate-400">Tenant ID and Client (application) ID can't be changed here — reconnect via "Add Cloud Account" if those need to change too.</span>
-          </label>
+          </>
         ) : (
           <>
             <label className="flex flex-col gap-1 text-sm">
