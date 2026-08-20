@@ -58,11 +58,27 @@ interface DataTableProps<T> {
   server?: ServerMode;
 }
 
+/**
+ * A cell whose first character is =/+/-/@ (or a tab/CR, which Excel treats
+ * the same way) is parsed as a formula by Excel/Sheets/Numbers on open, not
+ * as literal text -- CSV injection, real code execution risk in the
+ * opening app if the cell's content is attacker-influenceable (e.g. a
+ * cloud resource name or tag another org member set). Prefixing with a
+ * single quote forces spreadsheet apps to treat it as text; the quote
+ * itself isn't rendered. Every value flowing into a CSV export in this app
+ * should go through this, not just the tables that happen to render
+ * user-supplied strings today -- what ends up in a given column changes
+ * over time and this is cheap to apply everywhere.
+ */
+export function csvCellSafe(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 function toCsv<T>(columns: Column<T>[], rows: T[]): string {
   const header = columns.map(c => `"${c.header.replace(/"/g, '""')}"`).join(',');
   const lines = rows.map(row => columns.map(c => {
     const val = c.sortValue ? c.sortValue(row) : '';
-    return `"${String(val).replace(/"/g, '""')}"`;
+    return `"${csvCellSafe(String(val)).replace(/"/g, '""')}"`;
   }).join(','));
   return [header, ...lines].join('\n');
 }
