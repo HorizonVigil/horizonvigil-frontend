@@ -427,14 +427,14 @@ export function CloudAccounts() {
               <StatCard label="AWS Accounts" value={String(dashboard.totalAccounts)} />
               <StatCard label="GCP Projects" value={gcpProjectCount === null ? '…' : String(gcpProjectCount)} />
               <StatCard label="Azure Subscriptions" value={azureAccountCount === null ? '…' : String(azureAccountCount)} />
-              <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} />
-              <StatCard label="Failed" value={String(dashboard.failedAccounts)} />
-              <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} />
-              <StatCard label="Needing Attention" value={String(dashboard.accountsNeedingAttention)} />
+              <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} caption="AWS only" />
+              <StatCard label="Failed" value={String(dashboard.failedAccounts)} caption="AWS only" />
+              <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} caption="AWS only" />
+              <StatCard label="Needing Attention" value={String(dashboard.accountsNeedingAttention)} caption="AWS only" />
               <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
-              <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} />
+              <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} caption="AWS only" />
             </div>
-            <p className="text-xs text-slate-400 -mt-3">Dashboard aggregates (Healthy/Failed/Disconnected/Needing Attention/Rotation Due) reflect AWS accounts only. GCP projects and Azure subscriptions appear in Inventory alongside AWS accounts.</p>
+            <p className="text-xs text-slate-400 -mt-3">GCP projects and Azure subscriptions appear in Inventory alongside AWS accounts, and their own health can be seen there.</p>
 
             {dashboard.accountsNeedingAttentionList.length > 0 && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">

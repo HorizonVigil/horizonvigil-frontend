@@ -13,7 +13,7 @@ import { Icon } from '../components/icons';
 import {
   api, ApiError,
   type CloudConnection, type CloudResource, type CostSnapshot,
-  type PermissionCheckResult, type ValidationRun, type CostRecommendation, type ActivityEntry, type Favorite,
+  type PermissionCheckResult, type ValidationRun, type RecurringFailure, type CostRecommendation, type ActivityEntry, type Favorite,
   type RemediationActionType,
 } from '../lib/api';
 
@@ -80,6 +80,7 @@ export function AwsAccountDetail() {
   const [validating, setValidating] = useState(false);
   const [regions, setRegions] = useState<{ region: string; isDefault: boolean; resourceCount: number; lastScan: string | null }[]>([]);
   const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
+  const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [resourceSearch, setResourceSearch] = useState('');
@@ -140,7 +141,7 @@ export function AwsAccountDetail() {
     if (tab === 'Cost') void api.getAccountCost(id).then(setAccountCost);
     else if (tab === 'Permissions') void loadPermissions();
     else if (tab === 'Regions') void api.getAccountRegions(id).then(r => setRegions(r.regions));
-    else if (tab === 'Sync History') void api.getAccountSyncHistory(id).then(r => setSyncRuns(r.runs));
+    else if (tab === 'Sync History') void api.getAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
     else if (tab === 'Recommendations') void api.getAccountRecommendations(id).then(r => setRecommendations(r.recommendations));
     else if (tab === 'Activity') void api.getAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
   }, [tab, id, loadPermissions]);
@@ -542,7 +543,27 @@ export function AwsAccountDetail() {
       )}
 
       {tab === 'Sync History' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+        <div className="flex flex-col gap-4">
+          {recurringFailures.length > 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
+              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2 flex items-center gap-1.5">
+                <Icon name="alert-triangle" size={14} />
+                Recurring Failures
+              </h3>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+                These steps have failed consistently across recent runs. Each run below still shows "succeeded" overall — a small, stable failure rate doesn't flip the whole run to an error state — but a step failing this often is worth a closer look.
+              </p>
+              <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
+                {recurringFailures.map(f => (
+                  <li key={f.step} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                    <span className="font-mono text-xs text-amber-900 dark:text-amber-200">{f.step}</span>
+                    <span className="text-xs text-amber-700 dark:text-amber-400 shrink-0">{f.failureCount} of last {f.runsChecked} runs</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
@@ -570,6 +591,7 @@ export function AwsAccountDetail() {
               {syncRuns.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No sync activity yet.</td></tr>}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
