@@ -88,10 +88,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <button onClick={() => toggleFolder(folder.id)} className="w-4 text-slate-400 dark:text-slate-500 flex justify-center">
             <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
           </button>
-          <span className="truncate flex-1 flex items-center gap-1.5" onClick={() => setScope({ type: 'folder', id: folder.id, name: folder.name })}>
+          <button type="button" className="truncate flex-1 flex items-center gap-1.5 text-left" onClick={() => setScope({ type: 'folder', id: folder.id, name: folder.name })}>
             <Icon name="folder" size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
             {folder.name}
-          </span>
+          </button>
           <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">{projectCountByFolder.get(folder.id) ?? 0}</span>
         </div>
         {!isCollapsed && (childFolders.length > 0 || childProjects.length > 0) && (

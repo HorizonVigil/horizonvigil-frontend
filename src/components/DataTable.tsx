@@ -303,7 +303,23 @@ export function DataTable<T>({
             {pageRows.map(row => {
               const key = rowKey(row);
               return (
-                <tr key={key} className={`group border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`} onClick={() => onRowClick?.(row)}>
+                <tr
+                  key={key}
+                  className={`group border-b border-slate-100 dark:border-slate-800/60 last:border-0 ${onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 focus-visible:-outline-offset-2' : ''}`}
+                  onClick={() => onRowClick?.(row)}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onKeyDown={onRowClick ? (e => {
+                    // Only when the row itself is focused, not a nested
+                    // interactive child (e.g. the selection checkbox) —
+                    // otherwise Space would both toggle the checkbox via
+                    // its native behavior *and* trigger the row action.
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onRowClick(row);
+                    }
+                  }) : undefined}
+                >
                   {selectable && (
                     <td className="w-8 px-3 py-2" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedKeys?.has(key) ?? false} onChange={() => toggleRowSelection(key)} aria-label="Select row" />
@@ -338,7 +354,7 @@ export function DataTable<T>({
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
-              <button disabled={safePage === 0} onClick={() => goToPage(safePage - 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+              <button disabled={safePage === 0} onClick={() => goToPage(safePage - 1)} aria-label="Previous page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
               {pageWindow(safePage, totalPages).map((p, i) =>
                 p === 'ellipsis'
                   ? <span key={`e${i}`} className="px-1.5">…</span>
@@ -347,13 +363,14 @@ export function DataTable<T>({
                       key={p}
                       onClick={() => goToPage(p)}
                       aria-current={p === safePage ? 'page' : undefined}
-                      className={`min-w-[26px] px-2 py-1 rounded-md border tabular-nums ${p === safePage ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      aria-label={`Page ${p + 1}`}
+                      className={`min-w-[36px] min-h-[36px] px-2.5 py-2 rounded-md border tabular-nums ${p === safePage ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                     >
                       {p + 1}
                     </button>
                   )
               )}
-              <button disabled={safePage >= totalPages - 1} onClick={() => goToPage(safePage + 1)} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+              <button disabled={safePage >= totalPages - 1} onClick={() => goToPage(safePage + 1)} aria-label="Next page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
             </div>
           )}
         </div>
