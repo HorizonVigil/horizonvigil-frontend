@@ -359,7 +359,12 @@ export function CloudAccounts() {
           onValidate={() => void runValidation(r.id)}
           onSync={() => syncNow(r)}
           onToggleFavorite={() => void toggleFavorite(r.id, r.name)}
-          onUpdateCredentials={r.provider === 'aws' && r.connectionMethod === 'access_key' ? () => setUpdateCredsFor(r) : r.provider === 'gcp' && r.connectionMethod === 'service_account_key' ? () => setUpdateCredsFor(r) : undefined}
+          onUpdateCredentials={
+            (r.provider === 'aws' && r.connectionMethod === 'access_key') ||
+            (r.provider === 'gcp' && r.connectionMethod === 'service_account_key') ||
+            (r.provider === 'azure' && r.connectionMethod === 'service_principal')
+              ? () => setUpdateCredsFor(r) : undefined
+          }
           onDisconnect={() => void handleDisconnect(r)}
           onDelete={() => void handleDeletePermanently(r)}
         />
@@ -928,12 +933,16 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
  * Re-encrypts stored credentials in place — disconnect+re-add hits the
  * org_id+identifier unique constraint since disconnect is a soft
  * status-flip, not a row delete. Also the only way to rotate credentials at
- * all. Handles both AWS access keys and GCP service account key JSON.
+ * all. Handles AWS access keys, GCP service account key JSON, and Azure
+ * client secrets (Azure's PUT .../credentials only rotates the secret —
+ * tenant/client id changes go through the Connect wizard's reconnect path,
+ * same as AWS/GCP's identifiers are immutable here too).
  */
 function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccountRow; onClose: () => void; onUpdated: () => void }) {
   const [accessKeyId, setAccessKeyId] = useState('');
   const [secretAccessKey, setSecretAccessKey] = useState('');
   const [serviceAccountKeyJson, setServiceAccountKeyJson] = useState('');
+  const [azureClientSecret, setAzureClientSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -944,6 +953,8 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
     try {
       if (row.provider === 'gcp') {
         await api.updateGcpAccountCredentials(row.id, { serviceAccountKeyJson });
+      } else if (row.provider === 'azure') {
+        await api.updateAzureAccountCredentials(row.id, { azureClientSecret: azureClientSecret.trim() });
       } else {
         await api.updateAccountCredentials(row.id, { accessKeyId, secretAccessKey });
       }
@@ -956,7 +967,7 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
     }
   }
 
-  const canSubmit = row.provider === 'gcp' ? !!serviceAccountKeyJson.trim() : !!accessKeyId && !!secretAccessKey;
+  const canSubmit = row.provider === 'gcp' ? !!serviceAccountKeyJson.trim() : row.provider === 'azure' ? !!azureClientSecret.trim() : !!accessKeyId && !!secretAccessKey;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
@@ -972,6 +983,12 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Service Account Key (JSON)</span>
             <textarea value={serviceAccountKeyJson} onChange={e => setServiceAccountKeyJson(e.target.value)} rows={5} placeholder='{"type": "service_account", "project_id": "...", ...}' className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
+          </label>
+        ) : row.provider === 'azure' ? (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-500 dark:text-slate-400">Client Secret</span>
+            <input type="password" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="The secret's Value, not its Secret ID" />
+            <span className="text-[11px] text-slate-400">Tenant ID and Client (application) ID can't be changed here — reconnect via "Add Cloud Account" if those need to change too.</span>
           </label>
         ) : (
           <>
