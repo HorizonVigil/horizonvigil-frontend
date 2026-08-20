@@ -1023,6 +1023,8 @@ export interface VulnerabilityFinding {
   aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational'; cvss_score: number | null; title: string; description: string | null;
   compliance_frameworks: string[]; status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null; resource_arn: string | null;
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
+  /** Only present on the single-finding GET (list endpoints use a narrower select for payload size) -- the scanner's own untouched finding payload, shown as a fallback in the detail drawer for whatever isn't already surfaced in a named field above. */
+  raw_finding?: Record<string, unknown> | null;
 }
 // passRate is a 0-1 fraction (not a percentage) and null when total_checks
 // is 0 (nothing evaluated yet, not the same as a 0% pass rate) - multiply by
