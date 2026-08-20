@@ -1,9 +1,5 @@
 import { supabase } from './supabase';
 
-// Every one of the 15 domain Workers deploys as cloudops360-1-<domain>-api.<subdomain>
-// — subdomain is not sensitive (it's public in every Workers URL), so it's a safe default.
-const SUBDOMAIN = import.meta.env.VITE_WORKERS_SUBDOMAIN || 'thequietmind18.workers.dev';
-
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'azureAccounts' | 'resources' | 'customDashboards' | 'costManagement'
   | 'costOptimization' | 'vulnerabilityManagement' | 'containers' | 'monitoring' | 'alerts'
@@ -11,24 +7,30 @@ type Service =
 
 export { isBillingEnabled } from './featureFlags';
 
+// Every VITE_*_API_URL below is set explicitly in CI for every real
+// deployment (see .github/workflows/deploy.yml) -- there is deliberately
+// no fallback to a hardcoded external domain here. A service left
+// unconfigured resolves to '' (a same-origin, always-404 relative path)
+// rather than silently forwarding the current user's bearer token to some
+// other server, which is what a hardcoded fallback URL would do.
 const SERVICE_URLS: Record<Service, string> = {
-  overview: import.meta.env.VITE_OVERVIEW_API_URL || `https://cloudops360-1-overview-api.${SUBDOMAIN}`,
-  awsAccounts: import.meta.env.VITE_AWS_ACCOUNTS_API_URL || `https://cloudops360-1-aws-accounts-api.${SUBDOMAIN}`,
-  gcpAccounts: import.meta.env.VITE_GCP_ACCOUNTS_API_URL || `https://cloudops360-1-gcp-accounts-api.${SUBDOMAIN}`,
+  overview: import.meta.env.VITE_OVERVIEW_API_URL || '',
+  awsAccounts: import.meta.env.VITE_AWS_ACCOUNTS_API_URL || '',
+  gcpAccounts: import.meta.env.VITE_GCP_ACCOUNTS_API_URL || '',
   azureAccounts: import.meta.env.VITE_AZURE_ACCOUNTS_API_URL || '',
-  resources: import.meta.env.VITE_RESOURCES_API_URL || `https://cloudops360-1-resources-api.${SUBDOMAIN}`,
-  customDashboards: import.meta.env.VITE_CUSTOM_DASHBOARDS_API_URL || `https://cloudops360-1-custom-dashboards-api.${SUBDOMAIN}`,
-  costManagement: import.meta.env.VITE_COST_MANAGEMENT_API_URL || `https://cloudops360-1-cost-management-api.${SUBDOMAIN}`,
-  costOptimization: import.meta.env.VITE_COST_OPTIMIZATION_API_URL || `https://cloudops360-1-cost-optimization-api.${SUBDOMAIN}`,
-  vulnerabilityManagement: import.meta.env.VITE_VULNERABILITY_MANAGEMENT_API_URL || `https://cloudops360-1-vulnerability-management-api.${SUBDOMAIN}`,
-  containers: import.meta.env.VITE_CONTAINERS_API_URL || `https://cloudops360-1-containers-api.${SUBDOMAIN}`,
-  monitoring: import.meta.env.VITE_MONITORING_API_URL || `https://cloudops360-1-monitoring-api.${SUBDOMAIN}`,
-  alerts: import.meta.env.VITE_ALERTS_API_URL || `https://cloudops360-1-alerts-api.${SUBDOMAIN}`,
-  reports: import.meta.env.VITE_REPORTS_API_URL || `https://cloudops360-1-reports-api.${SUBDOMAIN}`,
-  users: import.meta.env.VITE_USERS_API_URL || `https://cloudops360-1-users-api.${SUBDOMAIN}`,
-  organizationManagement: import.meta.env.VITE_ORGANIZATION_MANAGEMENT_API_URL || `https://cloudops360-1-organization-management-api.${SUBDOMAIN}`,
-  automation: import.meta.env.VITE_AUTOMATION_API_URL || `https://cloudops360-1-automation-api.${SUBDOMAIN}`,
-  settings: import.meta.env.VITE_SETTINGS_API_URL || `https://cloudops360-1-settings-api.${SUBDOMAIN}`,
+  resources: import.meta.env.VITE_RESOURCES_API_URL || '',
+  customDashboards: import.meta.env.VITE_CUSTOM_DASHBOARDS_API_URL || '',
+  costManagement: import.meta.env.VITE_COST_MANAGEMENT_API_URL || '',
+  costOptimization: import.meta.env.VITE_COST_OPTIMIZATION_API_URL || '',
+  vulnerabilityManagement: import.meta.env.VITE_VULNERABILITY_MANAGEMENT_API_URL || '',
+  containers: import.meta.env.VITE_CONTAINERS_API_URL || '',
+  monitoring: import.meta.env.VITE_MONITORING_API_URL || '',
+  alerts: import.meta.env.VITE_ALERTS_API_URL || '',
+  reports: import.meta.env.VITE_REPORTS_API_URL || '',
+  users: import.meta.env.VITE_USERS_API_URL || '',
+  organizationManagement: import.meta.env.VITE_ORGANIZATION_MANAGEMENT_API_URL || '',
+  automation: import.meta.env.VITE_AUTOMATION_API_URL || '',
+  settings: import.meta.env.VITE_SETTINGS_API_URL || '',
   billing: import.meta.env.VITE_BILLING_API_URL || '',
   aiCopilot: import.meta.env.VITE_AI_COPILOT_API_URL || '',
   incidents: import.meta.env.VITE_INCIDENTS_API_URL || '',
