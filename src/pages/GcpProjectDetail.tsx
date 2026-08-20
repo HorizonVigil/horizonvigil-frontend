@@ -10,9 +10,9 @@ import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type GcpConnection, type CloudResource } from '../lib/api';
+import { api, ApiError, type GcpConnection, type CloudResource, type ValidationRun, type PermissionCheckResult, type GcpIdentitySummary } from '../lib/api';
 
-const TABS = ['Overview', 'Resources'] as const;
+const TABS = ['Overview', 'Resources', 'Permissions'] as const;
 type Tab = typeof TABS[number];
 
 /** GCP Compute Engine's own status values (RUNNING/TERMINATED/...), not AWS's lowercase 'running'/'stopped' — see gcp-accounts-api's scanners/compute.ts, which stores GCP's status verbatim. Only stop/start are wired yet (see gcpRemediation.ts's doc comment on why setMachineType/disk-delete equivalents of AWS's resize/delete_volume aren't built in this pass). */
@@ -25,12 +25,16 @@ function eligibleGcpRemediationAction(r: CloudResource): 'stop_instance' | 'star
 const GCP_ACTION_LABEL: Record<'stop_instance' | 'start_instance', string> = { stop_instance: 'Stop instance', start_instance: 'Start instance' };
 
 /**
- * Deliberately two tabs, not a mirror of AwsAccountDetail.tsx's eight — GCP
- * Phase 1 has no cost/permissions/sync-history/activity backend endpoints
- * (see gcp-accounts-api/src/routes — only accounts + discovery exist), so
- * this only shows what's real. The Resources tab reuses the existing
- * provider-agnostic api.getResourceInventory (cloud_resources has no
- * AWS-specific columns), same as AwsAccountDetail.tsx does.
+ * Deliberately three tabs, not a mirror of AwsAccountDetail.tsx's eight — GCP
+ * still has no cost/sync-history/activity backend endpoints (see
+ * gcp-accounts-api/src/routes), so this only shows what's real. Permissions
+ * is now real too (routes/permissions.ts — oauth2 tokeninfo identity check
+ * plus Compute/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager
+ * read probes), mirroring AwsAccountDetail.tsx's tab exactly except for
+ * GcpIdentitySummary's email+scopes shape instead of an ARN. The Resources
+ * tab reuses the existing provider-agnostic api.getResourceInventory
+ * (cloud_resources has no AWS-specific columns), same as AwsAccountDetail.tsx
+ * does.
  *
  * All hooks (including the two useMemo below) run unconditionally before
  * the `!connection` early return — see the exact bug this avoids, found
@@ -50,6 +54,10 @@ export function GcpProjectDetail() {
   const [resourceRegion, setResourceRegion] = useState('');
   const [resourceStatus, setResourceStatus] = useState('');
   const [remediating, setRemediating] = useState<string | null>(null);
+  const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
+  const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
+  const [gcpIdentity, setGcpIdentity] = useState<GcpIdentitySummary | null>(null);
+  const [validating, setValidating] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -63,6 +71,34 @@ export function GcpProjectDetail() {
 
   useEffect(() => { void load(); }, [load]);
   useSyncCompletion(id ? [id] : [], load);
+
+  const loadPermissions = useCallback(async () => {
+    if (!id) return;
+    const res = await api.getGcpProjectPermissions(id);
+    setPermissionRun(res.run);
+    setPermissionChecks(res.checks);
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (tab === 'Permissions') void loadPermissions();
+  }, [tab, id, loadPermissions]);
+
+  async function runValidation() {
+    if (!id) return;
+    setValidating(true);
+    try {
+      const result = await api.validateGcpProjectPermissions(id);
+      setGcpIdentity(result.identity);
+      toast(result.status === 'succeeded' ? 'Validated — identity confirmed' : 'Validation failed', result.status === 'succeeded' ? 'success' : 'error');
+      await loadPermissions();
+      await load();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Validation failed', 'error');
+    } finally {
+      setValidating(false);
+    }
+  }
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -124,6 +160,9 @@ export function GcpProjectDetail() {
         <div className="flex-1" />
         <button onClick={() => id && startDiscovery(id, 'gcpAccounts')} disabled={syncing} title="Scans this project for Compute Engine instances, Cloud Storage buckets, Cloud SQL instances, and GKE clusters" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
+        </button>
+        <button onClick={() => void runValidation()} disabled={validating} title="Runs a real oauth2 identity check plus Compute Engine/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+          {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
       {sync?.status === 'running' && sync.total > 1 && (
@@ -248,6 +287,36 @@ export function GcpProjectDetail() {
                 <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this project →</button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'Permissions' && (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Latest Validation Run</h3>
+              {permissionRun && <Badge tone={permissionRun.status === 'succeeded' ? 'good' : permissionRun.status === 'running' ? 'warning' : 'critical'}>{permissionRun.status}</Badge>}
+            </div>
+            {permissionRun ? (
+              <div className="text-xs text-slate-400 flex flex-col gap-0.5">
+                {(gcpIdentity?.email ?? permissionRun.identity_arn) && <span className="font-mono">{gcpIdentity?.email ?? permissionRun.identity_arn}</span>}
+                <span>Started {new Date(permissionRun.started_at).toLocaleString()}{permissionRun.finished_at ? ` · Finished ${new Date(permissionRun.finished_at).toLocaleString()}` : ''}</span>
+                {permissionRun.error_message && <span className="text-red-500">{permissionRun.error_message}</span>}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">No validation run yet — click "Validate Permissions" above.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {permissionChecks.map(check => (
+              <div key={check.service} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 flex items-center gap-2 text-sm" title={check.detail}>
+                <span className={`h-2 w-2 rounded-full ${check.status === 'granted' ? 'bg-emerald-500' : check.status === 'not_applicable' ? 'bg-slate-400' : check.status === 'denied' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                <span className="text-slate-700 dark:text-slate-200">{check.label}</span>
+                {!check.verified && <span className="text-slate-400 text-xs" title="This check's exact GCP API shape hasn't been confirmed against a live project yet">unverified</span>}
+              </div>
+            ))}
+            {permissionChecks.length === 0 && <p className="text-sm text-slate-400">No permission checks recorded yet.</p>}
           </div>
         </div>
       )}

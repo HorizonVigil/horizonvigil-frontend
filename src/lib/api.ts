@@ -237,6 +237,18 @@ class ApiClient {
     return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/credentials`, data);
   }
 
+  // Real GCP permission/connection validation (oauth2 tokeninfo identity check
+  // plus Compute/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager
+  // read probes) — same shape as validateAccountPermissions/getAccountPermissions
+  // above, GCP's own IdentitySummary since a GCP identity is an email + OAuth
+  // scopes, not an ARN.
+  validateGcpProjectPermissions(id: string) {
+    return this.post<{ status: 'succeeded' | 'failed'; identity: GcpIdentitySummary | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/permissions/validate`);
+  }
+  getGcpProjectPermissions(id: string) {
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/permissions`);
+  }
+
   // ── azure-accounts-api ────────────────────────────────────────────────────
   // Same one-service-principal-connects-a-subscription shape as GCP's service
   // account, kept as its own method set for the same reason GCP's is separate
@@ -922,6 +934,7 @@ export interface AwsAccountsDashboard {
 export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
 export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }
 export interface IdentitySummary { arn: string | null; accountId: string | null; userId: string | null }
+export interface GcpIdentitySummary { email: string | null; scopes: string[] | null }
 export interface ValidationRun { id: string; run_type?: 'permission_validation' | 'discovery'; status: 'running' | 'succeeded' | 'failed'; identity_arn?: string | null; identity_account_id?: string | null; started_at: string; finished_at: string | null; error_message: string | null; triggered_by?: string | null }
 /** A step that's failed on at least half of the last 10 discovery runs — surfaced separately because a run with a step this consistently broken still legitimately shows "succeeded" overall (see discovery.ts's runFinalize: a small, stable failure rate isn't allowed to flip every run to a scary "error" badge), so this is the only place the pattern is visible without reading error_message on every row by hand. */
 export interface RecurringFailure { step: string; failureCount: number; runsChecked: number; lastMessage: string }
