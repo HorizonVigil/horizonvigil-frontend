@@ -35,6 +35,19 @@ interface AuthContextType {
    * than this silently pretending to work.
    */
   signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
+  /**
+   * Calls Supabase's real Enterprise SSO API (SAML 2.0 federation with a
+   * customer's own IdP -- Okta/Entra ID/Ping, not the consumer OAuth
+   * providers above). Same honest-failure shape as signInWithOAuth: this
+   * redirects for real once a provider is registered for the given email
+   * domain, and Supabase itself returns a real "no SSO provider found for
+   * this domain" error until one is. Registering a domain's provider is a
+   * one-time setup step done per enterprise customer (via Supabase's
+   * project-level SSO configuration, which itself requires a paid add-on
+   * tier) -- this function only calls the login API, it doesn't configure
+   * anything.
+   */
+  signInWithSSO: (domain: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -104,8 +117,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // there's no local state to set here, execution doesn't continue.
   }, []);
 
+  const signInWithSSO = useCallback(async (domain: string) => {
+    const { data, error } = await supabase.auth.signInWithSSO({
+      domain,
+      options: { redirectTo: `${window.location.origin}/overview` },
+    });
+    if (error) throw error;
+    // Unlike signInWithOAuth (which always redirects on success),
+    // signInWithSSO returns a url to navigate to rather than redirecting
+    // itself -- Supabase's own API shape, not a choice made here.
+    if (data?.url) window.location.href = data.url;
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword, signInWithOAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword, signInWithOAuth, signInWithSSO }}>
       {children}
     </AuthContext.Provider>
   );
