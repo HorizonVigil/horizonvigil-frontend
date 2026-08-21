@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
-import { useAuth, type OAuthProvider } from '../../lib/auth';
+import { useAuth } from '../../lib/auth';
 import { AuthLayout, FormField } from './AuthLayout';
-import { OAuthButtons } from './OAuthButtons';
 
 const STRENGTH_LEVELS = [
   { label: 'Weak', color: 'bg-red-500' },
@@ -38,7 +37,7 @@ function PasswordStrengthMeter({ password }: { password: string }) {
 }
 
 export function Signup() {
-  const { signUp, signInWithOAuth } = useAuth();
+  const { signUp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // Mirrors Login.tsx -- a logged-out user deep-linking into the app can
@@ -52,18 +51,6 @@ export function Signup() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
-
-  async function handleOAuth(provider: OAuthProvider) {
-    setError(null);
-    setOauthLoading(provider);
-    try {
-      await signInWithOAuth(provider);
-    } catch (err) {
-      setError((err as Error).message || `Could not sign up with ${provider}`);
-      setOauthLoading(null);
-    }
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -106,7 +93,6 @@ export function Signup() {
       <p className="text-xs text-slate-500 dark:text-slate-400 mt-4">
         Already have an account? <Link to="/login" className="hover:underline text-brand-600 dark:text-brand-400">Sign in</Link>
       </p>
-      <OAuthButtons loadingProvider={oauthLoading} onSelect={handleOAuth} />
     </AuthLayout>
   );
 }

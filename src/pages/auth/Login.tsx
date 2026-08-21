@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
-import { useAuth, mfaStepUpRequired, type OAuthProvider } from '../../lib/auth';
+import { useAuth, mfaStepUpRequired } from '../../lib/auth';
 import { AuthLayout, FormField } from './AuthLayout';
-import { OAuthButtons } from './OAuthButtons';
 
 export function Login() {
-  const { signIn, signInWithOAuth } = useAuth();
+  const { signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // RequireAuth redirects here with the original destination in router
@@ -17,7 +16,6 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,17 +39,6 @@ export function Login() {
     }
   }
 
-  async function handleOAuth(provider: OAuthProvider) {
-    setError(null);
-    setOauthLoading(provider);
-    try {
-      await signInWithOAuth(provider);
-    } catch (err) {
-      setError((err as Error).message || `Could not sign in with ${provider}`);
-      setOauthLoading(null);
-    }
-  }
-
   return (
     <AuthLayout title="Sign in">
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -66,7 +53,6 @@ export function Login() {
         <Link to="/signup" className="hover:underline">Create an account</Link>
         <Link to="/forgot-password" className="hover:underline">Forgot password?</Link>
       </div>
-      <OAuthButtons loadingProvider={oauthLoading} onSelect={handleOAuth} />
     </AuthLayout>
   );
 }
