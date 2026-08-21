@@ -207,6 +207,13 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'AWS Config', to: tabLink(VULN, 'AWS Config'), real: true },
       { label: 'Container Images', to: tabLink(VULN, 'Container Images'), real: true },
       { label: 'Security Findings', to: tabLink(VULN, 'Security Findings'), real: true },
+      // real: false until confirmed live against real positive data (see
+      // this session's attack-path-engine plan) -- the tab and its backend
+      // route both exist and work, but the only two connected AWS test
+      // accounts have no GuardDuty/Security Hub/Access Analyzer findings to
+      // correlate, so "renders correctly" hasn't yet been distinguished
+      // from "actually surfaces a real attack path" against live data.
+      { label: 'Attack Paths', to: tabLink(VULN, 'Attack Paths'), real: false },
       { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true },
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
       { label: 'Scanners', to: tabLink(VULN, 'Scanners'), real: true },

@@ -546,6 +546,18 @@ class ApiClient {
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ComplianceBenchmark>>('vulnerabilityManagement', `/api/vulnerability-management/compliance${qs(params)}`);
   }
+  /**
+   * The correlation view -- resources with a public/cross-account exposure
+   * finding AND a separate critical/high vulnerability finding AND a
+   * confirmed over-privileged IAM role, all three converging on the same
+   * resource. Not paginated server-side: this is the intersection of three
+   * already-filtered sets (via the attack_path_findings RPC), not a raw
+   * table scan, so it isn't expected to produce a result set large enough
+   * to need it.
+   */
+  getAttackPaths() {
+    return this.get<{ items: AttackPath[] }>('vulnerabilityManagement', '/api/vulnerability-management/attack-paths');
+  }
 
   // Proxies to the cloudops360-scanner-* microservices (separate
   // cloudscape-security GCP project) via vulnerability-management-api's
@@ -1025,6 +1037,15 @@ export interface VulnerabilityFinding {
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
   /** Only present on the single-finding GET (list endpoints use a narrower select for payload size) -- the scanner's own untouched finding payload, shown as a fallback in the detail drawer for whatever isn't already surfaced in a named field above. */
   raw_finding?: Record<string, unknown> | null;
+}
+
+/** One row from attack_path_findings — a resource where exposure + vulnerability + over-privileged identity all converge, not a single finding. computed_severity is 'critical' when the identity is admin_equivalent, 'high' when merely broad. */
+export interface AttackPath {
+  resource_id: string; connection_id: string; resource_type_key: string; resource_name: string | null; category: string;
+  vulnerability_finding_id: string; vulnerability_severity: string; vulnerability_title: string;
+  exposure_finding_id: string; exposure_title: string;
+  principal_resource_id: string; principal_name: string | null; privilege_level: 'broad' | 'admin_equivalent';
+  computed_severity: 'critical' | 'high';
 }
 // passRate is a 0-1 fraction (not a percentage) and null when total_checks
 // is 0 (nothing evaluated yet, not the same as a 0% pass rate) - multiply by
