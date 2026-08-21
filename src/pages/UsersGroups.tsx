@@ -9,6 +9,7 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { useAuth } from '../lib/auth';
 import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
+import { fetchAllPages } from '../lib/fetchAllPages';
 import { MenuAccessTree } from '../components/MenuAccessTree';
 
 type MyPermissions = { role: Role; description: string; effectivePermissions: { role: Role; description: string } };
@@ -118,11 +119,21 @@ export function UsersGroups() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Every connected account across all three clouds, paginated to
+  // completion (not a single limit:1000 fetch, which silently clamped to
+  // the server's 200-per-request cap and also never included Azure at
+  // all) -- scoping a user/role/resource grant to an account past #200 or
+  // to any Azure subscription was previously impossible from this picker.
   useEffect(() => {
-    void Promise.all([api.getAccounts({ limit: 1000 }), api.getGcpAccounts({ limit: 1000 })]).then(([aws, gcp]) => {
+    void Promise.all([
+      fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
+      fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
+      fetchAllPages((page, limit) => api.getAzureAccounts({ page, limit })),
+    ]).then(([aws, gcp, azure]) => {
       setConnections([
-        ...aws.items.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.aws_account_id} (AWS)` })),
-        ...gcp.items.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.gcp_project_id} (GCP)` })),
+        ...aws.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.aws_account_id} (AWS)` })),
+        ...gcp.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.gcp_project_id} (GCP)` })),
+        ...azure.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.azure_subscription_id} (Azure)` })),
       ]);
     });
   }, []);

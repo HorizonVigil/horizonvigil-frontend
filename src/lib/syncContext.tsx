@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { api, type CloudAccountService } from './api';
 import { useAuth } from './auth';
+import { fetchAllPages } from './fetchAllPages';
 
 export interface SyncState {
   status: 'running' | 'done' | 'error';
@@ -128,25 +129,29 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     setAutoSyncStatus('checking');
     setAutoSyncMessage('Checking for accounts that need syncing…');
     try {
-      // Fetch all connected accounts (AWS + GCP + Azure)
+      // Fetch every connected account (AWS + GCP + Azure), paginated to
+      // completion via fetchAllPages -- a single limit:200 fetch used to
+      // silently stop at the server's per-request cap, meaning any account
+      // past #200 on one cloud was permanently excluded from auto-sync with
+      // no error or indication anything was missing.
       const [awsRes, gcpRes, azureRes] = await Promise.allSettled([
-        api.getAccounts({ limit: 200 }),
-        api.getGcpAccounts({ limit: 200 }),
-        api.getAzureAccounts({ limit: 200 }),
+        fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
+        fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
+        fetchAllPages((page, limit) => api.getAzureAccounts({ page, limit })),
       ]);
       const accounts: { id: string; lastSync: string | null; provider: 'aws' | 'gcp' | 'azure'; name: string }[] = [];
       if (awsRes.status === 'fulfilled') {
-        for (const a of awsRes.value.items) {
+        for (const a of awsRes.value) {
           accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'aws', name: a.connection_name ?? a.aws_account_id });
         }
       }
       if (gcpRes.status === 'fulfilled') {
-        for (const a of gcpRes.value.items) {
+        for (const a of gcpRes.value) {
           accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'gcp', name: a.connection_name ?? a.gcp_project_id });
         }
       }
       if (azureRes.status === 'fulfilled') {
-        for (const a of azureRes.value.items) {
+        for (const a of azureRes.value) {
           accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'azure', name: a.connection_name ?? a.azure_subscription_id });
         }
       }

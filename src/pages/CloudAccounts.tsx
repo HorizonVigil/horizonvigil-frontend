@@ -22,6 +22,7 @@ import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
+import { fetchAllPages } from '../lib/fetchAllPages';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -34,15 +35,26 @@ import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRo
 // Dashboard; Cross-Account Roles folds into an Inventory filter; Credentials
 // moves to the per-row "..." menu and the Account Detail page.
 //
-// Inventory is the one tab that's genuinely multi-cloud: it merges AWS
-// accounts and GCP projects into a single table (client-side, since the two
-// backends paginate independently and the realistic account count per org is
-// low enough that this doesn't need server-side paging). Dashboard,
-// Organizations, Regions, Sync Center, and Reports stay AWS-only in their
-// data — gcp-accounts-api has no dashboard/organizations/regions/sync-status/
-// reports endpoints yet (only accounts CRUD + discovery), and fabricating
-// numbers for a tab GCP has no backend behind would violate this codebase's
-// own "never ship a tab with nothing real behind it" rule.
+// Inventory is the one tab that's genuinely multi-cloud. It used to merge
+// AWS/GCP/Azure into one client-side table on the assumption that "the
+// realistic account count per org is low enough this doesn't need
+// server-side paging" -- false at real enterprise scale (thousands of
+// accounts per cloud), and the merged fetch silently truncated at the
+// server's per-request cap with no indication anything was missing past
+// row 200. Now: filtering to one specific provider switches to that
+// provider's own real, fully paginated server-side list (DataTable's
+// `server` mode) -- unlimited access to every account on that cloud, not
+// just the first page. The "All" merged view stays a bounded, honestly
+// labeled snapshot (the first page from each cloud) rather than either
+// silently truncating or looping every page from every provider into one
+// client array, which would just relocate the same problem into a multi-MB
+// browser payload on every page load. See the disclosure banner rendered
+// in that mode. Dashboard, Organizations, Regions, Sync Center, and Reports
+// stay AWS-only in their data — gcp-accounts-api has no dashboard/
+// organizations/regions/sync-status/reports endpoints yet (only accounts
+// CRUD + discovery), and fabricating numbers for a tab GCP has no backend
+// behind would violate this codebase's own "never ship a tab with nothing
+// real behind it" rule.
 const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports'] as const;
 type Tab = typeof TABS[number];
 
@@ -121,14 +133,19 @@ export function CloudAccounts() {
     }
   }
 
-  // Inventory search/filter/bulk/pagination state — client-side, since the
-  // merged table combines two independently-paginated backends.
+  // Inventory search/filter/bulk/pagination state. When a specific provider
+  // is selected, `page`/`pageSize` drive real server-side pagination against
+  // that provider's own API (DataTable's `server` mode) via `providerTotal`
+  // (the real total from that API's `pagination.total`, not a client count).
+  // In "All" mode there's no single paginated source to drive -- see
+  // `loadInventory` below for what that view fetches instead.
   const [search, setSearchRaw] = useState('');
   const [statusFilter, setStatusFilterRaw] = useState('');
   const [environmentFilter, setEnvironmentFilterRaw] = useState('');
   const [providerFilter, setProviderFilterRaw] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSizeRaw] = useState(50);
+  const [providerTotal, setProviderTotal] = useState(0);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inventoryLoading, setInventoryLoading] = useState(true);
@@ -157,19 +174,40 @@ export function CloudAccounts() {
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
     try {
-      const [awsRes, gcpRes, azureRes] = await Promise.all([
-        api.getAccounts({ limit: 1000 }),
-        api.getGcpAccounts({ limit: 1000 }),
-        api.getAzureAccounts({ limit: 1000 }),
-      ]);
-      setAwsConnections(awsRes.items);
-      setGcpConnections(gcpRes.items);
-      setAzureConnections(azureRes.items);
+      const apiFilters = { status: statusFilter || undefined, environment: environmentFilter || undefined, search: search || undefined };
+      if (providerFilter) {
+        // A specific provider is selected — real server-side pagination
+        // against that provider's own API, so `page`/`pageSize` reach every
+        // account on that cloud, not just the first 200.
+        const res = providerFilter === 'gcp' ? await api.getGcpAccounts({ ...apiFilters, page, limit: pageSize })
+          : providerFilter === 'azure' ? await api.getAzureAccounts({ ...apiFilters, page, limit: pageSize })
+          : await api.getAccounts({ ...apiFilters, page, limit: pageSize });
+        setAwsConnections(providerFilter === 'aws' ? res.items as CloudConnection[] : []);
+        setGcpConnections(providerFilter === 'gcp' ? res.items as GcpConnection[] : []);
+        setAzureConnections(providerFilter === 'azure' ? res.items as AzureConnection[] : []);
+        setProviderTotal(res.pagination.total);
+      } else {
+        // "All" — a bounded, honestly-labeled snapshot (the first `pageSize`
+        // matching accounts per cloud), not a silent truncation and not a
+        // full 3-way fetch-every-page loop (which would just relocate the
+        // multi-MB-payload problem raising the old client limit didn't
+        // solve). `providerTotal` here is still the real combined count
+        // across all three clouds — used to disclose how much is hidden.
+        const [awsRes, gcpRes, azureRes] = await Promise.all([
+          api.getAccounts({ ...apiFilters, page: 1, limit: pageSize }),
+          api.getGcpAccounts({ ...apiFilters, page: 1, limit: pageSize }),
+          api.getAzureAccounts({ ...apiFilters, page: 1, limit: pageSize }),
+        ]);
+        setAwsConnections(awsRes.items);
+        setGcpConnections(gcpRes.items);
+        setAzureConnections(azureRes.items);
+        setProviderTotal(awsRes.pagination.total + gcpRes.pagination.total + azureRes.pagination.total);
+      }
     } finally {
       setInventoryLoading(false);
       setInventoryLoadedOnce(true);
     }
-  }, []);
+  }, [providerFilter, statusFilter, environmentFilter, search, page, pageSize]);
 
   useEffect(() => { void loadInventory(); }, [loadInventory, refreshToken]);
   // Test-connection state keeps running in the background (see syncContext.tsx)
@@ -195,21 +233,12 @@ export function CloudAccounts() {
     }
   }, [tab, refreshToken]);
 
+  // Status/environment/search/provider filters are all applied server-side
+  // now (see loadInventory) -- awsConnections/gcpConnections/azureConnections
+  // already only hold matching rows, so no further client-side filtering is
+  // needed here. In provider-specific mode this is exactly the current page;
+  // in "All" mode it's the bounded per-cloud snapshot described above.
   const allRows = useMemo(() => [...awsConnections.map(toUnifiedRow), ...gcpConnections.map(toUnifiedGcpRow), ...azureConnections.map(toUnifiedAzureRow)], [awsConnections, gcpConnections, azureConnections]);
-
-  const filtered = useMemo(() => allRows.filter(r => {
-    if (statusFilter && r.status !== statusFilter) return false;
-    if (environmentFilter && r.environment !== environmentFilter) return false;
-    if (providerFilter && r.provider !== providerFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!r.name.toLowerCase().includes(q) && !r.identifier.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  }), [allRows, statusFilter, environmentFilter, providerFilter, search]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pageRows = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize]);
 
   function findRow(id: string): UnifiedAccountRow | undefined {
     return allRows.find(r => r.id === id);
@@ -272,16 +301,38 @@ export function CloudAccounts() {
   async function exportExcel() {
     setExportingExcel(true);
     try {
+      // Loops the real API to completion (respecting the active filters)
+      // rather than exporting whatever's currently loaded in the table --
+      // that used to be the same client-truncated array the table itself was
+      // capped to, so the tooltip's "every matching account" claim was false
+      // past 200 accounts. Provider-filtered exports hit just that one
+      // provider's API; "All" exports all three, same filters applied to each.
+      const apiFilters = { status: statusFilter || undefined, environment: environmentFilter || undefined, search: search || undefined };
+      let rows: UnifiedAccountRow[];
+      if (providerFilter === 'gcp') {
+        rows = (await fetchAllPages((p, limit) => api.getGcpAccounts({ ...apiFilters, page: p, limit }))).map(toUnifiedGcpRow);
+      } else if (providerFilter === 'azure') {
+        rows = (await fetchAllPages((p, limit) => api.getAzureAccounts({ ...apiFilters, page: p, limit }))).map(toUnifiedAzureRow);
+      } else if (providerFilter === 'aws') {
+        rows = (await fetchAllPages((p, limit) => api.getAccounts({ ...apiFilters, page: p, limit }))).map(toUnifiedRow);
+      } else {
+        const [aws, gcp, azure] = await Promise.all([
+          fetchAllPages((p, limit) => api.getAccounts({ ...apiFilters, page: p, limit })),
+          fetchAllPages((p, limit) => api.getGcpAccounts({ ...apiFilters, page: p, limit })),
+          fetchAllPages((p, limit) => api.getAzureAccounts({ ...apiFilters, page: p, limit })),
+        ]);
+        rows = [...aws.map(toUnifiedRow), ...gcp.map(toUnifiedGcpRow), ...azure.map(toUnifiedAzureRow)];
+      }
       downloadExcel(
         'cloud-accounts-inventory',
         'Cloud Accounts',
         ['Name', 'Provider', 'Account / Project ID', 'Environment', 'Status', 'Connection Method', 'Region', 'Resources', 'Last Sync'],
-        filtered.map(r => [
+        rows.map(r => [
           r.name, r.provider.toUpperCase(), r.identifier, r.environment, r.status,
           r.connectionMethodLabel, r.region, r.resources ?? 0, r.lastSync ?? 'Never',
         ]),
       );
-      toast(`Exported ${filtered.length.toLocaleString()} account${filtered.length === 1 ? '' : 's'} to Excel`, 'success');
+      toast(`Exported ${rows.length.toLocaleString()} account${rows.length === 1 ? '' : 's'} to Excel`, 'success');
     } finally {
       setExportingExcel(false);
     }
@@ -576,7 +627,11 @@ export function CloudAccounts() {
             {(search || statusFilter || environmentFilter || providerFilter) && (
               <button onClick={() => { setSearch(''); setStatusFilter(''); setEnvironmentFilter(''); setProviderFilter(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
-            <span className="text-xs text-slate-400 pb-2 ml-auto">{filtered.length.toLocaleString()} account{filtered.length === 1 ? '' : 's'} total</span>
+            <span className="text-xs text-slate-400 pb-2 ml-auto">
+              {providerFilter
+                ? `${providerTotal.toLocaleString()} account${providerTotal === 1 ? '' : 's'} total`
+                : `${providerTotal.toLocaleString()} matching account${providerTotal === 1 ? '' : 's'} across all clouds`}
+            </span>
             <button onClick={() => void exportExcel()} disabled={exportingExcel} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 mb-0" title="Exports every matching account, not just this page">
               {exportingExcel ? 'Exporting…' : 'Export Excel'}
             </button>
@@ -609,35 +664,30 @@ export function CloudAccounts() {
             ))}
           </div>
 
+          {!providerFilter && providerTotal > allRows.length && (
+            <div className="mb-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+              Showing the first {allRows.length.toLocaleString()} of {providerTotal.toLocaleString()} matching accounts across all clouds — filter by provider above to see the complete list for one cloud.
+            </div>
+          )}
+
           {inventoryLoading && !inventoryLoadedOnce ? (
             <TableSkeleton rows={8} cols={8} />
           ) : (
             <DataTable
               columns={columns}
-              rows={pageRows}
+              rows={allRows}
               rowKey={r => r.id}
-              pageSize={Math.max(pageSize, 1)}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZES}
               onRowClick={r => navigate(`/cloud-accounts/${r.id}`)}
               emptyMessage={allRows.length === 0 && !search && !statusFilter && !environmentFilter && !providerFilter ? 'No cloud accounts connected yet. Click "+ Add Account" to connect your first one.' : 'No accounts match these filters.'}
+              server={providerFilter ? {
+                page, pageSize, total: providerTotal,
+                loading: inventoryLoading,
+                onPageChange: setPage,
+                onPageSizeChange: setPageSize,
+              } : undefined}
             />
-          )}
-
-          {filtered.length > 0 && (
-            <div className="flex items-center justify-between mt-3 text-xs text-slate-500 dark:text-slate-400">
-              <div className="flex items-center gap-2">
-                <span>Rows per page</span>
-                <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-xs">
-                  {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-3">
-                <span>Page {page} of {totalPages} · {filtered.length.toLocaleString()} total</span>
-                <div className="flex gap-1">
-                  <button disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
-                  <button disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))} className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
-                </div>
-              </div>
-            </div>
           )}
         </>
       )}
@@ -652,9 +702,9 @@ export function CloudAccounts() {
             Connect an AWS account (via a cross-account IAM role or access keys), a GCP project (via a service account key or impersonation), or an Azure subscription (via a service principal). Each wizard walks through least-privilege permissions, region selection, and an initial connection check.
           </p>
           <button onClick={() => setChooserOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2.5">Start Onboarding</button>
-          {filtered.length > 0 && (
+          {providerTotal > 0 && (
             <p className="text-xs text-slate-400 mt-6">
-              {allRows.length.toLocaleString()} account{allRows.length === 1 ? '' : 's'} already connected — see{' '}
+              {providerTotal.toLocaleString()} account{providerTotal === 1 ? '' : 's'} already connected — see{' '}
               <button onClick={() => setTab('Inventory')} className="text-brand-600 dark:text-brand-400 hover:underline">Account Inventory</button> to manage them.
             </p>
           )}

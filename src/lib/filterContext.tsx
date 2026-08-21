@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, type React
 import { api } from './api';
 import { useAuth } from './auth';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from './unifiedAccounts';
+import { fetchAllPages } from './fetchAllPages';
 
 export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd' | 'custom';
 
@@ -37,10 +38,11 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // by every page that wants an Account filter — every page reads the same
   // list, and it refetches whenever something bumps refreshToken (e.g. the
   // FilterBar's Refresh button, or connecting/disconnecting an account).
-  // Both providers, merged client-side — same reasoning as CloudAccounts.tsx's
-  // Inventory table (gcp-accounts-api paginates independently, and the
-  // realistic per-org account count is low enough this doesn't need
-  // server-side merging).
+  // All three providers, each paginated to completion via fetchAllPages
+  // (not a single limit:200 fetch, which used to silently truncate any org
+  // past 200 accounts on one cloud with no indication anything was missing)
+  // then merged client-side — this dropdown needs the real full list since
+  // filtering to an account past #200 previously had no way to even find it.
   // allSettled, not all — a hiccup in one provider's API (e.g. gcp-accounts-api
   // briefly unavailable) must not blank out the other provider's accounts too.
   useEffect(() => {
@@ -49,10 +51,14 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     // these two authenticated-only calls and ate a 401, for no purpose
     // (there's no connections list to show until someone's logged in).
     if (!isAuthenticated) { setConnections([]); return; }
-    void Promise.allSettled([api.getAccounts({ limit: 200 }), api.getGcpAccounts({ limit: 200 }), api.getAzureAccounts({ limit: 200 })]).then(([aws, gcp, azure]) => {
-      const awsRows = aws.status === 'fulfilled' ? aws.value.items.map(toUnifiedRow) : [];
-      const gcpRows = gcp.status === 'fulfilled' ? gcp.value.items.map(toUnifiedGcpRow) : [];
-      const azureRows = azure.status === 'fulfilled' ? azure.value.items.map(toUnifiedAzureRow) : [];
+    void Promise.allSettled([
+      fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
+      fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
+      fetchAllPages((page, limit) => api.getAzureAccounts({ page, limit })),
+    ]).then(([aws, gcp, azure]) => {
+      const awsRows = aws.status === 'fulfilled' ? aws.value.map(toUnifiedRow) : [];
+      const gcpRows = gcp.status === 'fulfilled' ? gcp.value.map(toUnifiedGcpRow) : [];
+      const azureRows = azure.status === 'fulfilled' ? azure.value.map(toUnifiedAzureRow) : [];
       setConnections([...awsRows, ...gcpRows, ...azureRows]);
     });
   }, [refreshToken, isAuthenticated]);
