@@ -1031,7 +1031,7 @@ export interface RemediationRequest {
 }
 
 export interface VulnerabilityFinding {
-  id: string; connection_id: string; resource_id: string | null; finding_source: 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'aws_config' | 'trusted_advisor' | 'gcp_scc' | 'trivy';
+  id: string; connection_id: string; resource_id: string | null; finding_source: 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'iam_access_analyzer_unused' | 'aws_config' | 'trusted_advisor' | 'gcp_scc' | 'trivy';
   aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational'; cvss_score: number | null; title: string; description: string | null;
   compliance_frameworks: string[]; status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null; resource_arn: string | null;
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
