@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api } from './api';
 import { useAuth } from './auth';
+import { useOrg } from './orgContext';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from './unifiedAccounts';
 import { fetchAllPages } from './fetchAllPages';
 
@@ -26,6 +27,18 @@ const FilterContext = createContext<FilterContextType | null>(null);
 
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
+  // OrgProvider (a parent of this provider — see App.tsx) resolves which org
+  // is active via its own async bootstrap call and only then calls
+  // api.setCurrentOrgId(), which is what makes api.ts attach the X-Org-Id
+  // header every org-scoped call below needs. Gating on isAuthenticated
+  // alone raced ahead of that: this effect used to fire the instant login
+  // completed, before OrgProvider's own effect (mounted as a sibling-timed
+  // useEffect, not actually before this one) had set an org id yet, so the
+  // very first load after signing in intermittently 400'd with "Missing
+  // X-Org-Id header" on all three account fetches -- exactly the kind of
+  // failure a first-time visitor (or a demo audience watching a fresh login)
+  // would hit.
+  const { currentOrg } = useOrg();
   const [region, setRegion] = useState('all');
   const [account, setAccount] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangePreset>('30d');
@@ -50,7 +63,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     // routes -- without this guard, every anonymous visitor to "/" fired
     // these two authenticated-only calls and ate a 401, for no purpose
     // (there's no connections list to show until someone's logged in).
-    if (!isAuthenticated) { setConnections([]); return; }
+    // Also wait for OrgProvider to have actually picked an org -- see the
+    // comment on `currentOrg` above.
+    if (!isAuthenticated || !currentOrg) { setConnections([]); return; }
     void Promise.allSettled([
       fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
       fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
@@ -61,7 +76,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       const azureRows = azure.status === 'fulfilled' ? azure.value.map(toUnifiedAzureRow) : [];
       setConnections([...awsRows, ...gcpRows, ...azureRows]);
     });
-  }, [refreshToken, isAuthenticated]);
+  }, [refreshToken, isAuthenticated, currentOrg]);
 
   return (
     <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, setRegion, setAccount, setDateRange, refresh }}>

@@ -19,7 +19,7 @@ function money(n: number): string {
 }
 
 export function Overview() {
-  const { folders, projects } = useOrg();
+  const { folders, projects, currentOrg } = useOrg();
   const { region, dateRange, refreshToken } = useFilters();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,7 +41,16 @@ export function Overview() {
     try {
       const days = dateRangeToDays(dateRange);
       const from = new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const [dash, resourcesDash, costAnalytics, costForecast, activityRes, quickActionsRes, favoritesRes] = await Promise.all([
+      // allSettled, not all -- every backend service this page calls runs at
+      // Cloud Run min-instances=0 (see the deploy config), so a cold start on
+      // any single one of these 7 calls used to blank the ENTIRE dashboard
+      // behind one generic error, even when the other 6 had already come
+      // back with real data. The primary dashboard call (KPI stat cards + AI
+      // summary) is still treated as required -- there's no meaningful page
+      // to show without it -- but resource trend, cost, forecast, activity,
+      // quick actions, and favorites are independent widgets that should
+      // degrade on their own instead of taking the whole page down.
+      const [dashRes, resourcesRes, costRes, forecastRes, activityRes, quickActionsRes, favoritesRes] = await Promise.allSettled([
         api.getOverviewDashboard({ region }),
         api.getResourcesDashboard({ region, days }),
         api.getCostAnalytics({ region, from }),
@@ -50,14 +59,20 @@ export function Overview() {
         api.getQuickActions(),
         api.getFavorites(),
       ]);
-      setDashboard(dash);
-      setResourceTrend(resourcesDash.trend30d);
-      setTrendDays(resourcesDash.trendDays);
-      setCostByService(costAnalytics.byService);
-      setForecast(costForecast.projectedTotal);
-      setActivity(activityRes.items);
-      setQuickActions(quickActionsRes.actions);
-      setFavorites(favoritesRes.favorites);
+      if (dashRes.status === 'rejected') throw dashRes.reason;
+      setDashboard(dashRes.value);
+      if (resourcesRes.status === 'fulfilled') { setResourceTrend(resourcesRes.value.trend30d); setTrendDays(resourcesRes.value.trendDays); }
+      else console.error('Resource trend widget failed to load:', resourcesRes.reason);
+      if (costRes.status === 'fulfilled') setCostByService(costRes.value.byService);
+      else console.error('Cost-by-service widget failed to load:', costRes.reason);
+      if (forecastRes.status === 'fulfilled') setForecast(forecastRes.value.projectedTotal);
+      else console.error('Cost forecast widget failed to load:', forecastRes.reason);
+      if (activityRes.status === 'fulfilled') setActivity(activityRes.value.items);
+      else console.error('Recent activity widget failed to load:', activityRes.reason);
+      if (quickActionsRes.status === 'fulfilled') setQuickActions(quickActionsRes.value.actions);
+      else console.error('Quick actions widget failed to load:', quickActionsRes.reason);
+      if (favoritesRes.status === 'fulfilled') setFavorites(favoritesRes.value.favorites);
+      else console.error('Favorites widget failed to load:', favoritesRes.reason);
     } catch (err) {
       const message = friendlyErrorMessage(err, 'Failed to load the Overview dashboard.');
       setError(message);
@@ -67,7 +82,13 @@ export function Overview() {
     }
   }, [region, dateRange, toast]);
 
-  useEffect(() => { void load(); }, [load, refreshToken]);
+  // OrgProvider resolves the active org (and only then makes api.ts attach
+  // the X-Org-Id header every one of these calls needs) asynchronously after
+  // login -- without waiting for currentOrg, this fired the instant the
+  // Overview route mounted, before an org id existed yet, and every one of
+  // the 7 calls above 400'd with "Missing X-Org-Id header" on a fresh login
+  // (exactly what a first-time visitor or a demo audience would hit).
+  useEffect(() => { if (currentOrg) void load(); }, [load, refreshToken, currentOrg]);
 
   // The Overview submenu links to sections within this same page (Executive
   // Dashboard, Activity Timeline, Quick Actions, Favorites) rather than

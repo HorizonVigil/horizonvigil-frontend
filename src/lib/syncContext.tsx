@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { api, type CloudAccountService } from './api';
 import { useAuth } from './auth';
+import { useOrg } from './orgContext';
 import { fetchAllPages } from './fetchAllPages';
 
 export interface SyncState {
@@ -36,6 +37,12 @@ const SyncContext = createContext<SyncContextType | null>(null);
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
+  // See the matching comment in filterContext.tsx -- OrgProvider resolves
+  // the active org (and calls api.setCurrentOrgId(), which makes api.ts
+  // attach X-Org-Id) asynchronously after login, so gating this on
+  // isAuthenticated alone let the initial auto-sync sweep fire before an
+  // org id existed, 400ing on every account fetch it made.
+  const { currentOrg } = useOrg();
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const runningIds = useRef<Set<string>>(new Set());
   const [autoSyncStatus, setAutoSyncStatus] = useState<'idle' | 'checking' | 'syncing' | 'done' | 'error'>('idle');
@@ -123,7 +130,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     // SyncProvider is mounted at the app root, above the router -- including
     // the public marketing routes. Without this guard, every anonymous
     // visitor triggered these authenticated-only calls ~3s after page load.
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !currentOrg) return;
     if (syncingRef.current) return;
     syncingRef.current = true;
     setAutoSyncStatus('checking');
@@ -196,14 +203,20 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     } finally {
       syncingRef.current = false;
     }
-  }, [startDiscovery, isAuthenticated]);
+  }, [startDiscovery, isAuthenticated, currentOrg]);
 
-  // Initialize auto-sync on mount and schedule every 24 hours
+  // Initialize auto-sync once org context is actually ready, then schedule
+  // every 24 hours -- gating the one-shot `autoSyncInitRef` guard on mount
+  // alone (the original condition) let this fire and capture a `runAutoSync`
+  // closure built from a still-null `currentOrg`; since the guard only ever
+  // lets this body run once, that stale closure would silently no-op forever
+  // rather than actually retrying once the org became ready a moment later.
   useEffect(() => {
     if (autoSyncInitRef.current) return;
+    if (!isAuthenticated || !currentOrg) return;
     autoSyncInitRef.current = true;
 
-    // Run once on mount (checks if any account needs syncing now)
+    // Run once org context is ready (checks if any account needs syncing now)
     const initialDelay = setTimeout(() => {
       void runAutoSync();
     }, 3000); // Wait 3 seconds for the app to load
