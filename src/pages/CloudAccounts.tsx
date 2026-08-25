@@ -10,6 +10,7 @@ import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
 import { ConnectGcpProjectWizard } from '../components/ConnectGcpProjectWizard';
 import { ConnectAzureSubscriptionWizard } from '../components/ConnectAzureSubscriptionWizard';
 import { AddAccountChooser } from '../components/AddAccountChooser';
+import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
 import { useOrg } from '../lib/orgContext';
@@ -20,7 +21,7 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
-import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite } from '../lib/api';
+import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
 import { fetchAllPages } from '../lib/fetchAllPages';
 
@@ -55,7 +56,7 @@ import { fetchAllPages } from '../lib/fetchAllPages';
 // CRUD + discovery), and fabricating numbers for a tab GCP has no backend
 // behind would violate this codebase's own "never ship a tab with nothing
 // real behind it" rule.
-const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports'] as const;
+const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports', 'Identities'] as const;
 type Tab = typeof TABS[number];
 
 // This page's own tab values are shorter than navConfig.ts's sidebar labels
@@ -65,7 +66,10 @@ type Tab = typeof TABS[number];
 const TAB_TO_NAV_LABEL: Record<Tab, string> = {
   Dashboard: 'Dashboard', Inventory: 'Account Inventory', Onboarding: 'Account Onboarding',
   Organizations: 'Organizations', Regions: 'Regions', 'Sync Center': 'Sync Center', Reports: 'Reports',
+  Identities: 'Identities',
 };
+
+const IDENTITY_PRIVILEGE_TONE: Record<string, 'good' | 'warning' | 'critical'> = { scoped: 'good', broad: 'warning', admin_equivalent: 'critical' };
 
 const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'] as const;
 const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }, { value: 'azure', label: 'Azure' }] as const;
@@ -171,6 +175,21 @@ export function CloudAccounts() {
   const [updateCredsFor, setUpdateCredsFor] = useState<UnifiedAccountRow | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
 
+  // Identities tab (cloud_identities) — its own server-side pagination, same
+  // pattern as Inventory's provider-filtered path, since this list can be
+  // just as large as the account list itself (one row per IAM user/role).
+  const [identities, setIdentities] = useState<CloudIdentity[]>([]);
+  const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
+  const [identitiesTotal, setIdentitiesTotal] = useState(0);
+  const [identitiesLoading, setIdentitiesLoading] = useState(true);
+  const [identityPage, setIdentityPage] = useState(1);
+  const [identityPageSize, setIdentityPageSize] = useState(50);
+  const [identitySearch, setIdentitySearch] = useState('');
+  const [identityPrivilegeFilter, setIdentityPrivilegeFilter] = useState('');
+  const [identityHumanFilter, setIdentityHumanFilter] = useState<'' | 'true' | 'false'>('');
+  const [selectedIdentity, setSelectedIdentity] = useState<CloudIdentity | null>(null);
+  const [identityEdges, setIdentityEdges] = useState<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] } | null>(null);
+
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
     try {
@@ -232,6 +251,34 @@ export function CloudAccounts() {
       ]).finally(() => setSyncCenterLoaded(true));
     }
   }, [tab, refreshToken]);
+
+  const loadIdentities = useCallback(async () => {
+    setIdentitiesLoading(true);
+    try {
+      const [listRes, summaryRes] = await Promise.all([
+        api.getIdentities({
+          page: identityPage, limit: identityPageSize, search: identitySearch || undefined,
+          privilegeLevel: identityPrivilegeFilter || undefined,
+          isHuman: identityHumanFilter === '' ? undefined : identityHumanFilter === 'true',
+        }),
+        api.getIdentitySummary(),
+      ]);
+      setIdentities(listRes.items);
+      setIdentitiesTotal(listRes.pagination.total);
+      setIdentitySummary(summaryRes);
+    } finally {
+      setIdentitiesLoading(false);
+    }
+  }, [identityPage, identityPageSize, identitySearch, identityPrivilegeFilter, identityHumanFilter]);
+
+  useEffect(() => {
+    if (tab === 'Identities') void loadIdentities();
+  }, [tab, loadIdentities, refreshToken]);
+
+  useEffect(() => {
+    if (!selectedIdentity) { setIdentityEdges(null); return; }
+    void api.getIdentityEdges(selectedIdentity.id).then(setIdentityEdges);
+  }, [selectedIdentity]);
 
   // Status/environment/search/provider filters are all applied server-side
   // now (see loadInventory) -- awsConnections/gcpConnections/azureConnections
@@ -350,6 +397,22 @@ export function CloudAccounts() {
       setDownloadingReport(null);
     }
   }
+
+  const identityColumns: Column<CloudIdentity>[] = useMemo(() => [
+    { key: 'display_name', header: 'Identity', sticky: true, sortValue: r => r.display_name ?? r.native_id, render: r => (
+      <div className="flex flex-col">
+        <span className="text-slate-800 dark:text-slate-100 font-medium">{r.display_name ?? r.native_id}</span>
+        <span className="text-xs text-slate-400">{r.native_id}</span>
+      </div>
+    ) },
+    { key: 'identity_type', header: 'Type', sortValue: r => r.identity_type, render: r => <span className="capitalize">{r.identity_type.replace(/_/g, ' ')}</span> },
+    { key: 'is_human', header: 'Kind', sortValue: r => (r.is_human ? 'Human' : 'Non-human'), render: r => <Badge tone="neutral">{r.is_human ? 'Human' : 'Non-human'}</Badge> },
+    { key: 'privilege_level', header: 'Privilege', sortValue: r => r.privilege_level ?? '', render: r => r.privilege_level ? <Badge tone={IDENTITY_PRIVILEGE_TONE[r.privilege_level]}>{r.privilege_level.replace(/_/g, ' ')}</Badge> : <span className="text-slate-400">—</span> },
+    { key: 'mfa_enabled', header: 'MFA', sortValue: r => String(r.mfa_enabled), render: r => (
+      r.mfa_enabled === null ? <span className="text-slate-400">n/a</span> : <Badge tone={r.mfa_enabled ? 'good' : 'critical'}>{r.mfa_enabled ? 'Enabled' : 'Off'}</Badge>
+    ) },
+    { key: 'last_used_at', header: 'Last Used', sortValue: r => r.last_used_at ?? '', render: r => r.last_used_at ? new Date(r.last_used_at).toLocaleDateString() : <span className="text-slate-400">Never</span> },
+  ], []);
 
   async function runValidation(id: string, knownName?: string) {
     // knownName covers callers (like the Dashboard's Needing Attention list)
@@ -848,6 +911,88 @@ export function CloudAccounts() {
             </div>
           ))}
         </div>
+      )}
+
+      {tab === 'Identities' && (
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-slate-400 max-w-2xl">
+            One row per AWS IAM user or role, with privilege level, MFA status, and access-key staleness computed from each account's own credential report — AWS-only for now, GCP/Azure identity ingestion isn't built yet.
+          </p>
+          {identitySummary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Identities" value={String(identitySummary.total)} icon="users-2" />
+              <StatCard label="Admin-Equivalent" value={String(identitySummary.adminEquivalent)} icon="shield-alert" iconTone={identitySummary.adminEquivalent > 0 ? 'critical' : 'neutral'} />
+              <StatCard label="Broad Privilege" value={String(identitySummary.broad)} icon="alert-triangle" iconTone={identitySummary.broad > 0 ? 'warning' : 'neutral'} />
+              <StatCard label="Human, No MFA" value={String(identitySummary.humanWithoutMfa)} icon="lock" iconTone={identitySummary.humanWithoutMfa > 0 ? 'critical' : 'neutral'} />
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Privilege</span>
+            <button onClick={() => { setIdentityPrivilegeFilter(''); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!identityPrivilegeFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
+            {(['scoped', 'broad', 'admin_equivalent'] as const).map(level => (
+              <button key={level} onClick={() => { setIdentityPrivilegeFilter(level); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border capitalize transition-colors ${identityPrivilegeFilter === level ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{level.replace(/_/g, ' ')}</button>
+            ))}
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 ml-3 mr-1">Kind</span>
+            <button onClick={() => { setIdentityHumanFilter(''); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${identityHumanFilter === '' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
+            <button onClick={() => { setIdentityHumanFilter('true'); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${identityHumanFilter === 'true' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>Human</button>
+            <button onClick={() => { setIdentityHumanFilter('false'); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${identityHumanFilter === 'false' ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>Non-human</button>
+          </div>
+          {identitiesLoading && identities.length === 0 ? (
+            <TableSkeleton rows={8} cols={6} />
+          ) : (
+            <DataTable
+              columns={identityColumns}
+              rows={identities}
+              rowKey={r => r.id}
+              pageSizeOptions={PAGE_SIZES}
+              onRowClick={r => setSelectedIdentity(r)}
+              emptyMessage={identitiesTotal === 0 && !identitySearch && !identityPrivilegeFilter && !identityHumanFilter ? 'No identities found yet — run "Discover Resources" on a connected AWS account to populate this from its IAM users/roles.' : 'No identities match these filters.'}
+              server={{
+                page: identityPage, pageSize: identityPageSize, total: identitiesTotal,
+                search: identitySearch, loading: identitiesLoading,
+                onPageChange: setIdentityPage,
+                onPageSizeChange: n => { setIdentityPageSize(n); setIdentityPage(1); },
+                onSearchChange: q => { setIdentitySearch(q); setIdentityPage(1); },
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {selectedIdentity && (
+        <Modal open={!!selectedIdentity} onClose={() => setSelectedIdentity(null)} title={selectedIdentity.display_name ?? selectedIdentity.native_id}>
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><span className="text-xs text-slate-400 block">Type</span><span className="capitalize text-slate-700 dark:text-slate-200">{selectedIdentity.identity_type.replace(/_/g, ' ')}</span></div>
+              <div><span className="text-xs text-slate-400 block">Kind</span><span className="text-slate-700 dark:text-slate-200">{selectedIdentity.is_human ? 'Human' : 'Non-human'}</span></div>
+              <div><span className="text-xs text-slate-400 block">Privilege</span>{selectedIdentity.privilege_level ? <Badge tone={IDENTITY_PRIVILEGE_TONE[selectedIdentity.privilege_level]}>{selectedIdentity.privilege_level.replace(/_/g, ' ')}</Badge> : <span className="text-slate-400">—</span>}</div>
+              <div><span className="text-xs text-slate-400 block">MFA</span>{selectedIdentity.mfa_enabled === null ? <span className="text-slate-400">n/a</span> : <Badge tone={selectedIdentity.mfa_enabled ? 'good' : 'critical'}>{selectedIdentity.mfa_enabled ? 'Enabled' : 'Off'}</Badge>}</div>
+              <div><span className="text-xs text-slate-400 block">Last Used</span><span className="text-slate-700 dark:text-slate-200">{selectedIdentity.last_used_at ? new Date(selectedIdentity.last_used_at).toLocaleString() : 'Never'}</span></div>
+              <div><span className="text-xs text-slate-400 block">First Seen</span><span className="text-slate-700 dark:text-slate-200">{new Date(selectedIdentity.first_seen_at).toLocaleDateString()}</span></div>
+            </div>
+            {selectedIdentity.privilege_reasons && selectedIdentity.privilege_reasons.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs text-slate-400 block mb-1.5">Why this privilege level</span>
+                <ul className="list-disc list-inside text-sm text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">
+                  {selectedIdentity.privilege_reasons.map((reason, i) => <li key={i}>{reason}</li>)}
+                </ul>
+              </div>
+            )}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-400 block mb-1.5">Relationships</span>
+              {!identityEdges ? (
+                <p className="text-xs text-slate-400">Loading…</p>
+              ) : identityEdges.outbound.length === 0 && identityEdges.inbound.length === 0 ? (
+                <p className="text-xs text-slate-400">No relationships recorded — nothing scanned assumes this identity or is contained by it.</p>
+              ) : (
+                <ul className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                  {identityEdges.outbound.map(e => <li key={e.id}>Assumed by a resource — {e.relationship_type.toLowerCase()} ({Math.round(e.confidence * 100)}% confidence)</li>)}
+                  {identityEdges.inbound.map(e => <li key={e.id}>Contains/assumes another entity — {e.relationship_type.toLowerCase()} ({Math.round(e.confidence * 100)}% confidence)</li>)}
+                </ul>
+              )}
+            </div>
+          </div>
+        </Modal>
       )}
 
       <AddAccountChooser open={chooserOpen} onClose={() => setChooserOpen(false)} onChoose={openWizard} />

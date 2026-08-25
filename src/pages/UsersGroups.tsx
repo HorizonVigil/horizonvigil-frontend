@@ -8,7 +8,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { useAuth } from '../lib/auth';
-import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow } from '../lib/api';
+import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow, type AbacPolicyRow, type AbacCondition, type AbacTestResult, type ScimTokenSummary } from '../lib/api';
 import { fetchAllPages } from '../lib/fetchAllPages';
 import { MenuAccessTree } from '../components/MenuAccessTree';
 
@@ -54,8 +54,14 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   viewer: ['view', 'view_metrics', 'download_reports'],
 };
 
-const TABS = ['Users', 'Groups', 'Roles & Permissions', 'Project Access', 'API Keys', 'Audit Logs'] as const;
+const TABS = ['Users', 'Groups', 'Roles & Permissions', 'Project Access', 'API Keys', 'ABAC Policies', 'SCIM Provisioning', 'Audit Logs'] as const;
 type Tab = typeof TABS[number];
+
+const ABAC_OPERATORS: { value: AbacCondition['operator']; label: string }[] = [
+  { value: 'eq', label: 'equals' }, { value: 'neq', label: 'does not equal' },
+  { value: 'in', label: 'is one of (comma-separated)' }, { value: 'not_in', label: 'is not one of (comma-separated)' },
+  { value: 'contains', label: 'contains' },
+];
 
 export function UsersGroups() {
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -72,6 +78,8 @@ export function UsersGroups() {
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [roles, setRoles] = useState<{ role: Role; description: string }[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
+  const [abacPolicies, setAbacPolicies] = useState<AbacPolicyRow[]>([]);
+  const [scimTokens, setScimTokens] = useState<ScimTokenSummary[]>([]);
   const [auditLog, setAuditLog] = useState<ActivityEntry[]>([]);
   const [myPermissions, setMyPermissions] = useState<MyPermissions | null>(null);
 
@@ -99,12 +107,43 @@ export function UsersGroups() {
   const [resourcePermsLoading, setResourcePermsLoading] = useState(false);
   const [addGrantConnectionId, setAddGrantConnectionId] = useState('');
 
+  // ABAC — Policies tab
+  const [newPolicyName, setNewPolicyName] = useState('');
+  const [newPolicyEffect, setNewPolicyEffect] = useState<'allow' | 'deny'>('deny');
+  const [newPolicyMenuKey, setNewPolicyMenuKey] = useState('cloud');
+  const [newPolicySubject, setNewPolicySubject] = useState<'user' | 'resource'>('resource');
+  const [newPolicyAttrKey, setNewPolicyAttrKey] = useState('environment');
+  const [newPolicyOperator, setNewPolicyOperator] = useState<AbacCondition['operator']>('eq');
+  const [newPolicyValue, setNewPolicyValue] = useState('');
+  const [abacError, setAbacError] = useState<string | null>(null);
+  const [testUserId, setTestUserId] = useState('');
+  const [testMenuKey, setTestMenuKey] = useState('cloud');
+  const [testAttrKey, setTestAttrKey] = useState('environment');
+  const [testAttrValue, setTestAttrValue] = useState('');
+  const [testResult, setTestResult] = useState<AbacTestResult | null>(null);
+  const [testRunning, setTestRunning] = useState(false);
+
+  // SCIM — Provisioning tab
+  const [newScimTokenName, setNewScimTokenName] = useState('');
+  const [scimError, setScimError] = useState<string | null>(null);
+  const [newlyCreatedScimToken, setNewlyCreatedScimToken] = useState<{ token: string; name: string } | null>(null);
+
+  // Member Permissions modal — ABAC attribute bag, a simple flat string-value
+  // key/value editor (matching the doc's own "department == Finance"-style
+  // examples) rather than a typed JSON editor -- ABAC conditions compare
+  // against plain strings, so that's what's worth making easy to edit here.
+  const [attributeRows, setAttributeRows] = useState<{ key: string; value: string }[]>([]);
+  const [attributesDirty, setAttributesDirty] = useState(false);
+  const [savingAttributes, setSavingAttributes] = useState(false);
+
   const load = useCallback(async () => {
-    const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, auditRes, perms] = await Promise.all([
+    const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, { items: abac }, { items: scim }, auditRes, perms] = await Promise.all([
       api.getMembers(),
       api.getGroups(),
       api.getRoles(),
       api.getApiKeys(),
+      api.getAbacPolicies(),
+      api.getScimTokens(),
       api.getUserAuditLog({ page: 1, limit: 15 }),
       api.getMyPermissions(),
     ]);
@@ -113,6 +152,8 @@ export function UsersGroups() {
     setGroups(g);
     setRoles(r);
     setApiKeys(keys);
+    setAbacPolicies(abac);
+    setScimTokens(scim);
     setAuditLog(auditRes.items);
     setMyPermissions(perms);
   }, []);
@@ -175,6 +216,34 @@ export function UsersGroups() {
     if (selectedMemberForPermissions) void loadResourceGrants(selectedMemberForPermissions.userId);
     else { setResourceGrants([]); setResourceRestricted(false); setAddGrantConnectionId(''); }
   }, [selectedMemberForPermissions, loadResourceGrants]);
+
+  useEffect(() => {
+    setAttributeRows(selectedMemberForPermissions ? Object.entries(selectedMemberForPermissions.attributes).map(([key, value]) => ({ key, value: String(value) })) : []);
+    setAttributesDirty(false);
+  }, [selectedMemberForPermissions]);
+
+  function addAttributeRow() { setAttributeRows(prev => [...prev, { key: '', value: '' }]); setAttributesDirty(true); }
+  function updateAttributeRow(i: number, field: 'key' | 'value', value: string) {
+    setAttributeRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+    setAttributesDirty(true);
+  }
+  function removeAttributeRow(i: number) { setAttributeRows(prev => prev.filter((_, idx) => idx !== i)); setAttributesDirty(true); }
+
+  async function handleSaveAttributes(userId: string) {
+    setSavingAttributes(true);
+    try {
+      const attributes = Object.fromEntries(attributeRows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value]));
+      await api.updateMemberAttributes(userId, attributes);
+      toast('Attributes updated', 'success');
+      setAttributesDirty(false);
+      await load();
+      setSelectedMemberForPermissions(prev => (prev ? { ...prev, attributes } : prev));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not save attributes.', 'error');
+    } finally {
+      setSavingAttributes(false);
+    }
+  }
 
   async function handleAddResourceGrant(userId: string) {
     if (!addGrantConnectionId) return;
@@ -368,6 +437,91 @@ export function UsersGroups() {
       await load();
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'Could not revoke this API key.');
+    }
+  }
+
+  function buildConditionValue(): unknown {
+    if (newPolicyOperator === 'in' || newPolicyOperator === 'not_in') return newPolicyValue.split(',').map(v => v.trim()).filter(Boolean);
+    return newPolicyValue;
+  }
+
+  async function handleCreateAbacPolicy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newPolicyName.trim() || !newPolicyAttrKey.trim() || !newPolicyValue.trim()) return;
+    setAbacError(null);
+    try {
+      const condition: AbacCondition = { attribute: `${newPolicySubject}.${newPolicyAttrKey.trim()}`, operator: newPolicyOperator, value: buildConditionValue() };
+      await api.createAbacPolicy({ name: newPolicyName.trim(), effect: newPolicyEffect, menuKey: newPolicyMenuKey, conditions: [condition] });
+      toast(`Policy "${newPolicyName.trim()}" created`, 'success');
+      setNewPolicyName(''); setNewPolicyValue('');
+      await load();
+    } catch (err) {
+      setAbacError(err instanceof Error ? err.message : 'Could not create this policy.');
+    }
+  }
+
+  async function handleTogglePolicyEnabled(policy: AbacPolicyRow) {
+    setAbacError(null);
+    try {
+      await api.updateAbacPolicy(policy.id, { enabled: !policy.enabled });
+      toast(policy.enabled ? 'Policy disabled' : 'Policy enabled', 'success');
+      await load();
+    } catch (err) {
+      setAbacError(err instanceof Error ? err.message : 'Could not update this policy.');
+    }
+  }
+
+  async function handleDeleteAbacPolicy(id: string, name: string) {
+    if (!(await confirm(`Delete the policy "${name}"?`))) return;
+    setAbacError(null);
+    try {
+      await api.deleteAbacPolicy(id);
+      toast('Policy deleted', 'success');
+      await load();
+    } catch (err) {
+      setAbacError(err instanceof Error ? err.message : 'Could not delete this policy.');
+    }
+  }
+
+  async function handleRunAbacTest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!testUserId) return;
+    setTestRunning(true);
+    setTestResult(null);
+    try {
+      const resourceAttributes = testAttrKey.trim() ? { [testAttrKey.trim()]: testAttrValue } : {};
+      const result = await api.testAbacPolicy({ userId: testUserId, menuKey: testMenuKey, resourceAttributes });
+      setTestResult(result);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not run this test.', 'error');
+    } finally {
+      setTestRunning(false);
+    }
+  }
+
+  async function handleCreateScimToken(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newScimTokenName.trim()) return;
+    setScimError(null);
+    try {
+      const created = await api.createScimToken(newScimTokenName.trim());
+      setNewScimTokenName('');
+      setNewlyCreatedScimToken({ token: created.token, name: created.name });
+      await load();
+    } catch (err) {
+      setScimError(err instanceof Error ? err.message : 'Could not create this SCIM token.');
+    }
+  }
+
+  async function handleRevokeScimToken(id: string) {
+    if (!(await confirm('Revoke this SCIM token? Your identity provider will immediately be unable to provision or deprovision users through it.'))) return;
+    setScimError(null);
+    try {
+      await api.revokeScimToken(id);
+      toast('SCIM token revoked', 'success');
+      await load();
+    } catch (err) {
+      setScimError(err instanceof Error ? err.message : 'Could not revoke this token.');
     }
   }
 
@@ -653,6 +807,131 @@ export function UsersGroups() {
         </div>
       )}
 
+      {tab === 'ABAC Policies' && (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Attribute-Based Policies</h3>
+            <p className="text-xs text-slate-400 mb-3">Layered on top of roles — a policy only fires when its condition matches; everything else falls through to ordinary role-based access unchanged.</p>
+            <table className="w-full text-sm mb-4">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                  <th className="py-2">Name</th><th className="py-2">Effect</th><th className="py-2">Menu</th><th className="py-2">Condition</th><th className="py-2">Status</th><th className="py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {abacPolicies.map(p => (
+                  <tr key={p.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                    <td className="py-2 text-slate-700 dark:text-slate-200">{p.name}</td>
+                    <td className="py-2"><Badge tone={p.effect === 'deny' ? 'critical' : 'good'}>{p.effect}</Badge></td>
+                    <td className="py-2 text-slate-500 dark:text-slate-400">{p.menu_key ?? 'any'}</td>
+                    <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      {p.conditions.map((c, i) => <span key={i}>{i > 0 && ' AND '}{c.attribute} {c.operator} {JSON.stringify(c.value)}</span>)}
+                    </td>
+                    <td className="py-2">
+                      <button onClick={() => void handleTogglePolicyEnabled(p)} className="cursor-pointer">
+                        <Badge tone={p.enabled ? 'good' : 'neutral'}>{p.enabled ? 'enabled' : 'disabled'}</Badge>
+                      </button>
+                    </td>
+                    <td className="py-2">
+                      <button onClick={() => void handleDeleteAbacPolicy(p.id, p.name)} className="text-xs text-red-500 hover:underline">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+                {abacPolicies.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-sm text-slate-400">No ABAC policies yet — access is governed by roles alone.</td></tr>}
+              </tbody>
+            </table>
+            <form onSubmit={handleCreateAbacPolicy} className="flex flex-col gap-2">
+              <div className="flex gap-2 flex-wrap items-center">
+                <input value={newPolicyName} onChange={e => setNewPolicyName(e.target.value)} placeholder="Policy name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-48" />
+                <select value={newPolicyEffect} onChange={e => setNewPolicyEffect(e.target.value as 'allow' | 'deny')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white">
+                  <option value="deny">Deny</option>
+                  <option value="allow">Allow</option>
+                </select>
+                <input value={newPolicyMenuKey} onChange={e => setNewPolicyMenuKey(e.target.value)} placeholder="Menu key (e.g. cloud)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                <span className="text-xs text-slate-400">when</span>
+                <select value={newPolicySubject} onChange={e => setNewPolicySubject(e.target.value as 'user' | 'resource')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white">
+                  <option value="resource">resource.</option>
+                  <option value="user">user.</option>
+                </select>
+                <input value={newPolicyAttrKey} onChange={e => setNewPolicyAttrKey(e.target.value)} placeholder="attribute key (e.g. environment)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-52" />
+                <select value={newPolicyOperator} onChange={e => setNewPolicyOperator(e.target.value as AbacCondition['operator'])} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white">
+                  {ABAC_OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <input value={newPolicyValue} onChange={e => setNewPolicyValue(e.target.value)} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-40" />
+                <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Policy</button>
+              </div>
+            </form>
+            {abacError && <p className="text-sm text-red-500 mt-2">{abacError}</p>}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Test a Policy</h3>
+            <p className="text-xs text-slate-400 mb-3">Dry-run only — never touches real access. Shows exactly what the policy engine would decide for a given user, menu, and resource attribute.</p>
+            <form onSubmit={handleRunAbacTest} className="flex gap-2 flex-wrap items-center">
+              <select value={testUserId} onChange={e => setTestUserId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-52">
+                <option value="">Select a member…</option>
+                {members.map(m => <option key={m.userId} value={m.userId}>{m.email ?? m.fullName ?? m.userId}</option>)}
+              </select>
+              <input value={testMenuKey} onChange={e => setTestMenuKey(e.target.value)} placeholder="Menu key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
+              <span className="text-xs text-slate-400">resource.</span>
+              <input value={testAttrKey} onChange={e => setTestAttrKey(e.target.value)} placeholder="attribute key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
+              <input value={testAttrValue} onChange={e => setTestAttrValue(e.target.value)} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
+              <button type="submit" disabled={testRunning || !testUserId} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm px-3 py-1.5">{testRunning ? 'Running…' : 'Run Test'}</button>
+            </form>
+            {testResult && (
+              <div className="mt-3">
+                {testResult.result === 'not_applicable' ? (
+                  <Badge tone="neutral">not_applicable — no policy matched, RBAC decides as normal</Badge>
+                ) : (
+                  <Badge tone={testResult.result === 'deny' ? 'critical' : 'good'}>{testResult.result} — matched "{testResult.matchedPolicyName}"</Badge>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'SCIM Provisioning' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">SCIM 2.0 Provisioning</h3>
+          <p className="text-xs text-slate-400 mb-3">
+            Issue a bearer token here and paste it into your identity provider's SCIM app config (Okta, Entra ID, ...) along with the base URL below — the IdP then provisions and deprovisions users directly, no manual invites needed.
+          </p>
+          <div className="rounded-md bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 px-3 py-2 mb-4 text-xs">
+            <span className="text-slate-400 block mb-0.5">SCIM base URL</span>
+            <code className="text-slate-700 dark:text-slate-200">{import.meta.env.VITE_USERS_API_URL || '(not configured in this environment)'}/scim/v2</code>
+          </div>
+          <table className="w-full text-sm mb-4">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="py-2">Name</th><th className="py-2">Created</th><th className="py-2">Last Used</th><th className="py-2">Status</th><th className="py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {scimTokens.map(t => (
+                <tr key={t.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="py-2 text-slate-700 dark:text-slate-200">{t.name}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(t.created_at).toLocaleDateString()}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'Never'}</td>
+                  <td className="py-2">{t.revoked_at ? <Badge tone="neutral">revoked</Badge> : <Badge tone="good">active</Badge>}</td>
+                  <td className="py-2">
+                    {!t.revoked_at && <button onClick={() => void handleRevokeScimToken(t.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
+                  </td>
+                </tr>
+              ))}
+              {scimTokens.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No SCIM tokens yet. Create one to connect an identity provider.</td></tr>}
+            </tbody>
+          </table>
+          <form onSubmit={handleCreateScimToken} className="flex gap-2">
+            <input value={newScimTokenName} onChange={e => setNewScimTokenName(e.target.value)} placeholder="Token name (e.g. Okta)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Token</button>
+          </form>
+          {scimError && <p className="text-sm text-red-500 mt-2">{scimError}</p>}
+        </div>
+      )}
+
       {tab === 'Audit Logs' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Audit Logs</h3>
@@ -755,6 +1034,29 @@ export function UsersGroups() {
                 </>
               )}
             </div>
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-400 block mb-2">
+                ABAC Attributes — what an attribute-based policy's <code className="text-[10px]">user.&lt;key&gt;</code> conditions read for {selectedMemberForPermissions.email ?? 'this user'} (see the ABAC Policies tab). Plain key/value pairs, e.g. <code className="text-[10px]">department = Finance</code>.
+              </span>
+              <div className="flex flex-col gap-1.5 mb-2">
+                {attributeRows.map((row, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <input value={row.key} onChange={e => updateAttributeRow(i, 'key', e.target.value)} placeholder="key" className="w-1/3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
+                    <input value={row.value} onChange={e => updateAttributeRow(i, 'value', e.target.value)} placeholder="value" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
+                    <button onClick={() => removeAttributeRow(i)} className="text-[10px] text-slate-400 hover:text-red-600 dark:hover:text-red-400 shrink-0">remove</button>
+                  </div>
+                ))}
+                {attributeRows.length === 0 && <p className="text-xs text-slate-400">No attributes set.</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={addAttributeRow} className="text-[11px] rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300">+ Add attribute</button>
+                {attributesDirty && (
+                  <button onClick={() => void handleSaveAttributes(selectedMemberForPermissions.userId)} disabled={savingAttributes} className="text-[11px] rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2 py-1">
+                    {savingAttributes ? 'Saving…' : 'Save attributes'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </Modal>
       )}
@@ -787,6 +1089,17 @@ export function UsersGroups() {
         <div className="flex justify-end gap-2">
           <button onClick={() => newlyCreatedKey && void copyKey(newlyCreatedKey.apiKey)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
           <button onClick={() => setNewlyCreatedKey(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
+        </div>
+      </Modal>
+
+      <Modal open={!!newlyCreatedScimToken} onClose={() => setNewlyCreatedScimToken(null)} title="SCIM Token Created">
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+          Copy this token now — <strong>"{newlyCreatedScimToken?.name}"</strong>'s secret won't be shown again. Paste it into your identity provider's SCIM app config as the bearer token.
+        </p>
+        <pre className="rounded-md bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap break-all mb-3">{newlyCreatedScimToken?.token}</pre>
+        <div className="flex justify-end gap-2">
+          <button onClick={() => newlyCreatedScimToken && void copyKey(newlyCreatedScimToken.token)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
+          <button onClick={() => setNewlyCreatedScimToken(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
         </div>
       </Modal>
       {confirmDialog}

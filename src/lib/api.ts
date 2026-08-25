@@ -363,6 +363,14 @@ class ApiClient {
   }
   finalizeCur(id: string) { return this.post<{ syncedAt: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/finalize`); }
 
+  // Canonical Identity model — AWS IAM users/roles today (GCP/Azure ingestion not built yet).
+  getIdentities(params: { provider?: string; identityType?: string; privilegeLevel?: string; isHuman?: boolean; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<CloudIdentity>>('awsAccounts', `/api/aws-accounts/identities${qs(params)}`);
+  }
+  getIdentity(id: string) { return this.get<CloudIdentity>('awsAccounts', `/api/aws-accounts/identities/${id}`); }
+  getIdentitySummary() { return this.get<IdentitySummary>('awsAccounts', '/api/aws-accounts/identities/summary'); }
+  getIdentityEdges(id: string) { return this.get<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] }>('awsAccounts', `/api/aws-accounts/identities/${id}/edges`); }
+
   // ── resources-api ────────────────────────────────────────────────────────
 
   getResourcesDashboard(params: { region?: string; days?: number; connectionId?: string } = {}) {
@@ -678,6 +686,30 @@ class ApiClient {
 
   getUserAuditLog(params: { action?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('users', `/api/users/audit-logs${qs(params)}`); }
 
+  /** Full replace, not merge — sets the ABAC attribute bag (department, clearance, ...) an abac_policies "user.<key>" condition reads. */
+  updateMemberAttributes(userId: string, attributes: Record<string, unknown>) {
+    return this.put<{ id: string; attributes: Record<string, unknown> }>('users', `/api/users/members/${userId}/attributes`, { attributes });
+  }
+
+  // ABAC — attribute-based policies layered on top of role/menu-permission RBAC. A policy only fires when its conditions match; everything else falls through to RBAC unchanged.
+  getAbacPolicies() { return this.get<{ items: AbacPolicyRow[] }>('users', '/api/users/abac-policies'); }
+  createAbacPolicy(data: { name: string; description?: string; effect: 'allow' | 'deny'; menuKey?: string | null; conditions: AbacCondition[]; priority?: number; enabled?: boolean }) {
+    return this.post<AbacPolicyRow>('users', '/api/users/abac-policies', data);
+  }
+  updateAbacPolicy(id: string, data: Partial<{ name: string; description: string; effect: 'allow' | 'deny'; menuKey: string | null; conditions: AbacCondition[]; priority: number; enabled: boolean }>) {
+    return this.put<AbacPolicyRow>('users', `/api/users/abac-policies/${id}`, data);
+  }
+  deleteAbacPolicy(id: string) { return this.delete<{ deleted: boolean }>('users', `/api/users/abac-policies/${id}`); }
+  /** Dry-run — never touches real access, just reports what the policy engine would decide for a hypothetical (user, menu, resource attributes) triple. */
+  testAbacPolicy(data: { userId: string; menuKey: string; resourceAttributes?: Record<string, unknown> }) {
+    return this.post<AbacTestResult>('users', '/api/users/abac-policies/test', data);
+  }
+
+  // SCIM 2.0 token management — the tokens an IdP (Okta, Entra ID) authenticates with against /scim/v2/*. The provisioning protocol itself has no UI (an IdP calls it directly), only the token lifecycle does.
+  getScimTokens() { return this.get<{ items: ScimTokenSummary[] }>('users', '/api/users/scim-tokens'); }
+  createScimToken(name: string) { return this.post<ScimTokenSummary & { token: string }>('users', '/api/users/scim-tokens', { name }); }
+  revokeScimToken(id: string) { return this.delete<{ revoked: boolean }>('users', `/api/users/scim-tokens/${id}`); }
+
   // ── organization-management-api ─────────────────────────────────────────
 
   /** No X-Org-Id required — the bootstrap route that discovers which org(s) the caller belongs to before one is selected. */
@@ -907,6 +939,21 @@ export interface CloudConnection {
 }
 export interface AccountSummary { id: string; connection_name: string; status: string; environment?: string; last_sync_at: string | null; last_discovery_at: string | null; last_permission_check_at?: string | null; error_message: string | null; resource_summary?: unknown; key_rotated_at?: string | null }
 
+/** The canonical identity model (cloud_identities) — one row per IAM user/role today, GCP/Azure to follow. privilege_level/mfa_enabled/last_used_at come from real per-identity credential-report parsing, not an aggregate guess. */
+export interface CloudIdentity {
+  id: string; connection_id: string; provider: 'aws' | 'gcp' | 'azure';
+  identity_type: 'user' | 'role' | 'service_account' | 'managed_identity' | 'group' | 'federated' | 'unknown';
+  native_id: string; native_label: string | null; display_name: string | null; is_human: boolean;
+  privilege_level: 'scoped' | 'broad' | 'admin_equivalent' | null; privilege_reasons: string[] | null;
+  mfa_enabled: boolean | null; last_used_at: string | null;
+  last_used_source: 'credential_report' | 'access_analyzer_unused' | 'provider_api' | null;
+  identity_created_at: string | null; first_seen_at: string; last_seen_at: string;
+  metadata?: Record<string, unknown>;
+}
+export interface IdentitySummary { total: number; users: number; roles: number; adminEquivalent: number; broad: number; scoped: number; humanWithoutMfa: number }
+/** One cloud_resource_edges row, from an identity's own /edges endpoint — source/target are mutually exclusive between the *_resource_id and *_identity_id pair on each side. */
+export interface IdentityEdge { id: string; relationship_type: string; confidence: number; source_engine: string; source_resource_id: string | null; source_identity_id: string | null; target_resource_id: string | null; target_identity_id: string | null; metadata: Record<string, unknown>; first_seen_at: string; last_seen_at: string }
+
 /** gcp-accounts-api's equivalent of CloudConnection — a distinct type rather than widening CloudConnection's AWS-specific required fields (aws_account_id, role_arn, external_id) to accommodate GCP's identifiers. */
 export interface GcpConnection {
   id: string; org_id: string; project_id: string | null; provider: 'gcp'; connection_method: 'service_account_key' | 'service_account_impersonation';
@@ -1097,11 +1144,17 @@ export interface MaintenanceWindow { id: string; org_id: string; connection_id: 
 export interface ReportRow { id: string; org_id: string; category: string; name: string; scope: unknown; format: string; status: 'pending' | 'generating' | 'delivered' | 'failed'; data_volume_mb: number | null; region: string | null; requested_by: string | null; generated_at: string | null; delivered_at: string | null; download_url: string | null; mime_type: string | null; error_message: string | null; created_at: string }
 export interface ScheduledReport { id: string; org_id: string; report_category: string; name: string; scope: unknown; cadence: string; recipients: string[]; format: string; next_run_at: string | null; enabled: boolean; created_at: string }
 
-export interface Member { roleGrantId: string; userId: string; role: Role; email: string | null; fullName: string | null; mfaEnabled: boolean }
+export interface Member { roleGrantId: string; userId: string; role: Role; email: string | null; fullName: string | null; mfaEnabled: boolean; attributes: Record<string, unknown> }
 export interface PendingInvite { id: string; email: string; role: Role; invitedBy: string | null; createdAt: string }
 export interface PendingInviteRow { id: string; org_id: string; email: string; role: Role; invited_by: string; accepted_at: string | null; created_at: string }
 export interface UserGroup { id: string; name: string; createdAt: string; memberIds: string[] }
 export interface ApiKeySummary { id: string; name: string; key_prefix: string; last_used_at: string | null; revoked_at: string | null; created_at: string; user_id: string }
+
+export interface AbacCondition { attribute: string; operator: 'eq' | 'neq' | 'in' | 'not_in' | 'contains'; value: unknown }
+export interface AbacPolicyRow { id: string; org_id: string; name: string; description: string | null; effect: 'allow' | 'deny'; menu_key: string | null; conditions: AbacCondition[]; priority: number; enabled: boolean; created_by: string | null; created_at: string; updated_at: string }
+export type AbacTestResult = { result: 'allow' | 'deny'; matchedPolicyId: string; matchedPolicyName: string } | { result: 'not_applicable' };
+/** Metadata only — the real bearer token is returned exactly once, from createScimToken, and never again. */
+export interface ScimTokenSummary { id: string; org_id: string; name: string; created_by: string | null; created_at: string; last_used_at: string | null; revoked_at: string | null }
 
 export interface OrganizationRow { id: string; name: string; slug: string; mfa_required: boolean; ip_allowlist: string[]; branding: Record<string, unknown>; plan: string; seats: number; settings: Record<string, unknown>; created_by: string; created_at: string; myRole?: Role }
 export interface FolderRow { id: string; parent_folder_id: string | null; name: string; monthly_budget: number | null; required_tags: string[]; allowed_regions: string[]; business_unit_id: string | null; cost_center_id: string | null; created_at: string }
