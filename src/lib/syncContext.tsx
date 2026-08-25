@@ -134,16 +134,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         }
         setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
         const summary = await withRetry(() => api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service, steps.length));
-        // Best-effort — a scan that found real resources should still report
-        // success even if this fails. GCP has no recommendations engine yet
-        // (Phase 1 scope, see the plan doc), so this is AWS-only for now.
-        if (service === 'awsAccounts') await api.generateRecommendations(connectionId).catch(() => {});
-        // Alert-rule evaluation is provider-agnostic (resource_state
-        // conditions can match any provider's cloud_resources), unlike
-        // recommendations above -- only the alarm-state condition type is
-        // AWS-only in practice, since monitoring_alarms is only populated
-        // by connector-aws's cloudwatch sync today.
-        await api.evaluateAlertRules(connectionId).catch(() => {});
+        // Recommendation generation and alert-rule evaluation used to fire
+        // from here (client-side, best-effort) after every interactive
+        // scan -- moved server-side into aws-accounts-api's runFinalize
+        // (discovery.ts), which every scan path now funnels through
+        // (interactive, daily sweep, abandoned-scan recovery), not just this
+        // one. Calling them again here would just be a redundant, racy
+        // duplicate of what the server already guarantees. See
+        // cloudops-connector-aws/src/lib/postScanHooks.ts.
         const realErrors = stepErrors.filter(e => e.severity !== 'info');
         setSyncStates(prev => ({
           ...prev,
