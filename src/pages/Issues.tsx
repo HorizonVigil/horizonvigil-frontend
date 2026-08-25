@@ -137,7 +137,7 @@ export function Issues() {
 
   return (
     <div>
-      <FilterBar title="Issues" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Issues" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Total Open Issues" value={String(openCount)} />

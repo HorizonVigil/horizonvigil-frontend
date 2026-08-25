@@ -66,7 +66,7 @@ export function CloudAccountDetail() {
   if (notFound) {
     return (
       <div>
-        <FilterBar title="Account Not Found" breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} />
+        <FilterBar title="Account Not Found" breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
         <p className="text-sm text-slate-400 py-10 text-center">This account or project doesn't exist, or you don't have access to it.</p>
       </div>
     );

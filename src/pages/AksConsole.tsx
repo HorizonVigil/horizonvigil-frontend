@@ -12,7 +12,7 @@ import { RoadmapPanel } from '../components/EmptyState';
 export function AksConsole() {
   return (
     <div>
-      <FilterBar title="Azure AKS Console" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} />
+      <FilterBar title="Azure AKS Console" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
       <RoadmapPanel
         icon="hammer"
         title="Azure AKS support isn't built yet"

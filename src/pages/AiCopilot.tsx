@@ -105,7 +105,7 @@ export function AiCopilot() {
 
   return (
     <div>
-      <FilterBar title="AI Copilot" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="AI Copilot" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4 h-[calc(100vh-160px)]">
         <div className="flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">

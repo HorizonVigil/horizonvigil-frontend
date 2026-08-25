@@ -72,7 +72,7 @@ export function ResourcesOverview() {
 
   return (
     <div>
-      <FilterBar title="Resources" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Resources" breadcrumb={<Breadcrumb />} showDateFilter={false} />
 
       <form onSubmit={submitSearch} className="mb-5">
         <input

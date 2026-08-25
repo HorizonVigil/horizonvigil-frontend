@@ -224,7 +224,7 @@ export function OrganizationManagement() {
 
   return (
     <div>
-      <FilterBar title="Organization Management" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Organization Management" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (

@@ -158,7 +158,7 @@ export function Reports() {
 
   return (
     <div>
-      <FilterBar title="Reports" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Reports" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Reports Generated" value={String(reports.filter(r => r.status === 'delivered').length)} />

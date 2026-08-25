@@ -311,7 +311,7 @@ export function Automation() {
 
   return (
     <div>
-      <FilterBar title="Automation" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Automation" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
         Runbooks and workflows can be defined and viewed, but the execution engine that actually runs them isn't built in this pass — "Execute" records a real, honest attempt in Execution History rather than pretending to run anything.

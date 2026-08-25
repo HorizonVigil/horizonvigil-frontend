@@ -158,7 +158,7 @@ export function GcpProjectDetail() {
 
   return (
     <div>
-      <FilterBar title={connection.connection_name ?? connection.gcp_project_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} />
+      <FilterBar title={connection.connection_name ?? connection.gcp_project_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex items-center gap-2 mb-4">
         <Badge>{connection.status}</Badge>

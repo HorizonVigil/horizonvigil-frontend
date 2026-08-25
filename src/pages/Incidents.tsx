@@ -63,7 +63,7 @@ export function Incidents() {
 
   return (
     <div>
-      <FilterBar title="Incidents" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      <FilterBar title="Incidents" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">

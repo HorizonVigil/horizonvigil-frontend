@@ -148,7 +148,7 @@ export function Monitoring() {
 
   return (
     <div>
-      <FilterBar title="Monitoring" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Monitoring" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex gap-1 mb-5 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (

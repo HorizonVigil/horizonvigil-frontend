@@ -266,7 +266,7 @@ export function Settings() {
 
   return (
     <div>
-      <FilterBar title="Settings" showAccountFilter={false} />
+      <FilterBar title="Settings" showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (

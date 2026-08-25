@@ -351,7 +351,7 @@ export function CostOptimization() {
 
   return (
     <div>
-      <FilterBar title="Cost Optimization" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Cost Optimization" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Potential Monthly Savings" value={money(potentialMonthly)} />

@@ -87,6 +87,41 @@ function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+/**
+ * Each cloud models "permissions" differently, so this reads the exact
+ * fields each connector's own identity-ingestion code actually writes into
+ * cloud_identities.metadata, per provider, rather than one generic shape:
+ * AWS attaches real policy names (attachedPolicies/inlinePolicies, from
+ * ListAttached*Policies/List*Policies), GCP attaches the IAM roles this
+ * identity is bound to (boundRoles, from the project's own getIamPolicy),
+ * Azure attaches resolved role-assignment names (roleNames, from a real
+ * Microsoft.Authorization/roleDefinitions lookup -- see roleAssignments.ts's
+ * own doc comment for why that's ARM, not a fabricated Graph call).
+ */
+function IdentityPermissionsList({ identity }: { identity: CloudIdentity }) {
+  const metadata = identity.metadata ?? {};
+  if (identity.provider === 'aws') {
+    const attached = (metadata.attachedPolicies as string[] | undefined) ?? [];
+    const inline = (metadata.inlinePolicies as string[] | undefined) ?? [];
+    if (attached.length === 0 && inline.length === 0) return <p className="text-xs text-slate-400">No attached or inline policies.</p>;
+    return (
+      <ul className="text-sm text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">
+        {attached.map((name, i) => <li key={`a-${i}`}><Badge tone="neutral">Attached</Badge> {name}</li>)}
+        {inline.map((name, i) => <li key={`i-${i}`}><Badge tone="neutral">Inline</Badge> {name}</li>)}
+      </ul>
+    );
+  }
+  if (identity.provider === 'gcp') {
+    const roles = (metadata.boundRoles as string[] | undefined) ?? [];
+    if (roles.length === 0) return <p className="text-xs text-slate-400">Not bound to any IAM role on this project.</p>;
+    return <ul className="text-sm text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">{roles.map((r, i) => <li key={i}>{r}</li>)}</ul>;
+  }
+  // Azure
+  const roleNames = (metadata.roleNames as string[] | undefined) ?? [];
+  if (roleNames.length === 0) return <p className="text-xs text-slate-400">No role assignments found.</p>;
+  return <ul className="text-sm text-slate-600 dark:text-slate-300 flex flex-col gap-0.5">{roleNames.map((r, i) => <li key={i}>{r}</li>)}</ul>;
+}
+
 export function CloudAccounts() {
   const { projects } = useOrg();
   const { refreshToken } = useFilters();
@@ -191,6 +226,11 @@ export function CloudAccounts() {
   const [identitiesError, setIdentitiesError] = useState<string | null>(null);
   const [selectedIdentity, setSelectedIdentity] = useState<CloudIdentity | null>(null);
   const [identityEdges, setIdentityEdges] = useState<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] } | null>(null);
+  // The list endpoint deliberately omits `metadata` (LIST_SELECT in
+  // identities.ts) to keep the paged response light -- the permissions list
+  // below needs it, so it's fetched separately per-identity, same lazy-load
+  // pattern as identityEdges right below.
+  const [selectedIdentityDetail, setSelectedIdentityDetail] = useState<CloudIdentity | null>(null);
 
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
@@ -287,8 +327,9 @@ export function CloudAccounts() {
   }, [tab, loadIdentities, refreshToken]);
 
   useEffect(() => {
-    if (!selectedIdentity) { setIdentityEdges(null); return; }
+    if (!selectedIdentity) { setIdentityEdges(null); setSelectedIdentityDetail(null); return; }
     void api.getIdentityEdges(selectedIdentity.id).then(setIdentityEdges);
+    void api.getIdentity(selectedIdentity.id).then(setSelectedIdentityDetail);
   }, [selectedIdentity]);
 
   // Status/environment/search/provider filters are all applied server-side
@@ -533,7 +574,15 @@ export function CloudAccounts() {
 
   return (
     <div>
-      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
+      {/* Region/Date filters don't apply anywhere on this page -- none of its
+          8 tabs read region/dateRange from useFilters() (only refreshToken
+          is used); each tab that needs region/privilege/kind/provider
+          filtering already has its own local, tab-specific chips (Inventory's
+          provider chips, Identities' Cloud/Privilege/Kind chips, etc). Same
+          "don't show a control that silently does nothing" principle
+          showAccountFilter={false} above already applied -- Region/Date were
+          just missed. */}
+      <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
@@ -928,7 +977,7 @@ export function CloudAccounts() {
       {tab === 'Identities' && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-slate-400 max-w-2xl">
-            One row per identity across every connected cloud — an AWS IAM user or role, a GCP service account or a real project IAM-policy member, or an Azure role-assignment principal. Privilege level is computed per-cloud from each account's own IAM data (AWS additionally has MFA/access-key staleness from its credential report; GCP/Azure don't expose that the same way). Azure identities show their principal ID rather than a resolved name — that needs Microsoft Graph access this connection doesn't have yet.
+            One row per identity across every connected cloud — AWS (IAM users, roles, and groups), GCP (service accounts and real project IAM-policy members), or Azure (role-assignment principals: users, service principals, managed identities, groups). Click a row for its full permissions list — attached/inline policies on AWS, bound IAM roles on GCP, resolved role-assignment names on Azure. Privilege level is computed per-cloud from each account's own IAM data (AWS additionally has MFA/access-key staleness from its credential report; GCP/Azure don't expose that the same way). Azure identities show their principal ID rather than a resolved name — that needs Microsoft Graph access this connection doesn't have yet.
           </p>
           {identitiesError && (
             <div className="rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
@@ -1000,6 +1049,14 @@ export function CloudAccounts() {
                 </ul>
               </div>
             )}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-xs text-slate-400 block mb-1.5">Permissions</span>
+              {!selectedIdentityDetail ? (
+                <p className="text-xs text-slate-400">Loading…</p>
+              ) : (
+                <IdentityPermissionsList identity={selectedIdentityDetail} />
+              )}
+            </div>
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
               <span className="text-xs text-slate-400 block mb-1.5">Relationships</span>
               {!identityEdges ? (

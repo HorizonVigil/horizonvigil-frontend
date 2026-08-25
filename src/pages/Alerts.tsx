@@ -396,7 +396,7 @@ export function Alerts() {
   if (loadError && !everLoadedOk) {
     return (
       <div>
-        <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} />
+        <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
         <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
           <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1">
@@ -411,7 +411,7 @@ export function Alerts() {
 
   return (
     <div>
-      <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} />
+      <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Active Alerts" value={String(activeAlerts.length)} />

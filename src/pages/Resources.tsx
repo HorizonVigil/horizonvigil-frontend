@@ -630,7 +630,7 @@ export function Resources() {
 
   return (
     <div>
-      <FilterBar title={isWorkspaceView ? serviceLabel(presetService, presetCategory) : 'Resources'} breadcrumb={workspaceCrumb} />
+      <FilterBar title={isWorkspaceView ? serviceLabel(presetService, presetCategory) : 'Resources'} breadcrumb={workspaceCrumb} showDateFilter={false} />
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (
