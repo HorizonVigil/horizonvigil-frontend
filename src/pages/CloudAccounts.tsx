@@ -277,22 +277,48 @@ export function CloudAccounts() {
   useSyncCompletion([...awsConnections.map(c => c.id), ...gcpConnections.map(c => c.id), ...azureConnections.map(c => c.id)], loadInventory);
 
   // Each secondary tab's data is only fetched once you actually open it, and
-  // re-fetched on refreshToken while that tab is active.
+  // re-fetched on refreshToken while that tab is active. Promise.allSettled
+  // (not .then chains left to reject silently) so one failing call surfaces
+  // a toast instead of leaving that tab's data permanently stuck on its
+  // loading/empty state with no explanation -- and a `cancelled` guard so a
+  // slow response from a tab the user has already switched away from can't
+  // land late and overwrite whatever tab's data is now on screen.
   useEffect(() => {
-    if (tab === 'Dashboard') {
-      void api.getAwsAccountsDashboard().then(setDashboard);
-      void api.getGcpAccounts({ limit: 1 }).then(r => setGcpProjectCount(r.pagination.total));
-      void api.getAzureAccounts({ limit: 1 }).then(r => setAzureAccountCount(r.pagination.total));
-    } else if (tab === 'Organizations') void api.getAwsOrganizations().then(r => setAwsOrgs(r.awsAccounts));
-    else if (tab === 'Regions') void api.getAwsAccountsRegions().then(r => setRegions(r.regions));
-    else if (tab === 'Sync Center') {
-      setSyncCenterLoaded(false);
-      void Promise.all([
-        api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts)),
-        api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts)),
-      ]).finally(() => setSyncCenterLoaded(true));
-    }
-  }, [tab, refreshToken]);
+    let cancelled = false;
+    const run = async () => {
+      try {
+        if (tab === 'Dashboard') {
+          const [dash, gcp, azure] = await Promise.allSettled([
+            api.getAwsAccountsDashboard(),
+            api.getGcpAccounts({ limit: 1 }),
+            api.getAzureAccounts({ limit: 1 }),
+          ]);
+          if (cancelled) return;
+          if (dash.status === 'fulfilled') setDashboard(dash.value); else toast(dash.reason instanceof Error ? dash.reason.message : 'Failed to load account dashboard.', 'error');
+          if (gcp.status === 'fulfilled') setGcpProjectCount(gcp.value.pagination.total);
+          if (azure.status === 'fulfilled') setAzureAccountCount(azure.value.pagination.total);
+        } else if (tab === 'Organizations') {
+          const r = await api.getAwsOrganizations();
+          if (!cancelled) setAwsOrgs(r.awsAccounts);
+        } else if (tab === 'Regions') {
+          const r = await api.getAwsAccountsRegions();
+          if (!cancelled) setRegions(r.regions);
+        } else if (tab === 'Sync Center') {
+          setSyncCenterLoaded(false);
+          const [sync, permissions] = await Promise.allSettled([api.getAccountsSyncStatus(), api.getAwsAccountsPermissionsSummary()]);
+          if (cancelled) return;
+          if (sync.status === 'fulfilled') setSyncStatus(sync.value.accounts); else toast(sync.reason instanceof Error ? sync.reason.message : 'Failed to load sync status.', 'error');
+          if (permissions.status === 'fulfilled') setPermissionsSummary(permissions.value.accounts); else toast(permissions.reason instanceof Error ? permissions.reason.message : 'Failed to load permission summary.', 'error');
+          setSyncCenterLoaded(true);
+        }
+      } catch (err) {
+        if (!cancelled) toast(err instanceof Error ? err.message : 'Failed to load account data.', 'error');
+        setSyncCenterLoaded(true);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [tab, refreshToken, toast]);
 
   const loadIdentities = useCallback(async () => {
     setIdentitiesLoading(true);
@@ -328,9 +354,19 @@ export function CloudAccounts() {
 
   useEffect(() => {
     if (!selectedIdentity) { setIdentityEdges(null); setSelectedIdentityDetail(null); return; }
-    void api.getIdentityEdges(selectedIdentity.id).then(setIdentityEdges);
-    void api.getIdentity(selectedIdentity.id).then(setSelectedIdentityDetail);
-  }, [selectedIdentity]);
+    let cancelled = false;
+    const selectedId = selectedIdentity.id;
+    setIdentityEdges(null);
+    setSelectedIdentityDetail(null);
+    void Promise.allSettled([api.getIdentityEdges(selectedId), api.getIdentity(selectedId)]).then(([edges, detail]) => {
+      if (cancelled) return;
+      if (edges.status === 'fulfilled') setIdentityEdges(edges.value);
+      else toast(edges.reason instanceof Error ? edges.reason.message : 'Failed to load identity relationships.', 'error');
+      if (detail.status === 'fulfilled') setSelectedIdentityDetail(detail.value);
+      else toast(detail.reason instanceof Error ? detail.reason.message : 'Failed to load identity details.', 'error');
+    });
+    return () => { cancelled = true; };
+  }, [selectedIdentity, toast]);
 
   // Status/environment/search/provider filters are all applied server-side
   // now (see loadInventory) -- awsConnections/gcpConnections/azureConnections

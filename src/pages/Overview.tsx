@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -73,16 +73,22 @@ export function Overview() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // re-fetch on top of already-visible data
   const [error, setError] = useState<string | null>(null);
+  // Whether to show the skeleton (first load / retry after failure) or the
+  // subtle refreshing bar (real data already on screen) has to survive
+  // `load` being memoized -- a plain `!dashboard` read inside `load` closes
+  // over whatever `dashboard` was bound to at the callback's last recreation
+  // (whenever region/dateRange/toast last changed), not its current value,
+  // since `dashboard` isn't a dependency of this callback. Concretely: after
+  // the first successful load, `load` itself is NOT recreated (its deps
+  // didn't change), so it keeps closing over the pre-load `null` -- every
+  // later refresh (e.g. clicking Refresh, which only bumps `refreshToken`)
+  // would still see `!dashboard` as true and wrongly re-show the skeleton
+  // instead of the refreshing bar. A ref sidesteps this: `.current` is
+  // always read fresh at call time, never captured by a stale closure.
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(async () => {
-    // First load (or a retry after a failed first load, where `dashboard`
-    // is still null) shows skeletons; once real dashboard data exists,
-    // subsequent loads keep it visible and just mark `refreshing` instead --
-    // keying this off `error` too (as an earlier version of this did) sends
-    // a post-failure retry down the `refreshing` branch, which falls through
-    // to rendering an all-zeros dashboard from null data instead of either
-    // the skeleton or the clean full-page error state.
-    if (!dashboard) setLoading(true); else setRefreshing(true);
+    if (!hasLoadedOnce.current) setLoading(true); else setRefreshing(true);
     setError(null);
 
     try {
@@ -106,6 +112,7 @@ export function Overview() {
 
       if (dashRes.status === 'rejected') throw dashRes.reason;
       setDashboard(dashRes.value);
+      hasLoadedOnce.current = true;
 
       // Clear stale widget data up-front so a failed refetch never leaves old
       // numbers on screen masquerading as current ones.
@@ -144,9 +151,6 @@ export function Overview() {
       setLoading(false);
       setRefreshing(false);
     }
-    // `dashboard` read only to pick first-load vs refresh behavior;
-    // including it would re-trigger the effect below on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [region, dateRange, toast]);
 
   // OrgProvider resolves the active org (and only then makes api.ts attach
