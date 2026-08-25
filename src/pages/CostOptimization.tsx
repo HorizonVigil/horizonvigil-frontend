@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -92,6 +92,14 @@ export function CostOptimization() {
   // "Awaiting approval", etc. instead of offering a duplicate request.
   const [resizeRequest, setResizeRequest] = useState<RemediationRequest | null>(null);
   const [resizeRequesting, setResizeRequesting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tabError, setTabError] = useState<string | null>(null);
+  const [anomalyError, setAnomalyError] = useState<string | null>(null);
+  const [mutationId, setMutationId] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+  const tabRequestRef = useRef(0);
+  const anomalyRequestRef = useRef(0);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!selected || selected.category !== 'rightsizing' || !selected.resource_id) {
@@ -100,20 +108,49 @@ export function CostOptimization() {
       setResizeRequest(null);
       return;
     }
+
     let cancelled = false;
     setSelectedDetailLoading(true);
+
     void Promise.all([
       api.getResource(selected.resource_id),
-      api.getMetrics({ resourceId: selected.resource_id, metricName: 'CPUUtilization', limit: 60 }),
+      api.getMetrics({
+        resourceId: selected.resource_id,
+        metricName: 'CPUUtilization',
+        limit: 60,
+      }),
       api.listRemediation({ connectionId: selected.connection_id }),
-    ]).then(([resource, metrics, remediation]) => {
-      if (cancelled) return;
-      setSelectedResource(resource);
-      setSelectedCpuHistory([...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)));
-      setResizeRequest(remediation.items.find(r => r.resource_id === selected.resource_id && r.action_type === 'resize_instance') ?? null);
-    }).finally(() => { if (!cancelled) setSelectedDetailLoading(false); });
-    return () => { cancelled = true; };
+    ])
+      .then(([resource, metrics, remediation]) => {
+        if (cancelled) return;
+
+        setSelectedResource(resource);
+        setSelectedCpuHistory(
+          [...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)),
+        );
+        setResizeRequest(
+          remediation.items.find(
+            r =>
+              r.resource_id === selected.resource_id &&
+              r.action_type === 'resize_instance',
+          ) ?? null,
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelectedResource(null);
+        setSelectedCpuHistory([]);
+        setResizeRequest(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedDetailLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selected]);
+
 
   // resize_instance's execute step can only ever safely issue StopInstances
   // and stop there — AWS's stop is itself asynchronous, so a Worker
@@ -130,8 +167,15 @@ export function CostOptimization() {
   const resizeRequestStatus = resizeRequest?.status;
   useEffect(() => {
     if (!resizeRequestId || resizeRequestStatus !== 'awaiting_stop') return;
+
     const interval = setInterval(() => {
-      void api.finishResizeRemediation(resizeRequestId).then(updated => setResizeRequest(updated)).catch(() => {});
+      void api
+        .finishResizeRemediation(resizeRequestId)
+        .then(updated => setResizeRequest(updated))
+        .catch(() => {
+          // Keep the current state. The next poll can recover from a transient
+          // API failure without interrupting the remediation workflow.
+        });
     }, 8000);
     return () => clearInterval(interval);
   }, [resizeRequestId, resizeRequestStatus]);
@@ -158,14 +202,36 @@ export function CostOptimization() {
   }
 
   const load = useCallback(async () => {
-    const connectionId = account === 'all' ? undefined : account;
-    const [dash, opportunities] = await Promise.all([
-      api.getCostOptimizationDashboard(),
-      api.getSavingsOpportunities({ connectionId, status: 'open', limit: 200 }),
-    ]);
-    setDashboard(dash);
-    setSavingsOpportunities(opportunities.items);
+    const requestId = ++loadRequestRef.current;
+    setLoadError(null);
+
+    try {
+      const connectionId = account === 'all' ? undefined : account;
+
+      const [dash, opportunities] = await Promise.all([
+        api.getCostOptimizationDashboard(),
+        api.getSavingsOpportunities({
+          connectionId,
+          status: 'open',
+          limit: 200,
+        }),
+      ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
+      setDashboard(dash);
+      setSavingsOpportunities(opportunities.items);
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+
+      setLoadError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load cost optimization data.',
+      );
+    }
   }, [account]);
+
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
@@ -174,53 +240,193 @@ export function CostOptimization() {
   // getSavingsPlans, getOptimizationHistory) instead of one list filtered
   // client-side by `category` — so tab switches fetch fresh.
   useEffect(() => {
-    if (tab === 'Overview' || tab === 'Recommendations' || tab === 'Cost Anomalies') { setTabRows([]); return; }
+    if (
+      tab === 'Overview' ||
+      tab === 'Recommendations' ||
+      tab === 'Cost Anomalies'
+    ) {
+      setTabRows([]);
+      setTabError(null);
+      return;
+    }
+
+    const requestId = ++tabRequestRef.current;
     let cancelled = false;
+
     setTabLoading(true);
+    setTabError(null);
+
     const connectionId = account === 'all' ? undefined : account;
-    const params: RecommendationListParams = { connectionId, limit: 200 };
+    const params: RecommendationListParams = {
+      connectionId,
+      limit: 200,
+    };
+
     const call =
-      tab === 'Rightsizing' ? api.getRightsizing({ ...params, status: 'open' }) :
-      tab === 'Idle Resources' ? api.getIdleResources({ ...params, status: 'open' }) :
-      tab === 'Reserved Instances' ? api.getReservedInstances({ ...params, status: 'open' }) :
-      tab === 'Savings Plans' ? api.getSavingsPlans({ ...params, status: 'open' }) :
-      api.getOptimizationHistory(params); // History: no status filter — shows applied + dismissed
-    void call.then(res => { if (!cancelled) setTabRows(res.items); }).finally(() => { if (!cancelled) setTabLoading(false); });
-    return () => { cancelled = true; };
+      tab === 'Rightsizing'
+        ? api.getRightsizing({ ...params, status: 'open' })
+        : tab === 'Idle Resources'
+          ? api.getIdleResources({ ...params, status: 'open' })
+          : tab === 'Reserved Instances'
+            ? api.getReservedInstances({ ...params, status: 'open' })
+            : tab === 'Savings Plans'
+              ? api.getSavingsPlans({ ...params, status: 'open' })
+              : api.getOptimizationHistory(params);
+
+    void call
+      .then(res => {
+        if (cancelled || requestId !== tabRequestRef.current) return;
+        setTabRows(res.items);
+      })
+      .catch(err => {
+        if (cancelled || requestId !== tabRequestRef.current) return;
+        setTabRows([]);
+        setTabError(
+          err instanceof Error
+            ? err.message
+            : 'Could not load optimization recommendations.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled && requestId === tabRequestRef.current) {
+          setTabLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [tab, account, refreshToken]);
+
 
   useEffect(() => {
     if (tab !== 'Cost Anomalies') return;
+
+    const requestId = ++anomalyRequestRef.current;
     let cancelled = false;
+
+    setAnomalyError(null);
+
     const connectionId = account === 'all' ? undefined : account;
-    void api.getCostAnomalies({ connectionId, limit: 200 }).then(res => { if (!cancelled) setAnomalies(res.items); });
-    return () => { cancelled = true; };
+
+    void api
+      .getCostAnomalies({ connectionId, limit: 200 })
+      .then(res => {
+        if (cancelled || requestId !== anomalyRequestRef.current) return;
+        setAnomalies(res.items);
+      })
+      .catch(err => {
+        if (cancelled || requestId !== anomalyRequestRef.current) return;
+        setAnomalies([]);
+        setAnomalyError(
+          err instanceof Error
+            ? err.message
+            : 'Could not load cost anomalies.',
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [tab, account, refreshToken]);
 
-  async function handleAnomalyStatus(id: string, status: 'acknowledged' | 'resolved') {
-    await api.updateCostAnomaly(id, status);
-    const connectionId = account === 'all' ? undefined : account;
-    const res = await api.getCostAnomalies({ connectionId, limit: 200 });
-    setAnomalies(res.items);
+
+  async function handleAnomalyStatus(
+    id: string,
+    status: 'acknowledged' | 'resolved',
+  ) {
+    if (mutationId) return;
+
+    setMutationId(id);
+    setAnomalyError(null);
+
+    try {
+      await api.updateCostAnomaly(id, status);
+
+      const connectionId = account === 'all' ? undefined : account;
+      const res = await api.getCostAnomalies({
+        connectionId,
+        limit: 200,
+      });
+
+      setAnomalies(res.items);
+    } catch (err) {
+      setAnomalyError(
+        err instanceof Error
+          ? err.message
+          : 'Could not update the anomaly.',
+      );
+    } finally {
+      setMutationId(null);
+    }
   }
+
 
   const potentialMonthly = dashboard?.totalPotentialMonthlySavings ?? 0;
   const potentialAnnual = potentialMonthly * 12;
 
-  async function markDone(id: string, status: 'applied' | 'dismissed') {
-    // updateSavingsOpportunity is the only mutate route cost-optimization-api
-    // exposes — it operates on any cost_recommendations row by id regardless
-    // of which category endpoint it was listed under.
-    await api.updateSavingsOpportunity(id, status);
-    setSelected(null);
-    await refreshLists();
+  async function markDone(
+    id: string,
+    status: 'applied' | 'dismissed',
+  ) {
+    if (mutationId) return;
+
+    setMutationId(id);
+
+    try {
+      await api.updateSavingsOpportunity(id, status);
+      setSelected(null);
+      await refreshLists();
+    } catch (err) {
+      toast(
+        err instanceof ApiError
+          ? err.message
+          : 'Could not update this recommendation.',
+        'error',
+      );
+    } finally {
+      setMutationId(null);
+    }
   }
 
-  function copyText(text: string) {
-    void navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+
+  async function copyText(value: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+
+      setCopied(true);
+
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimerRef.current = null;
+      }, 1500);
+    } catch {
+      toast('Could not copy to clipboard.', 'error');
+    }
   }
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
 
   async function refreshLists() {
     await load();
@@ -259,6 +465,20 @@ export function CostOptimization() {
       toast('Pick a date for a custom exclusion.', 'error');
       return;
     }
+
+    if (excludeDuration === 'custom') {
+      const until = new Date(`${excludeUntil}T23:59:59.999Z`);
+      if (Number.isNaN(until.getTime()) || until.getTime() <= Date.now()) {
+        toast('The custom exclusion date must be in the future.', 'error');
+        return;
+      }
+    }
+
+    const justification = excludeJustification.trim();
+    if (justification.length > 2000) {
+      toast('Justification must be 2,000 characters or fewer.', 'error');
+      return;
+    }
     setExcludeSubmitting(true);
     try {
       await api.excludeSavingsOpportunity(excludeTarget.id, {
@@ -295,7 +515,22 @@ export function CostOptimization() {
 
   async function submitNotify() {
     if (!notifyTarget) return;
-    const additionalEmails = notifyAdditionalEmails.split(',').map(e => e.trim()).filter(Boolean);
+    const additionalEmails = notifyAdditionalEmails
+      .split(',')
+      .map(e => e.trim())
+      .filter(Boolean);
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (additionalEmails.some(email => !emailPattern.test(email))) {
+      toast('One or more additional email addresses are invalid.', 'error');
+      return;
+    }
+
+    if (additionalEmails.length > 20) {
+      toast('You can add at most 20 additional email addresses.', 'error');
+      return;
+    }
+
     if (!notifyRecipientUserId && additionalEmails.length === 0) {
       toast('Pick an assignee or enter at least one email address.', 'error');
       return;
@@ -313,7 +548,15 @@ export function CostOptimization() {
     }
   }
 
-  const displayedRows = tab === 'Recommendations' ? savingsOpportunities : tabRows;
+  const displayedRows = useMemo(
+    () => (tab === 'Recommendations' ? savingsOpportunities : tabRows),
+    [tab, savingsOpportunities, tabRows],
+  );
+
+  const highPriorityCount = useMemo(
+    () => savingsOpportunities.filter(r => r.priority === 'high').length,
+    [savingsOpportunities],
+  );
 
   const baseColumns: Column<CostRecommendation>[] = [
     { key: 'resource', header: 'Resource', render: r => r.resource_id ?? '—', sortValue: r => r.resource_id ?? '' },
@@ -325,10 +568,10 @@ export function CostOptimization() {
   const actionsColumn: Column<CostRecommendation> = {
     key: 'actions', header: 'Actions', render: r => (
       <div className="flex gap-2 text-xs">
-        <button onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
-        <button onClick={e => { e.stopPropagation(); openNotifyModal(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Notify Owner</button>
-        <button onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
-        <button onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} className="text-slate-400 hover:underline">Dismiss</button>
+        <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openNotifyModal(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Notify Owner</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} disabled={mutationId === r.id} className="text-slate-400 hover:underline">Dismiss</button>
       </div>
     ),
   };
@@ -348,27 +591,75 @@ export function CostOptimization() {
     {
       key: 'actions', header: 'Actions', render: a => (
         <div className="flex gap-2 text-xs">
-          {a.status === 'open' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'acknowledged'); }} className="text-amber-600 dark:text-amber-400 hover:underline">Acknowledge</button>}
-          {a.status !== 'resolved' && <button onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'resolved'); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Resolve</button>}
+          {a.status === 'open' && <button type="button" onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'acknowledged'); }} disabled={mutationId === a.id} className="text-amber-600 dark:text-amber-400 hover:underline">Acknowledge</button>}
+          {a.status !== 'resolved' && <button type="button" onClick={e => { e.stopPropagation(); void handleAnomalyStatus(a.id, 'resolved'); }} disabled={mutationId === a.id} className="text-emerald-600 dark:text-emerald-400 hover:underline">Resolve</button>}
         </div>
       ),
     },
   ];
 
+  if (loadError && !dashboard) {
+    return (
+      <div className="flex flex-col gap-4">
+        <FilterBar
+          title="Cost Optimization"
+          breadcrumb={<Breadcrumb />}
+          showRegionFilter={false}
+          showDateFilter={false}
+        />
+        <div
+          className="rounded-xl border border-red-200 dark:border-red-900
+                     bg-red-50 dark:bg-red-900/20 p-6 text-center"
+          role="alert"
+        >
+          <p className="text-sm text-red-600 dark:text-red-300">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <FilterBar title="Cost Optimization" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
+
+      {loadError && (
+        <div
+          className="mb-4 rounded-md border border-amber-200 dark:border-amber-900/60
+                     bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-sm
+                     text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3"
+          role="alert"
+        >
+          <span>Cost optimization data could not be refreshed: {loadError}</span>
+          <button type="button" onClick={() => void load()} className="shrink-0 text-xs underline">
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Potential Monthly Savings" value={money(potentialMonthly)} />
         <StatCard label="Annualized Savings" value={money(potentialAnnual)} />
         <StatCard label="Open Opportunities" value={String(dashboard?.openRecommendations ?? 0)} />
-        <StatCard label="High Priority" value={String(savingsOpportunities.filter(r => r.priority === 'high').length)} />
+        <StatCard label="High Priority" value={String(highPriorityCount)} />
       </div>
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <button
+            type="button"
+            key={t}
+            onClick={() => setTab(t)}
+            role="tab"
+            aria-selected={tab === t}
+            className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+          >
             {TAB_TO_NAV_LABEL[t] ?? t}
           </button>
         ))}
@@ -384,9 +675,23 @@ export function CostOptimization() {
           )}
         </div>
       ) : tab === 'Cost Anomalies' ? (
-        <DataTable columns={anomalyColumns} rows={anomalies} rowKey={a => a.id} emptyMessage="No anomalies detected — day-over-day service cost spikes >50% will show up here." />
+        <>
+          {anomalyError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{anomalyError}</span>
+              <button type="button" onClick={() => setAnomalyError(null)} className="text-xs underline shrink-0">Dismiss</button>
+            </div>
+          )}
+          <DataTable columns={anomalyColumns} rows={anomalies} rowKey={a => a.id} emptyMessage="No anomalies detected — day-over-day service cost spikes >50% will show up here." />
+        </>
       ) : (
         <>
+          {tabError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{tabError}</span>
+              <button type="button" onClick={() => setTabError(null)} className="text-xs underline shrink-0">Dismiss</button>
+            </div>
+          )}
           <DataTable columns={columns} rows={displayedRows} rowKey={r => r.id} emptyMessage={tab === 'History' ? 'No applied or dismissed recommendations yet.' : 'No recommendations in this category yet.'} />
           {tabLoading && <p className="text-xs text-slate-400 mt-2">Loading…</p>}
         </>
@@ -423,7 +728,7 @@ export function CostOptimization() {
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Recommended Action</div>
               <div className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 whitespace-pre-wrap">{selected.recommended_action}</div>
-              <button onClick={() => copyText(selected.recommended_action)} className="mt-2 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <button type="button" onClick={() => copyText(selected.recommended_action)} className="mt-2 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
                 {copied ? 'Copied' : 'Copy recommended action'}
               </button>
             </div>
@@ -431,10 +736,10 @@ export function CostOptimization() {
             <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never makes this change for you — action it yourself in the AWS Console or CLI, then mark it done here.</p>
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
-              <button onClick={() => openNotifyModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
-              <button onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
-              <button onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
+              <button type="button" onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              <button type="button" onClick={() => openNotifyModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
+              <button type="button" onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
+              <button type="button" onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
             </div>
           </div>
         )}
@@ -468,8 +773,8 @@ export function CostOptimization() {
             )}
             <p className="text-xs text-slate-400">{excludeDuration === 'permanent' ? 'This recommendation will stay hidden from open views indefinitely, until manually reversed.' : 'This recommendation reappears automatically once the exclusion period ends.'}</p>
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button onClick={() => void submitExclude()} disabled={excludeSubmitting} className="text-xs px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">{excludeSubmitting ? 'Excluding…' : 'Exclude'}</button>
-              <button onClick={() => setExcludeTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+              <button type="button" onClick={() => void submitExclude()} disabled={excludeSubmitting} className="text-xs px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">{excludeSubmitting ? 'Excluding…' : 'Exclude'}</button>
+              <button type="button" onClick={() => setExcludeTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
             </div>
           </div>
         )}
@@ -503,8 +808,8 @@ export function CostOptimization() {
               <p className="text-xs text-slate-400">Last notified {new Date(notifyTarget.last_notified_at).toLocaleString()}.</p>
             )}
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button onClick={() => void submitNotify()} disabled={notifySubmitting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{notifySubmitting ? 'Sending…' : 'Notify'}</button>
-              <button onClick={() => setNotifyTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+              <button type="button" onClick={() => void submitNotify()} disabled={notifySubmitting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{notifySubmitting ? 'Sending…' : 'Notify'}</button>
+              <button type="button" onClick={() => setNotifyTarget(null)} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
             </div>
           </div>
         )}
@@ -583,6 +888,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
       setAutoPrRepos(res.items);
     } catch {
       setAutoPrRepos([]);
+      setAutoPrResult({ error: 'Could not load repositories for this GitHub installation.' });
     } finally {
       setAutoPrReposLoading(false);
     }
@@ -594,7 +900,15 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
     setAutoPrResult(null);
     try {
       const res = await api.openAutoPr(recommendation.id, { installationRowId: autoPrInstallationRowId, repoFullName: autoPrRepoFullName, filePath: autoPrFilePath });
-      setAutoPrResult({ prUrl: res.prUrl });
+      try {
+        const parsed = new URL(res.prUrl);
+        if (parsed.protocol !== 'https:') {
+          throw new Error('The pull request URL is not secure.');
+        }
+        setAutoPrResult({ prUrl: parsed.toString() });
+      } catch {
+        setAutoPrResult({ error: 'The server returned an invalid pull request URL.' });
+      }
     } catch (err) {
       setAutoPrResult({ error: err instanceof ApiError ? err.message : 'Could not open the pull request.' });
     } finally {
@@ -602,7 +916,16 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
     }
   }
 
-  const cliCommands = instanceId && region && recommendedType
+  const safeCliToken = (value: string): string =>
+    value.replace(/[^a-zA-Z0-9._:/-]/g, '');
+
+  const safeInstanceId = instanceId ? safeCliToken(instanceId) : '';
+  const safeRegion = region ? safeCliToken(region) : '';
+  const safeRecommendedType = recommendedType
+    ? safeCliToken(recommendedType)
+    : '';
+
+  const cliCommands = safeInstanceId && safeRegion && safeRecommendedType
     ? [
         `aws ec2 stop-instances --instance-ids ${instanceId} --region ${region}`,
         `aws ec2 wait instance-stopped --instance-ids ${instanceId} --region ${region}`,
@@ -674,7 +997,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           </div>
         ) : recommendedType ? (
           <>
-            <button onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <button type="button" onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
               {resizeRequesting ? 'Requesting…' : 'Request Automated Resize'}
             </button>
             <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. HorizonVigil executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
@@ -705,10 +1028,10 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
               <input value={autoPrFilePath} onChange={e => setAutoPrFilePath(e.target.value)} placeholder="path/to/instance.tf" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
             )}
             {autoPrRepoFullName && autoPrFilePath && (
-              <button onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
+              <button type="button" onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
             )}
             {autoPrResult && 'prUrl' in autoPrResult && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: <a href={autoPrResult.prUrl} target="_blank" rel="noreferrer" className="underline">{autoPrResult.prUrl}</a></p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: <a href={autoPrResult.prUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline">{autoPrResult.prUrl}</a></p>
             )}
             {autoPrResult && 'error' in autoPrResult && (
               <p className="text-xs text-red-500">{autoPrResult.error}</p>
@@ -724,7 +1047,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         {cliCommands ? (
           <>
             <pre className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 overflow-x-auto whitespace-pre">{cliCommands}</pre>
-            <button onClick={() => onCopy(cliCommands)} className="mt-2 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+            <button type="button" onClick={() => onCopy(cliCommands)} className="mt-2 text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
               {copied ? 'Copied' : 'Copy commands'}
             </button>
             <p className="text-xs text-slate-400 mt-2">Stops the instance (required — AWS rejects an instance-type change while running), resizes it, then starts it back up. There will be real downtime for the duration of the stop/resize/start cycle.</p>
@@ -737,10 +1060,10 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
       <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-        <button onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
-        <button onClick={onNotifyOwner} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
-        <button onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
-        <button onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
+        <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        <button type="button" onClick={onNotifyOwner} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
+        <button type="button" onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
+        <button type="button" onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
       </div>
     </div>
   );

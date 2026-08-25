@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -24,6 +24,17 @@ import {
 const TABS = ['EKS Clusters', 'Node Groups', 'Nodes', 'Namespaces', 'Deployments', 'Pods', 'Helm Releases', 'ECS Clusters', 'ECS Services', 'ECS Tasks'] as const;
 type Tab = typeof TABS[number];
 
+function displayValue(value: unknown, fallback = '—'): string {
+  if (value === null || value === undefined || value === '') return fallback;
+  return String(value);
+}
+
+function displayDate(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
+}
+
 function costCell(c: CloudResource) {
   if (c.cost_monthly == null) return <span className="text-slate-400 text-xs">no cost data</span>;
   return <span className="tabular-nums font-medium">${c.cost_monthly.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
@@ -35,6 +46,8 @@ export function EksConsole() {
   const [tab, setTab] = useTabParam<Tab>(TABS, 'EKS Clusters');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [everLoadedOk, setEverLoadedOk] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const loadRequestRef = useRef(0);
 
   const [ecsClusters, setEcsClusters] = useState<CloudResource[]>([]);
   const [eksClusters, setEksClusters] = useState<CloudResource[]>([]);
@@ -64,10 +77,30 @@ export function EksConsole() {
   const [selected, setSelected] = useState<CloudResource | null>(null);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    const isRefresh = everLoadedOk;
+
     setLoadError(null);
+    setRefreshing(isRefresh);
+
     try {
       const connectionId = account === 'all' ? undefined : account;
-      const [eksRes, ecsClusterRes, nodesRes, svcRes, taskRes, eksDeployRes, eksPodRes, namespaces, helmReleases, nodegroupsRes, accessEntriesRes, authMappingsRes, oidcRes, addonsRes] = await Promise.all([
+      const [
+        eksRes,
+        ecsClusterRes,
+        nodesRes,
+        svcRes,
+        taskRes,
+        eksDeployRes,
+        eksPodRes,
+        namespaces,
+        helmReleases,
+        nodegroupsRes,
+        accessEntriesRes,
+        authMappingsRes,
+        oidcRes,
+        addonsRes,
+      ] = await Promise.all([
         api.getEksClusters({ connectionId, limit: 200 }),
         api.getEcsClusters({ connectionId, limit: 200 }),
         api.getEksNodes({ connectionId, limit: 500 }),
@@ -83,6 +116,9 @@ export function EksConsole() {
         api.getResourceInventory({ connectionId, service: 'iam', limit: 200 }),
         api.getEksAddons({ connectionId, limit: 200 }),
       ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
       setEksClusters(eksRes.items);
       setEcsClusters(ecsClusterRes.items);
       setEksNodes(nodesRes.items);
@@ -95,26 +131,74 @@ export function EksConsole() {
       setHelmReleaseReason(helmReleases.reason);
       setEksAccessEntries(accessEntriesRes.items);
       setEksAuthMappings(authMappingsRes.items);
-      setIamOidcProviders(oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'));
+      setIamOidcProviders(
+        oidcRes.items.filter(r => r.resource_type_key === 'iam_oidc_provider'),
+      );
       setEksAddons(addonsRes.items);
       setEverLoadedOk(true);
     } catch (err) {
-      const message = friendlyErrorMessage(err, 'Failed to load the EKS console.');
+      if (requestId !== loadRequestRef.current) return;
+
+      const message = friendlyErrorMessage(
+        err,
+        'Failed to load the EKS console.',
+      );
       setLoadError(message);
-      toast(message, 'error');
+
+      // Do not toast every background refresh failure if the page already has
+      // usable data; the persistent inline banner below is less disruptive.
+      if (!isRefresh) toast(message, 'error');
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setRefreshing(false);
+      }
     }
-  }, [account, toast]);
+  }, [account, everLoadedOk, toast]);
+
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
-  const ecsClusterNameByArn = new Map(ecsClusters.map(c => [c.resource_id, c.resource_name ?? c.resource_id]));
+  const ecsClusterNameByArn = useMemo(
+    () => new Map(
+      ecsClusters.map(c => [c.resource_id, c.resource_name ?? c.resource_id]),
+    ),
+    [ecsClusters],
+  );
+
+  // Avoid O(clusters × services/tasks) filtering during every table render.
+  const ecsServiceCountByCluster = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const service of ecsServices) {
+      const arn = service.relationships?.clusterArn as string | undefined;
+      if (arn) counts.set(arn, (counts.get(arn) ?? 0) + 1);
+    }
+    return counts;
+  }, [ecsServices]);
+
+  const ecsTaskCountByCluster = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of ecsTasks) {
+      const arn = task.relationships?.clusterArn as string | undefined;
+      if (arn) counts.set(arn, (counts.get(arn) ?? 0) + 1);
+    }
+    return counts;
+  }, [ecsTasks]);
+
+  const eksNodeCountByCluster = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of eksNodes) {
+      const cluster = node.relationships?.clusterName as string | undefined;
+      if (cluster) counts.set(cluster, (counts.get(cluster) ?? 0) + 1);
+    }
+    return counts;
+  }, [eksNodes]);
 
   const ecsClusterColumns: Column<CloudResource>[] = [
     { key: 'name', header: 'Cluster', render: c => c.resource_name ?? c.resource_id, sortValue: c => c.resource_name ?? '' },
     { key: 'region', header: 'Region', render: c => c.region ?? 'global', sortValue: c => c.region ?? '' },
     { key: 'status', header: 'Status', render: c => <Badge>{c.state ?? c.status}</Badge>, sortValue: c => c.state ?? c.status },
-    { key: 'services', header: 'Services', render: c => ecsServices.filter(s => s.relationships?.clusterArn === c.resource_id).length, sortValue: c => ecsServices.filter(s => s.relationships?.clusterArn === c.resource_id).length },
-    { key: 'tasks', header: 'Tasks', render: c => ecsTasks.filter(t => t.relationships?.clusterArn === c.resource_id).length, sortValue: c => ecsTasks.filter(t => t.relationships?.clusterArn === c.resource_id).length },
+    { key: 'services', header: 'Services', render: c => ecsServiceCountByCluster.get(c.resource_id) ?? 0, sortValue: c => ecsServiceCountByCluster.get(c.resource_id) ?? 0 },
+    { key: 'tasks', header: 'Tasks', render: c => ecsTaskCountByCluster.get(c.resource_id) ?? 0, sortValue: c => ecsTaskCountByCluster.get(c.resource_id) ?? 0 },
     { key: 'cost', header: 'Est. Monthly Cost', render: costCell, sortValue: c => c.cost_monthly ?? 0 },
   ];
 
@@ -122,7 +206,7 @@ export function EksConsole() {
     { key: 'name', header: 'Cluster', render: c => c.resource_name ?? c.resource_id, sortValue: c => c.resource_name ?? '' },
     { key: 'region', header: 'Region', render: c => c.region ?? 'global', sortValue: c => c.region ?? '' },
     { key: 'status', header: 'Status', render: c => <Badge>{c.state ?? c.status}</Badge>, sortValue: c => c.state ?? c.status },
-    { key: 'nodes', header: 'Nodes', render: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length, sortValue: c => eksNodes.filter(n => n.relationships?.clusterName === c.resource_name).length },
+    { key: 'nodes', header: 'Nodes', render: c => eksNodeCountByCluster.get(c.resource_name ?? '') ?? 0, sortValue: c => eksNodeCountByCluster.get(c.resource_name ?? '') ?? 0 },
     { key: 'version', header: 'Version', render: c => (c.metadata?.version as string) ?? '—' },
     { key: 'cost', header: 'Est. Monthly Cost', render: costCell, sortValue: c => c.cost_monthly ?? 0 },
   ];
@@ -185,19 +269,34 @@ export function EksConsole() {
     { key: 'status', header: 'Status', render: n => <Badge>{n.state ?? n.status}</Badge>, sortValue: n => n.state ?? n.status },
   ];
 
-  const totalClusters = ecsClusters.length + eksClusters.length;
+  const totalClusters = useMemo(
+    () => ecsClusters.length + eksClusters.length,
+    [ecsClusters.length, eksClusters.length],
+  );
 
   if (loadError && !everLoadedOk) {
     return (
       <div>
         <FilterBar title="AWS EKS Console" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
+      <div className="flex justify-end -mt-2 mb-4">
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          aria-label="Refresh EKS console data"
+        >
+          <Icon name="refresh" size={13} />
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
         <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
           <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load the EKS console</p>
             <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
           </div>
-          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+          <button type="button" disabled={refreshing} onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0 disabled:opacity-50">{refreshing ? 'Retrying…' : 'Retry'}</button>
         </div>
       </div>
     );
@@ -206,6 +305,30 @@ export function EksConsole() {
   return (
     <div>
       <FilterBar title="AWS EKS Console" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
+
+      {loadError && everLoadedOk && (
+        <div
+          role="alert"
+          className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-amber-800 dark:text-amber-300">
+              Could not refresh EKS data
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5 truncate">
+              {loadError}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={refreshing}
+            onClick={() => void load()}
+            className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300 hover:underline disabled:opacity-50"
+          >
+            {refreshing ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-5">
         <StatCard label="Total Clusters" value={String(totalClusters)} />
@@ -216,12 +339,27 @@ export function EksConsole() {
         <StatCard label="Pods" value={String(eksPods.length)} />
       </div>
 
-      <div className="flex gap-1 text-sm flex-wrap mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex gap-1 text-sm flex-wrap" role="tablist" aria-label="EKS console resources">
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+          <button
+            type="button"
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            aria-controls={`eks-console-panel-${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+            onClick={() => setTab(t)}
+            className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+          >
             {t}
           </button>
         ))}
+        </div>
+        {refreshing && (
+          <span className="text-xs text-slate-400 whitespace-nowrap" aria-live="polite">
+            Refreshing…
+          </span>
+        )}
       </div>
 
       {tab === 'EKS Clusters' && (
@@ -310,7 +448,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
   const cluster = clusterName ? eksClusters.find(c => c.resource_name === clusterName) : undefined;
 
   const clusterLink = cluster && (
-    <DetailField label="Cluster" value={<button onClick={() => onNavigate(cluster)} className="text-brand-600 dark:text-brand-400 hover:underline">{clusterName}</button>} />
+    <DetailField label="Cluster" value={<button type="button" onClick={() => onNavigate(cluster)} className="text-brand-600 dark:text-brand-400 hover:underline">{clusterName}</button>} />
   );
 
   if (r.resource_type_key === 'eks_cluster') {
@@ -326,7 +464,13 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
     const authMappingsHere = eksAuthMappings.filter(a => a.relationships?.clusterName === r.resource_name);
     const addonsHere = eksAddons.filter(a => a.relationships?.clusterName === r.resource_name);
     const oidcIssuer = m.oidcIssuerUrl as string | undefined;
-    const hasIrsa = !!oidcIssuer && iamOidcProviders.some(p => p.resource_id.endsWith(oidcIssuer.replace('https://', '')));
+    const oidcProviderSuffix = oidcIssuer?.replace(/^https:\/\//, '').replace(/\/$/, '');
+    const hasIrsa = Boolean(
+      oidcProviderSuffix &&
+      iamOidcProviders.some(p =>
+        p.resource_id.replace(/\/$/, '').endsWith(oidcProviderSuffix),
+      ),
+    );
     return (
       <div className="flex flex-col gap-4 text-sm">
         {healthIssues.length > 0 && (
@@ -343,10 +487,10 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
               {behindLatest && <Badge tone="warning">behind latest ({m.latestStandardSupportVersion as string})</Badge>}
             </span>
           } />
-          <DetailField label="Platform Version" value={m.platformVersion as string} />
-          <DetailField label="Region" value={r.region} />
-          <DetailField label="Endpoint" value={<span className="font-mono text-[11px]">{m.endpoint as string}</span>} />
-          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+          <DetailField label="Platform Version" value={displayValue(m.platformVersion)} />
+          <DetailField label="Region" value={displayValue(r.region)} />
+          <DetailField label="Endpoint" value={<span className="font-mono text-[11px]">{displayValue(m.endpoint)}</span>} />
+          <DetailField label="Created" value={displayDate(m.createdAt)} />
           <DetailField label="Nodes Ready" value={`${readyCount} / ${nodesHere.length}`} />
           <DetailField label="Auth Mode" value={m.authenticationMode as string} />
         </DetailSection>
@@ -438,7 +582,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <DetailField label="Kubernetes Version" value={m.kubernetesVersion as string} />
           <DetailField label="Release Version" value={m.releaseVersion as string} />
           <DetailField label="Disk Size" value={m.diskSizeGiB ? `${m.diskSizeGiB} GiB` : undefined} />
-          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+          <DetailField label="Created" value={displayDate(m.createdAt)} />
         </DetailSection>
         <DetailSection title="Scaling">
           <DetailField label="Current Size" value={m.desiredSize as number} />
@@ -572,7 +716,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
       <div className="flex flex-col gap-4 text-sm">
         <DetailSection title="Overview">
           {clusterLink}
-          <DetailField label="Namespace" value={namespaceObj ? <button onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
+          <DetailField label="Namespace" value={namespaceObj ? <button type="button" onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
           <DetailField label="Replicas (ready / desired)" value={
             <span className="inline-flex items-center gap-1.5">
               {`${(m.readyReplicas as number) ?? 0} / ${(m.replicas as number) ?? 0}`}
@@ -626,8 +770,8 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
         <DetailSection title="Overview">
           <DetailField label="Status" value={<Badge tone={podHealthTone(r)}>{r.state ?? r.status}</Badge>} />
           {clusterLink}
-          <DetailField label="Namespace" value={namespaceObj ? <button onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
-          <DetailField label="Node" value={node ? <button onClick={() => onNavigate(node)} className="text-brand-600 dark:text-brand-400 hover:underline">{m.nodeName as string}</button> : (m.nodeName as string)} />
+          <DetailField label="Namespace" value={namespaceObj ? <button type="button" onClick={() => onNavigate(namespaceObj)} className="text-brand-600 dark:text-brand-400 hover:underline">{namespace}</button> : namespace} />
+          <DetailField label="Node" value={node ? <button type="button" onClick={() => onNavigate(node)} className="text-brand-600 dark:text-brand-400 hover:underline">{m.nodeName as string}</button> : (m.nodeName as string)} />
           <DetailField label="QoS Class" value={m.qosClass as string} />
           <DetailField label="Pod IP" value={m.podIP as string} />
           <DetailField label="Host IP" value={m.hostIP as string} />
@@ -724,7 +868,7 @@ function ResourceDetail({ resource: r, onNavigate, eksClusters, eksNodes, eksNod
           <DetailField label="Type" value={m.type as string} />
           <DetailField label="Kubernetes Groups" value={((m.kubernetesGroups as string[] | undefined) ?? []).join(', ') || '—'} />
           <DetailField label="Username Override" value={m.username as string} />
-          <DetailField label="Created" value={m.createdAt ? new Date(m.createdAt as string).toLocaleString() : undefined} />
+          <DetailField label="Created" value={displayDate(m.createdAt)} />
         </DetailSection>
         {policies.length > 0 && (
           <DetailSection title="Associated Access Policies">

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Modal } from '../components/Modal';
@@ -101,9 +101,16 @@ export function CustomDashboards() {
   const [createOpen, setCreateOpen] = useState(false);
   const [detail, setDetail] = useState<CustomDashboard | null>(null);
   const [widgetData, setWidgetData] = useState<WidgetData | null>(null);
+  const [widgetDataLoading, setWidgetDataLoading] = useState(false);
+  const [widgetDataError, setWidgetDataError] = useState<string | null>(null);
+  const [mutationKey, setMutationKey] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+  const widgetRequestRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoadError(null);
+
     try {
       const [m, s, t, w] = await Promise.all([
         api.getMyDashboards({ limit: 100 }),
@@ -111,58 +118,178 @@ export function CustomDashboards() {
         api.getDashboardTemplates({ limit: 100 }),
         api.getWidgetLibrary(),
       ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
       setMine(m.items);
       setShared(s.items);
       setTemplates(t.items);
       setWidgets(w.widgets);
       setEverLoadedOk(true);
     } catch (err) {
-      const message = friendlyErrorMessage(err, 'Failed to load dashboards.');
+      if (requestId !== loadRequestRef.current) return;
+
+      const message = friendlyErrorMessage(
+        err,
+        'Failed to load dashboards.',
+      );
       setLoadError(message);
       toast(message, 'error');
     }
   }, [toast]);
 
+
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!detail) { setWidgetData(null); return; }
+    if (!detail) {
+      setWidgetData(null);
+      setWidgetDataError(null);
+      setWidgetDataLoading(false);
+      return;
+    }
+
+    const requestId = ++widgetRequestRef.current;
     let cancelled = false;
-    (async () => {
-      const [resources, cost, costAnalytics, security, activityRes, alarmsRes] = await Promise.all([
-        api.getOverviewResources(),
-        api.getOverviewCost(),
-        api.getCostAnalytics(),
-        api.getOverviewSecurity(),
-        api.getRecentActivity(1, 5),
-        api.getAlarms({ limit: 5 }),
-      ]);
-      if (cancelled) return;
-      setWidgetData({
-        resourceTotal: resources.total, resourceByCategory: resources.byCategory,
-        costMtd: cost.monthToDate, costByService: costAnalytics.byService,
-        openFindings: security.openFindings, activity: activityRes.items, alarms: alarmsRes.items,
+
+    setWidgetDataLoading(true);
+    setWidgetDataError(null);
+
+    void Promise.all([
+      api.getOverviewResources(),
+      api.getOverviewCost(),
+      api.getCostAnalytics(),
+      api.getOverviewSecurity(),
+      api.getRecentActivity(1, 5),
+      api.getAlarms({ limit: 5 }),
+    ])
+      .then(([resources, cost, costAnalytics, security, activityRes, alarmsRes]) => {
+        if (cancelled || requestId !== widgetRequestRef.current) return;
+
+        setWidgetData({
+          resourceTotal: resources.total,
+          resourceByCategory: resources.byCategory,
+          costMtd: cost.monthToDate,
+          costByService: costAnalytics.byService,
+          openFindings: security.openFindings,
+          activity: activityRes.items,
+          alarms: alarmsRes.items,
+        });
+      })
+      .catch(err => {
+        if (cancelled || requestId !== widgetRequestRef.current) return;
+
+        setWidgetDataError(
+          friendlyErrorMessage(err, 'Could not load live widget data.'),
+        );
+        setWidgetData(null);
+      })
+      .finally(() => {
+        if (!cancelled && requestId === widgetRequestRef.current) {
+          setWidgetDataLoading(false);
+        }
       });
-    })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [detail]);
 
+
   async function handleDelete(id: string) {
-    if (!(await confirm('Delete this dashboard? This cannot be undone.'))) return;
-    await api.deleteDashboard(id);
-    setDetail(null);
-    await load();
+    if (mutationKey) return;
+
+    if (!(await confirm('Delete this dashboard? This cannot be undone.'))) {
+      return;
+    }
+
+    setMutationKey(`delete:${id}`);
+
+    try {
+      await api.deleteDashboard(id);
+      setDetail(null);
+      await load();
+    } catch (err) {
+      toast(
+        friendlyErrorMessage(err, 'Could not delete this dashboard.'),
+        'error',
+      );
+    } finally {
+      setMutationKey(null);
+    }
   }
+
 
   async function handleShare(dash: CustomDashboard) {
-    await api.shareDashboard(dash.id, !dash.is_shared);
-    await load();
+    if (mutationKey) return;
+
+    setMutationKey(`share:${dash.id}`);
+
+    try {
+      await api.shareDashboard(dash.id, !dash.is_shared);
+
+      // Keep the open detail in sync with the server response by refreshing
+      // the authoritative dashboard collections.
+      await load();
+      setDetail(current =>
+        current?.id === dash.id
+          ? { ...current, is_shared: !dash.is_shared }
+          : current,
+      );
+    } catch (err) {
+      toast(
+        friendlyErrorMessage(err, 'Could not update dashboard sharing.'),
+        'error',
+      );
+    } finally {
+      setMutationKey(null);
+    }
   }
 
+
   async function handleUseTemplate(id: string) {
-    await api.useTemplate(id);
-    await load();
-    setTab('mine');
+    if (mutationKey) return;
+
+    setMutationKey(`template:${id}`);
+
+    try {
+      await api.useTemplate(id);
+      await load();
+      setTab('mine');
+      toast('Dashboard created from template.', 'success');
+    } catch (err) {
+      toast(
+        friendlyErrorMessage(err, 'Could not create dashboard from template.'),
+        'error',
+      );
+    } finally {
+      setMutationKey(null);
+    }
+  }
+
+
+  async function updateDetailWidgets(
+    dashboardId: string,
+    nextWidgets: unknown[],
+  ) {
+    if (mutationKey) return;
+
+    setMutationKey(`widgets:${dashboardId}`);
+
+    try {
+      const updated = await api.updateDashboard(dashboardId, {
+        widgets: nextWidgets,
+      });
+      setDetail(updated);
+      await load();
+    } catch (err) {
+      toast(
+        friendlyErrorMessage(err, 'Could not update dashboard widgets.'),
+        'error',
+      );
+    } finally {
+      setMutationKey(null);
+    }
   }
 
   const rows = tab === 'mine' ? mine : tab === 'shared' ? shared : tab === 'templates' ? templates : [];
@@ -177,7 +304,7 @@ export function CustomDashboards() {
             <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load Custom Dashboards</p>
             <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{loadError}</p>
           </div>
-          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+          <button type="button" onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
         </div>
       </div>
     );
@@ -187,21 +314,39 @@ export function CustomDashboards() {
     <div>
       <FilterBar title="Custom Dashboards" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
+      {loadError && everLoadedOk && (
+        <div
+          className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-sm"
+          role="alert"
+        >
+          <span className="text-amber-800 dark:text-amber-300">
+            Could not refresh dashboard data: {loadError}
+          </span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300 hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm">
           {visibleTabs.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+            <button type="button" key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
               {t === 'mine' ? 'My Dashboards' : t === 'shared' ? 'Shared Dashboards' : t === 'templates' ? 'Templates' : 'Widget Library'}
             </button>
           ))}
         </div>
         {tab === 'mine' && (
-          <button onClick={() => setCreateOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ New Dashboard</button>
+          <button type="button" onClick={() => setCreateOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ New Dashboard</button>
         )}
       </div>
 
       {tab === 'widgets' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id="custom-dashboard-panel-widgets" role="tabpanel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {widgets.map(w => (
             <div key={w.key} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <div className="flex items-center justify-between mb-1">
@@ -215,9 +360,9 @@ export function CustomDashboards() {
           {widgets.length === 0 && <div className="col-span-full"><EmptyState icon="grid" title="No widgets in the catalog yet" /></div>}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div id={`custom-dashboard-panel-${tab}`} role="tabpanel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {rows.map(d => (
-            <button key={d.id} onClick={() => setDetail(d)} className="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-300 dark:hover:border-brand-700">
+            <button type="button" key={d.id} onClick={() => setDetail(d)} className="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-300 dark:hover:border-brand-700">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{d.name}</span>
                 {d.is_shared && <span className="text-[10px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">Shared</span>}
@@ -251,16 +396,17 @@ export function CustomDashboards() {
             <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Widgets ({Array.isArray(detail.widgets) ? detail.widgets.length : 0})</h3>
             <div className="flex flex-wrap gap-2">
               {widgets.map(w => (
-                <button
+                <button type="button"
                   key={w.key}
-                  onClick={async () => {
-                    const nextWidgets = [...(Array.isArray(detail.widgets) ? detail.widgets : []), { key: w.key, config: w.default_config }];
-                    const updated = await api.updateDashboard(detail.id, { widgets: nextWidgets });
-                    setDetail(updated);
-                    await load();
+                  onClick={() => {
+                    const nextWidgets = [
+                      ...(Array.isArray(detail.widgets) ? detail.widgets : []),
+                      { key: w.key, config: w.default_config },
+                    ];
+                    void updateDetailWidgets(detail.id, nextWidgets);
                   }}
                   className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-                  disabled={detail.owner_id !== user?.id}
+                  disabled={detail.owner_id !== user?.id || mutationKey === `widgets:${detail.id}`}
                 >
                   + {w.display_name}
                 </button>
@@ -275,12 +421,12 @@ export function CustomDashboards() {
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{catalogEntry?.display_name ?? w.key}</span>
                         {detail.owner_id === user?.id && (
-                          <button
-                            onClick={async () => {
-                              const nextWidgets = (detail.widgets as unknown[]).filter((_, idx) => idx !== i);
-                              const updated = await api.updateDashboard(detail.id, { widgets: nextWidgets });
-                              setDetail(updated);
-                              await load();
+                          <button type="button"
+                            onClick={() => {
+                              const nextWidgets = (detail.widgets as unknown[]).filter(
+                                (_, idx) => idx !== i,
+                              );
+                              void updateDetailWidgets(detail.id, nextWidgets);
                             }}
                             className="text-slate-300 hover:text-red-500 text-xs"
                             title="Remove widget"
@@ -300,10 +446,10 @@ export function CustomDashboards() {
           </div>
           {detail.owner_id === user?.id && (
             <div className="flex justify-between">
-              <button onClick={() => void handleShare(detail)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <button type="button" onClick={() => void handleShare(detail)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
                 {detail.is_shared ? 'Unshare' : 'Share with org'}
               </button>
-              <button onClick={() => void handleDelete(detail.id)} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Delete Dashboard</button>
+              <button type="button" onClick={() => void handleDelete(detail.id)} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Delete Dashboard</button>
             </div>
           )}
         </Modal>
@@ -321,15 +467,41 @@ function CreateDashboardModal({ open, onClose, onCreated }: { open: boolean; onC
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+
+    if (!trimmedName) {
+      setError('Dashboard name is required.');
+      return;
+    }
+
+    if (trimmedName.length > 120) {
+      setError('Dashboard name must be 120 characters or fewer.');
+      return;
+    }
+
+    if (trimmedDescription.length > 1000) {
+      setError('Description must be 1,000 characters or fewer.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
     try {
-      await api.createDashboard({ name: name.trim(), description: description.trim() || undefined, widgets: [] });
+      await api.createDashboard({
+        name: trimmedName,
+        description: trimmedDescription || undefined,
+        widgets: [],
+      });
       setName(''); setDescription('');
       onCreated();
       onClose();
     } catch (err) {
-      setError((err as Error).message);
+      setError(
+        friendlyErrorMessage(err, 'Could not create the dashboard.'),
+      );
     } finally {
       setLoading(false);
     }
@@ -340,11 +512,11 @@ function CreateDashboardModal({ open, onClose, onCreated }: { open: boolean; onC
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-slate-600 dark:text-slate-300">Name</span>
-          <input value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. My Cost Dashboard" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+          <input value={name} onChange={e => setName(e.target.value)} maxLength={120} required placeholder="e.g. My Cost Dashboard" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-slate-600 dark:text-slate-300">Description (optional)</span>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+          <textarea value={description} onChange={e => setDescription(e.target.value)} maxLength={1000} rows={2} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
         </label>
         {error && <p className="text-sm text-red-500">{error}</p>}
         <button type="submit" disabled={loading || !name.trim()} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2">

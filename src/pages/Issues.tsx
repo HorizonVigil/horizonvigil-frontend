@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -75,29 +75,69 @@ export function Issues() {
   const [costItems, setCostItems] = useState<CostRecommendation[]>([]);
   const [findings, setFindings] = useState<VulnerabilityFinding[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'all' | IssueSource>('all');
   const [severityFilter, setSeverityFilter] = useState<'all' | UnifiedSeverity>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | UnifiedStatus>('all');
   const [groupBy, setGroupBy] = useState<GroupBy>('None');
   const [selected, setSelected] = useState<UnifiedIssue | null>(null);
+  const loadRequestRef = useRef(0);
 
-  useEffect(() => {
-    const connectionId = account === 'all' ? undefined : account;
-    let cancelled = false;
-    setLoading(true);
-    void Promise.all([
-      api.getSavingsOpportunities({ connectionId, status: 'open', limit: 200 }),
-      api.getFindings({ connection_id: connectionId, status: 'open', limit: 200 }),
-      api.getActiveAlerts({ connection_id: connectionId, limit: 200 }),
-    ]).then(([cost, sec, al]) => {
-      if (cancelled) return;
+  const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    const hasExistingData =
+      costItems.length > 0 || findings.length > 0 || alerts.length > 0;
+
+    setLoadError(null);
+    setLoading(!hasExistingData);
+    setRefreshing(hasExistingData);
+
+    try {
+      const connectionId = account === 'all' ? undefined : account;
+
+      const [cost, sec, al] = await Promise.all([
+        api.getSavingsOpportunities({
+          connectionId,
+          status: 'open',
+          limit: 200,
+        }),
+        api.getFindings({
+          connection_id: connectionId,
+          status: 'open',
+          limit: 200,
+        }),
+        api.getActiveAlerts({
+          connection_id: connectionId,
+          limit: 200,
+        }),
+      ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
       setCostItems(cost.items);
       setFindings(sec.items);
       setAlerts(al.items);
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [account, refreshToken]);
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+
+      setLoadError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load issues.',
+      );
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [account, refreshToken, costItems.length, findings.length, alerts.length]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const allIssues = useMemo<UnifiedIssue[]>(() => {
     const merged = [...costItems.map(fromCostRecommendation), ...findings.map(fromFinding), ...alerts.map(fromAlert)];
@@ -124,40 +164,116 @@ export function Issues() {
     return [...map.entries()].map(([label, rows]) => ({ label, rows })).sort((a, b) => b.rows.length - a.rows.length);
   }, [filteredIssues, groupBy]);
 
+  useEffect(() => {
+    if (selected && !allIssues.some(issue => issue.id === selected.id)) {
+      setSelected(null);
+    }
+  }, [allIssues, selected]);
+
   const columns: Column<UnifiedIssue>[] = [
     { key: 'source', header: 'Source', render: i => <Badge tone="neutral">{SOURCE_LABEL[i.source]}</Badge>, sortValue: i => i.source },
     { key: 'title', header: 'Issue', render: i => <span className="truncate max-w-md inline-block">{i.title}</span>, sortValue: i => i.title },
-    { key: 'severity', header: 'Severity', render: i => <Badge tone={SEVERITY_TONE[i.severity]}>{i.severity}</Badge>, sortValue: i => i.severity },
-    { key: 'status', header: 'Status', render: i => <Badge tone={STATUS_TONE[i.status]}>{i.status.replace('_', ' ')}</Badge>, sortValue: i => i.status },
-    { key: 'occurred', header: 'Detected', render: i => new Date(i.occurredAt).toLocaleDateString(), sortValue: i => i.occurredAt },
+    { key: 'severity', header: 'Severity', render: i => <Badge tone={SEVERITY_TONE[i.severity] ?? 'warning'}>{i.severity}</Badge>, sortValue: i => i.severity },
+    { key: 'status', header: 'Status', render: i => <Badge tone={STATUS_TONE[i.status] ?? 'neutral'}>{i.status.replace('_', ' ')}</Badge>, sortValue: i => i.status },
+    { key: 'occurred', header: 'Detected', render: i => formatDate(i.occurredAt), sortValue: i => i.occurredAt },
   ];
 
-  const openCount = allIssues.filter(i => i.status === 'open').length;
-  const criticalCount = allIssues.filter(i => i.status !== 'resolved' && (i.severity === 'critical' || i.severity === 'high')).length;
+  const stats = useMemo(() => {
+    let open = 0;
+    let highOrCritical = 0;
+    let openCost = 0;
+    let openSecurityOrAlerts = 0;
+
+    for (const issue of allIssues) {
+      if (issue.status === 'open') open += 1;
+
+      if (
+        issue.status !== 'resolved' &&
+        (issue.severity === 'critical' || issue.severity === 'high')
+      ) {
+        highOrCritical += 1;
+      }
+
+      if (issue.source === 'cost' && issue.status === 'open') {
+        openCost += 1;
+      }
+
+      if (
+        (issue.source === 'security' || issue.source === 'alert') &&
+        issue.status === 'open'
+      ) {
+        openSecurityOrAlerts += 1;
+      }
+    }
+
+    return { open, highOrCritical, openCost, openSecurityOrAlerts };
+  }, [allIssues]);
+
+  const formatDate = useCallback((value: string, includeTime = false) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Invalid date';
+    return includeTime ? date.toLocaleString() : date.toLocaleDateString();
+  }, []);
 
   return (
     <div>
       <FilterBar title="Issues" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
+      <div className="flex items-center justify-end gap-3 mb-3">
+        {refreshing && (
+          <span className="text-xs text-slate-400" aria-live="polite">
+            Refreshing…
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading || refreshing}
+          className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          aria-label="Refresh issues"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs"
+        >
+          <span className="text-amber-800 dark:text-amber-300 break-words">
+            Couldn’t refresh issue feeds: {loadError}
+          </span>
+          <button
+            type="button"
+            disabled={refreshing}
+            onClick={() => void load()}
+            className="shrink-0 text-amber-700 dark:text-amber-300 hover:underline disabled:opacity-50"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Total Open Issues" value={String(openCount)} />
-        <StatCard label="High + Critical" value={String(criticalCount)} />
-        <StatCard label="Cost Recommendations" value={String(costItems.filter(c => c.status === 'open').length)} />
-        <StatCard label="Security + Alerts" value={String(findings.filter(f => f.status === 'open').length + alerts.filter(a => a.status === 'open').length)} />
+        <StatCard label="Total Open Issues" value={String(stats.open)} />
+        <StatCard label="High + Critical" value={String(stats.highOrCritical)} />
+        <StatCard label="Cost Recommendations" value={String(stats.openCost)} />
+        <StatCard label="Security + Alerts" value={String(stats.openSecurityOrAlerts)} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value as typeof sourceFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+        <select aria-label="Filter issues by source" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as typeof sourceFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
           <option value="all">All sources</option>
           <option value="cost">Cost</option>
           <option value="security">Security</option>
           <option value="alert">Alerts</option>
         </select>
-        <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value as typeof severityFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+        <select aria-label="Filter issues by severity" value={severityFilter} onChange={e => setSeverityFilter(e.target.value as typeof severityFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
           <option value="all">All severities</option>
           {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as typeof statusFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+        <select aria-label="Filter issues by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value as typeof statusFilter)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
           <option value="all">All statuses</option>
           <option value="open">Open</option>
           <option value="in_progress">In progress</option>
@@ -165,28 +281,76 @@ export function Issues() {
         </select>
         <div className="flex items-center gap-1.5 ml-auto">
           <span className="text-xs text-slate-400">Group by</span>
-          <select value={groupBy} onChange={e => setGroupBy(e.target.value as GroupBy)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+          <select aria-label="Group issues by" value={groupBy} onChange={e => setGroupBy(e.target.value as GroupBy)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
             {GROUP_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
       </div>
 
       {loading ? (
-        <p className="text-xs text-slate-400">Loading…</p>
-      ) : groups.map(g => (
-        <div key={g.label || 'all'} className="mb-4">
-          {g.label && <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">{g.label} <span className="text-slate-400 dark:text-slate-500 normal-case">({g.rows.length})</span></h3>}
-          <DataTable columns={columns} rows={g.rows} rowKey={i => i.id} onRowClick={setSelected} emptyMessage="No issues match these filters." />
+        <div
+          className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-10 text-center"
+          aria-busy="true"
+        >
+          <p className="text-xs text-slate-400" aria-live="polite">
+            Loading issue feeds…
+          </p>
         </div>
-      ))}
+      ) : loadError && allIssues.length === 0 ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/20 px-4 py-8 text-center"
+        >
+          <h2 className="text-sm font-semibold text-red-800 dark:text-red-300">
+            Couldn’t load issues
+          </h2>
+          <p className="mt-1 text-xs text-red-700 dark:text-red-400 break-words">
+            {loadError}
+          </p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-xs font-medium px-3 py-1.5"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <>
+          {groups.map(g => (
+            <div key={g.label || 'all'} className="mb-4">
+              {g.label && (
+                <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
+                  {g.label}{' '}
+                  <span className="text-slate-400 dark:text-slate-500 normal-case">
+                    ({g.rows.length})
+                  </span>
+                </h3>
+              )}
+              <DataTable
+                columns={columns}
+                rows={g.rows}
+                rowKey={i => i.id}
+                onRowClick={setSelected}
+                emptyMessage="No issues match these filters."
+              />
+            </div>
+          ))}
+          {(costItems.length >= 200 || findings.length >= 200 || alerts.length >= 200) && (
+            <p className="mt-2 text-[11px] text-slate-400">
+              Each source is capped at 200 records in this triage view. Use the source-specific pages for the complete feed.
+            </p>
+          )}
+        </>
+      )}
 
       <Drawer open={!!selected} onClose={() => setSelected(null)} title="Issue detail">
         {selected && (
           <div className="flex flex-col gap-4 text-sm">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge tone="neutral">{SOURCE_LABEL[selected.source]}</Badge>
-              <Badge tone={SEVERITY_TONE[selected.severity]}>{selected.severity}</Badge>
-              <Badge tone={STATUS_TONE[selected.status]}>{selected.status.replace('_', ' ')}</Badge>
+              <Badge tone={SEVERITY_TONE[selected.severity] ?? 'warning'}>{selected.severity}</Badge>
+              <Badge tone={STATUS_TONE[selected.status] ?? 'neutral'}>{selected.status.replace('_', ' ')}</Badge>
             </div>
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Issue</div>
@@ -200,7 +364,7 @@ export function Issues() {
             )}
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Detected</div>
-              <div className="text-slate-700 dark:text-slate-200">{new Date(selected.occurredAt).toLocaleString()}</div>
+              <div className="text-slate-700 dark:text-slate-200">{formatDate(selected.occurredAt, true)}</div>
             </div>
             <Link to={SOURCE_LINK[selected.source]} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 text-center">
               Open in {SOURCE_LABEL[selected.source] === 'Cost' ? 'Cost Optimization' : SOURCE_LABEL[selected.source] === 'Security' ? 'Vulnerability Management' : 'Alerts'}

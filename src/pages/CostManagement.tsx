@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -48,6 +48,14 @@ export function CostManagement() {
   const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Cost Explorer');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [allocationError, setAllocationError] = useState<string | null>(null);
+  const [budgetActionError, setBudgetActionError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+  const allocationRequestRef = useRef(0);
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  const [budgetDeletingId, setBudgetDeletingId] = useState<string | null>(null);
+  const [csvDownloading, setCsvDownloading] = useState(false);
 
   // A direct ?tab= URL (or a permission revoked mid-session) could still
   // request a tab this role/override no longer permits -- the tab bar below
@@ -73,9 +81,16 @@ export function CostManagement() {
   const [budgetError, setBudgetError] = useState('');
 
   const loadBudgets = useCallback(async () => {
-    const { items } = await api.getBudgets({ limit: 200 });
-    setBudgets(items);
+    try {
+      const { items } = await api.getBudgets({ limit: 200 });
+      setBudgets(items);
+    } catch (err) {
+      setBudgetActionError(
+        err instanceof Error ? err.message : 'Could not load budgets.',
+      );
+    }
   }, []);
+
 
   useEffect(() => { void loadBudgets(); }, [loadBudgets, refreshToken]);
 
@@ -112,26 +127,100 @@ export function CostManagement() {
   async function submitBudget(e: React.FormEvent) {
     e.preventDefault();
     setBudgetError('');
+
+    const name = budgetName.trim();
     const monthlyLimit = Number(budgetMonthlyLimit);
-    const alertThresholds = budgetThresholds.split(',').map(t => Number(t.trim())).filter(t => !Number.isNaN(t) && t > 0);
+    const alertThresholds = budgetThresholds
+      .split(',')
+      .map(t => Number(t.trim()))
+      .filter(t => Number.isFinite(t));
+
+    if (!name) {
+      setBudgetError('Enter a budget name.');
+      return;
+    }
+
+    if (!Number.isFinite(monthlyLimit) || monthlyLimit <= 0) {
+      setBudgetError('Monthly limit must be greater than 0.');
+      return;
+    }
+
+    if (alertThresholds.length === 0) {
+      setBudgetError('Enter at least one alert threshold.');
+      return;
+    }
+
+    if (alertThresholds.some(t => t <= 0 || t > 100)) {
+      setBudgetError('Alert thresholds must be between 1 and 100.');
+      return;
+    }
+
+    if (new Set(alertThresholds).size !== alertThresholds.length) {
+      setBudgetError('Alert thresholds must be unique.');
+      return;
+    }
+
+    alertThresholds.sort((a, b) => a - b);
+
+    if (!editingBudget && budgetScopeType !== 'org' && !budgetScopeId.trim()) {
+      setBudgetError('Choose a scope before creating the budget.');
+      return;
+    }
+
+    setBudgetSaving(true);
+
     try {
       if (editingBudget) {
-        await api.updateBudget(editingBudget.id, { name: budgetName, monthlyLimit, alertThresholds });
+        await api.updateBudget(editingBudget.id, {
+          name,
+          monthlyLimit,
+          alertThresholds,
+        });
       } else {
-        await api.createBudget({ name: budgetName, scopeType: budgetScopeType, scopeId: budgetScopeId, monthlyLimit, alertThresholds });
+        await api.createBudget({
+          name,
+          scopeType: budgetScopeType,
+          scopeId: budgetScopeType === 'org' ? (currentOrg?.id ?? '') : budgetScopeId,
+          monthlyLimit,
+          alertThresholds,
+        });
       }
+
       setBudgetModalOpen(false);
+      setBudgetActionError(null);
       await loadBudgets();
     } catch (err) {
-      setBudgetError(err instanceof Error ? err.message : 'Could not save this budget.');
+      setBudgetError(
+        err instanceof Error ? err.message : 'Could not save this budget.',
+      );
+    } finally {
+      setBudgetSaving(false);
     }
   }
 
+
   async function handleDeleteBudget(b: Budget) {
-    if (!(await confirm(`Delete the "${b.name}" budget? This doesn't affect any cloud resources or spend, only this tracker.`))) return;
-    await api.deleteBudget(b.id);
-    await loadBudgets();
+    const confirmed = await confirm(
+      `Delete the "${b.name}" budget? This doesn't affect any cloud resources or spend, only this tracker.`,
+    );
+
+    if (!confirmed) return;
+
+    setBudgetDeletingId(b.id);
+    setBudgetActionError(null);
+
+    try {
+      await api.deleteBudget(b.id);
+      await loadBudgets();
+    } catch (err) {
+      setBudgetActionError(
+        err instanceof Error ? err.message : 'Could not delete this budget.',
+      );
+    } finally {
+      setBudgetDeletingId(null);
+    }
   }
+
 
   // Allocation / Chargeback / Showback — all three read the same underlying
   // cost-by-tag aggregation, just with different framing per their real
@@ -147,55 +236,180 @@ export function CostManagement() {
   const onAllocationTab = tab === 'Cost Allocation' || tab === 'Chargeback' || tab === 'Showback';
 
   useEffect(() => {
-    if (!onAllocationTab) return;
-    if (!tagKey.trim()) { setAllocation(null); return; }
+    if (!onAllocationTab) {
+      setAllocationError(null);
+      return;
+    }
+
+    const key = tagKey.trim();
+    if (!key) {
+      setAllocation(null);
+      setAllocationError(null);
+      return;
+    }
+
+    const requestId = ++allocationRequestRef.current;
     setAllocationLoading(true);
+    setAllocationError(null);
+
     const { from, to } = rangeToFromTo(dateRange);
-    const call = allocationMode === 'chargeback' ? api.getChargeback({ tagKey: tagKey.trim(), from, to })
-      : allocationMode === 'showback' ? api.getShowback({ tagKey: tagKey.trim(), from, to })
-      : api.getCostAllocation({ tagKey: tagKey.trim(), from, to });
-    void call.then(setAllocation).finally(() => setAllocationLoading(false));
+
+    const call =
+      allocationMode === 'chargeback'
+        ? api.getChargeback({ tagKey: key, from, to })
+        : allocationMode === 'showback'
+          ? api.getShowback({ tagKey: key, from, to })
+          : api.getCostAllocation({ tagKey: key, from, to });
+
+    void call
+      .then(result => {
+        if (requestId !== allocationRequestRef.current) return;
+        setAllocation(result);
+      })
+      .catch(err => {
+        if (requestId !== allocationRequestRef.current) return;
+        setAllocation(null);
+        setAllocationError(
+          err instanceof Error ? err.message : 'Could not load cost allocation.',
+        );
+      })
+      .finally(() => {
+        if (requestId === allocationRequestRef.current) {
+          setAllocationLoading(false);
+        }
+      });
   }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken]);
 
+
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
+    setLoadError(null);
+
     try {
       const connectionId = account === 'all' ? undefined : account;
       const { from, to } = rangeToFromTo(dateRange);
+
       const [analyticsRes, forecastRes, explorerRes] = await Promise.all([
         api.getCostAnalytics({ from, to }),
         api.getCostForecast(),
-        api.getCostExplorer({ connectionId, region: region === 'all' ? undefined : region, from, to, limit: 200 }),
+        api.getCostExplorer({
+          connectionId,
+          region: region === 'all' ? undefined : region,
+          from,
+          to,
+          limit: 200,
+        }),
       ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
       setAnalytics(analyticsRes);
       setForecast(forecastRes);
       setDaily(aggregateDaily(explorerRes.items));
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+      setLoadError(
+        err instanceof Error ? err.message : 'Could not load cost data.',
+      );
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [dateRange, region, account]);
+
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
   async function handleDownloadCsv() {
-    const { from, to } = rangeToFromTo(dateRange);
-    const { blob, filename } = await api.downloadCostReportCsv({ from, to });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    if (csvDownloading) return;
+
+    setCsvDownloading(true);
+
+    try {
+      const { from, to } = rangeToFromTo(dateRange);
+      const { blob, filename } = await api.downloadCostReportCsv({ from, to });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || 'cost-report.csv';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : 'Could not download the CSV report.',
+      );
+    } finally {
+      setCsvDownloading(false);
+    }
   }
 
-  const byServiceEntries = Object.entries(analytics?.byService ?? {}).sort(([, a], [, b]) => b - a);
-  const byAccountEntries = Object.entries(analytics?.byAccount ?? {}).sort(([, a], [, b]) => b - a);
-  const byRegionEntries = Object.entries(analytics?.byRegion ?? {}).sort(([, a], [, b]) => b - a);
+
+  const byServiceEntries = useMemo(
+    () => Object.entries(analytics?.byService ?? {}).sort(([, a], [, b]) => b - a),
+    [analytics?.byService],
+  );
+  const byAccountEntries = useMemo(
+    () => Object.entries(analytics?.byAccount ?? {}).sort(([, a], [, b]) => b - a),
+    [analytics?.byAccount],
+  );
+  const byRegionEntries = useMemo(
+    () => Object.entries(analytics?.byRegion ?? {}).sort(([, a], [, b]) => b - a),
+    [analytics?.byRegion],
+  );
   const totalCost = analytics?.totalCost ?? 0;
   const avgDailyCost = daily.length > 0 ? daily.reduce((sum, d) => sum + d.cost, 0) / daily.length : 0;
   const allocationTotal = allocation?.totalCost ?? 0;
 
+  if (loadError && !analytics && !forecast) {
+    return (
+      <div className="flex flex-col gap-4">
+        <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
+        <div
+          className="rounded-xl border border-red-200 dark:border-red-900
+                     bg-red-50 dark:bg-red-900/20 p-5 text-center"
+          role="alert"
+        >
+          <p className="text-sm text-red-600 dark:text-red-300">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
+
+      {loadError && (
+        <div
+          className="mb-4 rounded-md border border-amber-200 dark:border-amber-900/60
+                     bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-sm
+                     text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3"
+          role="alert"
+        >
+          <span>Some cost data could not be refreshed: {loadError}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="shrink-0 text-xs underline hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Cost (MTD)" value={money(forecast?.mtdSpend ?? 0)} caption="real AWS + Azure cost spend" />
@@ -212,7 +426,14 @@ export function CostManagement() {
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <button
+            type="button"
+            key={t}
+            onClick={() => setTab(t)}
+            role="tab"
+            aria-selected={tab === t}
+            className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+          >
             {t}
           </button>
         ))}
@@ -226,7 +447,8 @@ export function CostManagement() {
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost & Usage by Service</h3>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                   <th className="py-2">Service</th><th className="py-2 text-right">Cost</th><th className="py-2 text-right">% of Total</th>
@@ -242,6 +464,7 @@ export function CostManagement() {
                 ))}
               </tbody>
             </table>
+            </div>
             {byServiceEntries.length === 0 && (
               <p className="text-sm text-slate-400 mt-3">
                 No cost data yet — open an AWS or Azure account's detail page (Cloud Accounts → Account Inventory) and click "Sync Cost."
@@ -300,8 +523,15 @@ export function CostManagement() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Budgets</h3>
-            <button onClick={openCreateBudget} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">New Budget</button>
+            <button type="button" onClick={openCreateBudget} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">New Budget</button>
           </div>
+          {budgetActionError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{budgetActionError}</span>
+              <button type="button" onClick={() => setBudgetActionError(null)} className="underline shrink-0">Dismiss</button>
+            </div>
+          )}
+
           {budgets.length === 0 ? (
             <p className="text-sm text-slate-400">No budgets yet — set a monthly limit on your whole org, a folder, a project, or a single AWS/Azure account, and get an early warning before you go over.</p>
           ) : (
@@ -326,8 +556,15 @@ export function CostManagement() {
                       <span>forecast {money(b.projectedSpend)}</span>
                     </div>
                     <div className="flex justify-end gap-2 mt-2 text-xs">
-                      <button onClick={() => openEditBudget(b)} className="text-slate-500 hover:underline">Edit</button>
-                      <button onClick={() => void handleDeleteBudget(b)} className="text-slate-500 hover:underline">Delete</button>
+                      <button type="button" onClick={() => openEditBudget(b)} className="text-slate-500 hover:underline">Edit</button>
+                      <button
+                          type="button"
+                          onClick={() => void handleDeleteBudget(b)}
+                          disabled={budgetDeletingId === b.id}
+                          className="text-slate-500 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {budgetDeletingId === b.id ? 'Deleting…' : 'Delete'}
+                        </button>
                     </div>
                   </div>
                 );
@@ -359,12 +596,20 @@ export function CostManagement() {
               ? 'Visibility only — showback numbers are informational and never billed to a team or cost center.'
               : 'Neutral cost breakdown by tag value, the same numbers Chargeback and Showback both frame differently.'}
           </p>
+          {allocationError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{allocationError}</span>
+              <button type="button" onClick={() => setTagKey(key => key.trim())} className="text-xs underline shrink-0">Retry</button>
+            </div>
+          )}
+
           {allocationLoading ? (
             <p className="text-sm text-slate-400">Loading…</p>
           ) : !allocation || allocation.buckets.length === 0 ? (
             <p className="text-sm text-slate-400">No cost data for this tag key in the selected date range. In AWS, a tag only appears here once it's activated as a cost allocation tag in Billing → Cost Allocation Tags — try CostCenter, Environment, Team, or Project, or type your own.</p>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                   <th className="py-2">{allocation.tagKey}</th><th className="py-2 text-right">{allocationMode === 'chargeback' ? 'Amount Owed' : 'Cost'}</th><th className="py-2 text-right">% of Total</th>
@@ -380,6 +625,7 @@ export function CostManagement() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -388,7 +634,14 @@ export function CostManagement() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Export CSV Report</h3>
           <p className="text-sm text-slate-400 mb-4">Downloads a real CSV of cost line items for the selected date range and account/region filters — the same underlying data as Cost Explorer, formatted for a spreadsheet.</p>
-          <button onClick={() => void handleDownloadCsv()} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-4 py-2">Export CSV Report</button>
+          <button
+            type="button"
+            onClick={() => void handleDownloadCsv()}
+            disabled={csvDownloading}
+            className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2"
+          >
+            {csvDownloading ? 'Preparing CSV…' : 'Export CSV Report'}
+          </button>
           <p className="text-xs text-slate-400 mt-4">For PDF/scheduled cost reports, see Reports → Cost Reports.</p>
         </div>
       )}
@@ -445,7 +698,13 @@ export function CostManagement() {
             <input required value={budgetThresholds} onChange={e => setBudgetThresholds(e.target.value)} placeholder="50,80,100" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
           </label>
           {budgetError && <p className="text-xs text-red-500">{budgetError}</p>}
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2">{editingBudget ? 'Save' : 'Create'}</button>
+          <button
+              type="submit"
+              disabled={budgetSaving}
+              className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2"
+            >
+              {budgetSaving ? 'Saving…' : editingBudget ? 'Save' : 'Create'}
+            </button>
         </form>
       </Modal>
       {confirmDialog}

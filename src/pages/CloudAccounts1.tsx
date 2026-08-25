@@ -24,6 +24,7 @@ import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
 import { fetchAllPages } from '../lib/fetchAllPages';
+import { money } from '../lib/format';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -82,10 +83,6 @@ const REPORT_KINDS = [
   { kind: 'sync' as const, label: 'Sync Report' },
   { kind: 'cost' as const, label: 'Cost Report' },
 ];
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
 
 /**
  * Each cloud models "permissions" differently, so this reads the exact
@@ -154,35 +151,23 @@ export function CloudAccounts() {
   const [azureWizardOpen, setAzureWizardOpen] = useState(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void api.getFavorites()
-      .then(r => { if (!cancelled) setFavorites(r.favorites); })
-      .catch(err => {
-        if (!cancelled) toast(err instanceof ApiError ? err.message : 'Failed to load Favorites.', 'error');
-      });
-    return () => { cancelled = true; };
-  }, [refreshToken, toast]);
+  useEffect(() => { void api.getFavorites().then(r => setFavorites(r.favorites)); }, [refreshToken]);
 
   async function toggleFavorite(connectionId: string, name: string) {
+    // Favorites remain AWS-only for now — see RowActionsMenu, which only
+    // shows this action for provider === 'aws'.
     const path = `/cloud-accounts/${connectionId}`;
     const existing = favorites.find(f => f.path === path);
-
-    try {
-      if (existing) {
-        await api.removeFavorite(existing.id);
-        setFavorites(prev => prev.filter(f => f.id !== existing.id));
-        toast(`Removed "${name}" from Favorites`, 'success');
-      } else {
-        const { favorite } = await api.addFavorite({ type: 'aws-account', label: name, path });
-        setFavorites(prev => [...prev, favorite]);
-        toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
-      }
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Failed to update Favorites.', 'error');
+    if (existing) {
+      await api.removeFavorite(existing.id);
+      setFavorites(prev => prev.filter(f => f.id !== existing.id));
+      toast(`Removed "${name}" from Favorites`, 'success');
+    } else {
+      const { favorite } = await api.addFavorite({ type: 'aws-account', label: name, path });
+      setFavorites(prev => [...prev, favorite]);
+      toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
     }
   }
-
 
   // Inventory search/filter/bulk/pagination state. When a specific provider
   // is selected, `page`/`pageSize` drive real server-side pagination against
@@ -201,19 +186,12 @@ export function CloudAccounts() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [inventoryLoadedOnce, setInventoryLoadedOnce] = useState(false);
-  const [inventoryError, setInventoryError] = useState<string | null>(null);
-  // API helpers in this codebase do not expose AbortSignal, so use request
-  // generations to prevent stale responses from overwriting newer state.
-  const inventoryRequestRef = useRef(0);
-  const identitiesRequestRef = useRef(0);
 
-  const resetInventorySelection = () => setSelectedIds(new Set());
-  const setSearch = (v: string) => { setSearchRaw(v); setPage(1); resetInventorySelection(); };
-  const setStatusFilter = (v: string) => { setStatusFilterRaw(v); setPage(1); resetInventorySelection(); };
-  const setEnvironmentFilter = (v: string) => { setEnvironmentFilterRaw(v); setPage(1); resetInventorySelection(); };
-  const setProviderFilter = (v: string) => { setProviderFilterRaw(v); setPage(1); resetInventorySelection(); };
-  const setPageSize = (v: number) => { setPageSizeRaw(v); setPage(1); resetInventorySelection(); };
-  const setInventoryPage = (v: number) => { setPage(v); resetInventorySelection(); };
+  const setSearch = (v: string) => { setSearchRaw(v); setPage(1); };
+  const setStatusFilter = (v: string) => { setStatusFilterRaw(v); setPage(1); };
+  const setEnvironmentFilter = (v: string) => { setEnvironmentFilterRaw(v); setPage(1); };
+  const setProviderFilter = (v: string) => { setProviderFilterRaw(v); setPage(1); };
+  const setPageSize = (v: number) => { setPageSizeRaw(v); setPage(1); };
 
   // Tab-specific data
   const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
@@ -252,62 +230,42 @@ export function CloudAccounts() {
   const [selectedIdentityDetail, setSelectedIdentityDetail] = useState<CloudIdentity | null>(null);
 
   const loadInventory = useCallback(async () => {
-    const requestId = ++inventoryRequestRef.current;
     setInventoryLoading(true);
-    setInventoryError(null);
-
     try {
-      const apiFilters = {
-        status: statusFilter || undefined,
-        environment: environmentFilter || undefined,
-        search: search || undefined,
-      };
-
+      const apiFilters = { status: statusFilter || undefined, environment: environmentFilter || undefined, search: search || undefined };
       if (providerFilter) {
-        // Provider-specific mode is genuinely server-paginated.
-        const res = providerFilter === 'gcp'
-          ? await api.getGcpAccounts({ ...apiFilters, page, limit: pageSize })
-          : providerFilter === 'azure'
-            ? await api.getAzureAccounts({ ...apiFilters, page, limit: pageSize })
-            : await api.getAccounts({ ...apiFilters, page, limit: pageSize });
-
-        if (requestId !== inventoryRequestRef.current) return;
-
+        // A specific provider is selected — real server-side pagination
+        // against that provider's own API, so `page`/`pageSize` reach every
+        // account on that cloud, not just the first 200.
+        const res = providerFilter === 'gcp' ? await api.getGcpAccounts({ ...apiFilters, page, limit: pageSize })
+          : providerFilter === 'azure' ? await api.getAzureAccounts({ ...apiFilters, page, limit: pageSize })
+          : await api.getAccounts({ ...apiFilters, page, limit: pageSize });
         setAwsConnections(providerFilter === 'aws' ? res.items as CloudConnection[] : []);
         setGcpConnections(providerFilter === 'gcp' ? res.items as GcpConnection[] : []);
         setAzureConnections(providerFilter === 'azure' ? res.items as AzureConnection[] : []);
         setProviderTotal(res.pagination.total);
       } else {
-        // "All" remains a bounded first-page snapshot by design. This avoids
-        // loading thousands of rows into the browser just to render a table.
+        // "All" — a bounded, honestly-labeled snapshot (the first `pageSize`
+        // matching accounts per cloud), not a silent truncation and not a
+        // full 3-way fetch-every-page loop (which would just relocate the
+        // multi-MB-payload problem raising the old client limit didn't
+        // solve). `providerTotal` here is still the real combined count
+        // across all three clouds — used to disclose how much is hidden.
         const [awsRes, gcpRes, azureRes] = await Promise.all([
           api.getAccounts({ ...apiFilters, page: 1, limit: pageSize }),
           api.getGcpAccounts({ ...apiFilters, page: 1, limit: pageSize }),
           api.getAzureAccounts({ ...apiFilters, page: 1, limit: pageSize }),
         ]);
-
-        if (requestId !== inventoryRequestRef.current) return;
-
         setAwsConnections(awsRes.items);
         setGcpConnections(gcpRes.items);
         setAzureConnections(azureRes.items);
-        setProviderTotal(
-          awsRes.pagination.total +
-          gcpRes.pagination.total +
-          azureRes.pagination.total,
-        );
+        setProviderTotal(awsRes.pagination.total + gcpRes.pagination.total + azureRes.pagination.total);
       }
-    } catch (err) {
-      if (requestId !== inventoryRequestRef.current) return;
-      setInventoryError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load cloud accounts.');
     } finally {
-      if (requestId === inventoryRequestRef.current) {
-        setInventoryLoading(false);
-        setInventoryLoadedOnce(true);
-      }
+      setInventoryLoading(false);
+      setInventoryLoadedOnce(true);
     }
   }, [providerFilter, statusFilter, environmentFilter, search, page, pageSize]);
-
 
   useEffect(() => { void loadInventory(); }, [loadInventory, refreshToken]);
   // Test-connection state keeps running in the background (see syncContext.tsx)
@@ -360,54 +318,32 @@ export function CloudAccounts() {
   }, [tab, refreshToken, toast]);
 
   const loadIdentities = useCallback(async () => {
-    const requestId = ++identitiesRequestRef.current;
     setIdentitiesLoading(true);
-    setIdentitiesError(null);
-
+    // Two independent calls (list + summary), each surfaced on its own --
+    // a Promise.all here once meant a single failing call (a real routing
+    // bug, since fixed, made /identities/summary 400 on every request)
+    // silently blanked out the whole tab, since neither state setter below
+    // it ever ran and the empty initial `identities` array rendered
+    // identically to "genuinely zero identities." allSettled means a
+    // failure on one call no longer hides real data the other call
+    // successfully returned.
     const [listRes, summaryRes] = await Promise.allSettled([
       api.getIdentities({
-        page: identityPage,
-        limit: identityPageSize,
-        search: identitySearch || undefined,
+        page: identityPage, limit: identityPageSize, search: identitySearch || undefined,
         provider: identityProviderFilter || undefined,
         privilegeLevel: identityPrivilegeFilter || undefined,
         isHuman: identityHumanFilter === '' ? undefined : identityHumanFilter === 'true',
       }),
       api.getIdentitySummary(),
     ]);
-
-    if (requestId !== identitiesRequestRef.current) return;
-
     if (listRes.status === 'fulfilled') {
       setIdentities(listRes.value.items);
       setIdentitiesTotal(listRes.value.pagination.total);
-    } else {
-      setIdentitiesError(
-        listRes.reason instanceof Error ? listRes.reason.message : 'Failed to load identities.',
-      );
     }
-
-    if (summaryRes.status === 'fulfilled') {
-      setIdentitySummary(summaryRes.value);
-    } else {
-      // Keep list data usable even when the optional summary endpoint fails.
-      toast(
-        summaryRes.reason instanceof Error ? summaryRes.reason.message : 'Failed to load identity summary.',
-        'error',
-      );
-    }
-
+    if (summaryRes.status === 'fulfilled') setIdentitySummary(summaryRes.value);
+    setIdentitiesError(listRes.status === 'rejected' ? (listRes.reason as Error).message || 'Failed to load identities.' : null);
     setIdentitiesLoading(false);
-  }, [
-    identityPage,
-    identityPageSize,
-    identitySearch,
-    identityPrivilegeFilter,
-    identityHumanFilter,
-    identityProviderFilter,
-    toast,
-  ]);
-
+  }, [identityPage, identityPageSize, identitySearch, identityPrivilegeFilter, identityHumanFilter, identityProviderFilter]);
 
   useEffect(() => {
     if (tab === 'Identities') void loadIdentities();
@@ -463,15 +399,10 @@ export function CloudAccounts() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
     const n = rows.length;
     if (!(await confirm(`Disconnect ${n} selected account(s)? They'll be marked disconnected — discovered resources are kept.`))) return;
-    const results = await Promise.allSettled(rows.map(disconnectFor));
-    const failed = results.filter(r => r.status === 'rejected').length;
+    await Promise.all(rows.map(disconnectFor));
+    toast(`Disconnected ${n} account${n === 1 ? '' : 's'}`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
-    if (failed === 0) {
-      toast(`Disconnected ${n} account${n === 1 ? '' : 's'}`, 'success');
-    } else {
-      toast(`Disconnected ${n - failed} of ${n}; ${failed} failed.`, 'error');
-    }
   }
 
   async function handleDeletePermanently(row: UnifiedAccountRow) {
@@ -485,15 +416,10 @@ export function CloudAccounts() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
     const n = rows.length;
     if (!(await confirm(`Permanently delete ${n} selected account(s)? This is irreversible — their discovered resources and history are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
-    const results = await Promise.allSettled(rows.map(deletePermanentlyFor));
-    const failed = results.filter(r => r.status === 'rejected').length;
+    await Promise.all(rows.map(deletePermanentlyFor));
+    toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
     setSelectedIds(new Set());
     await loadInventory();
-    if (failed === 0) {
-      toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
-    } else {
-      toast(`Deleted ${n - failed} of ${n}; ${failed} failed.`, 'error');
-    }
   }
 
   function toggleSelected(id: string) {
@@ -550,21 +476,12 @@ export function CloudAccounts() {
       const { blob, filename } = await api.downloadAwsAccountsReport(kind);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Give the browser a chance to consume the download before revoking it.
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Failed to download report.', 'error');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
     } finally {
       setDownloadingReport(null);
     }
   }
-
 
   const identityColumns: Column<CloudIdentity>[] = useMemo(() => [
     { key: 'display_name', header: 'Identity', sticky: true, sortValue: r => r.display_name ?? r.native_id, render: r => (
@@ -714,7 +631,7 @@ export function CloudAccounts() {
       {tab === 'Dashboard' && (
         !dashboard ? (
           <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 9 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
           </div>
         ) : (
@@ -851,18 +768,6 @@ export function CloudAccounts() {
               {anyErrors[0]!.error}
             </div>
           )}
-          {inventoryError && (
-            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3">
-              <span>Couldn't load the latest account list: {inventoryError}</span>
-              <button
-                type="button"
-                onClick={() => void loadInventory()}
-                className="shrink-0 text-xs underline hover:no-underline"
-              >
-                Retry
-              </button>
-            </div>
-          )}
 
           <div className="flex flex-wrap items-end gap-3 mb-3">
             <label className="flex flex-col gap-1">
@@ -936,7 +841,7 @@ export function CloudAccounts() {
               server={providerFilter ? {
                 page, pageSize, total: providerTotal,
                 loading: inventoryLoading,
-                onPageChange: setInventoryPage,
+                onPageChange: setPage,
                 onPageSizeChange: setPageSize,
               } : undefined}
             />
@@ -1218,7 +1123,7 @@ export function CloudAccounts() {
   );
 }
 
-/** Row-level "⋯" menu. Provider-specific actions are hidden when they do not apply. */
+/** Row-level "⋯" menu — replaces a row of competing text links with the single action point AWS Console / Datadog tables use. AWS-only actions (Validate Permissions, Open Console) are hidden for GCP rows rather than shown disabled, since they genuinely don't apply. */
 function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
   row: UnifiedAccountRow;
   validating: boolean;
@@ -1250,40 +1155,18 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
       if (buttonRef.current?.contains(target)) return;
       if (menuRef.current && !menuRef.current.contains(target)) setOpen(false);
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        buttonRef.current?.focus();
-      }
-    }
     document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
   useEffect(() => {
     if (!open || !buttonRef.current) { setCoords(null); return; }
-
-    const updatePosition = () => {
-      if (!buttonRef.current) return;
-      const rect = buttonRef.current.getBoundingClientRect();
-      const MENU_WIDTH = 224;
-      setCoords({
-        top: rect.bottom + 4,
-        left: Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8)),
-      });
-    };
-
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
+    const rect = buttonRef.current.getBoundingClientRect();
+    const MENU_WIDTH = 224; // w-56
+    setCoords({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8)),
+    });
   }, [open]);
 
   // Flip above the trigger if the menu would run off the bottom of the
@@ -1297,22 +1180,14 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
     }
   }, [open, coords]);
 
-  async function copyId() {
-    try {
-      await navigator.clipboard.writeText(row.identifier);
-      toast(`${row.provider === 'gcp' ? 'Project' : 'Account'} ID copied`, 'success');
-      setOpen(false);
-    } catch {
-      toast('Could not copy the ID. Check browser clipboard permissions.', 'error');
-    }
+  function copyId() {
+    void navigator.clipboard.writeText(row.identifier);
+    toast(`${row.provider === 'gcp' ? 'Project' : 'Account'} ID copied`, 'success');
+    setOpen(false);
   }
 
   function openConsole() {
-    const region = row.region?.trim();
-    const url = region
-      ? `https://${region}.console.aws.amazon.com/console/home?region=${encodeURIComponent(region)}`
-      : 'https://console.aws.amazon.com/';
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(`https://${row.region}.console.aws.amazon.com/console/home?region=${row.region}`, '_blank', 'noopener,noreferrer');
     setOpen(false);
   }
 
@@ -1346,7 +1221,7 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
               {isFavorited ? 'Remove from Favorites' : 'Add to Favorites'}
             </button>
           )}
-          <button role="menuitem" onClick={() => void copyId()} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy {row.provider === 'gcp' ? 'Project' : 'Account'} ID</button>
+          <button role="menuitem" onClick={copyId} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy {row.provider === 'gcp' ? 'Project' : 'Account'} ID</button>
           {onUpdateCredentials && (
             <button role="menuitem" onClick={() => { setOpen(false); onUpdateCredentials(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Update Credentials</button>
           )}
@@ -1397,10 +1272,7 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
             : { azureClientSecret: azureClientSecret.trim() }),
         });
       } else {
-        await api.updateAccountCredentials(row.id, {
-          accessKeyId: accessKeyId.trim(),
-          secretAccessKey: secretAccessKey.trim(),
-        });
+        await api.updateAccountCredentials(row.id, { accessKeyId, secretAccessKey });
       }
       toast(`Credentials updated for "${row.name}"`, 'success');
       onUpdated();
@@ -1419,14 +1291,9 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="update-credentials-title"
-        className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 flex flex-col gap-4"
-      >
+      <div className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 id="update-credentials-title" className="text-base font-semibold text-slate-900 dark:text-white">Update Credentials</h2>
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white">Update Credentials</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
         </div>
         <p className="text-xs text-slate-400">
@@ -1449,7 +1316,7 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
             {azureAuthType === 'client_secret' ? (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-slate-500 dark:text-slate-400">Client Secret</span>
-                <input type="password" autoComplete="new-password" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="The secret's Value, not its Secret ID" />
+                <input type="password" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="The secret's Value, not its Secret ID" />
               </label>
             ) : (
               <>
@@ -1470,11 +1337,11 @@ function UpdateCredentialsModal({ row, onClose, onUpdated }: { row: UnifiedAccou
           <>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Access Key ID</span>
-              <input autoComplete="username" value={accessKeyId} onChange={e => setAccessKeyId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="AKIA…" />
+              <input value={accessKeyId} onChange={e => setAccessKeyId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" placeholder="AKIA…" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Secret Access Key</span>
-              <input type="password" autoComplete="new-password" value={secretAccessKey} onChange={e => setSecretAccessKey(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
+              <input type="password" value={secretAccessKey} onChange={e => setSecretAccessKey(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-slate-800 dark:text-slate-100 font-mono text-xs" />
             </label>
           </>
         )}

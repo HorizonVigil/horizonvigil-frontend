@@ -22,10 +22,14 @@ function formatActivityAction(action: string): string {
   return action.replace(/_/g, ' ').replace(/\./g, ' — ');
 }
 
-function projectCountFor(folderId: string, projects: { folder_id: string | null }[]): string {
-  const n = projects.filter(p => p.folder_id === folderId).length;
-  return `${n} project${n === 1 ? '' : 's'}`;
+function formatActivityDate(value: string): string {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? 'Unknown time'
+    : date.toLocaleString();
 }
+
 
 // Health label/color tiers — extracted so the KPI card stays readable.
 function healthTier(score: number): { label: string; className: string } {
@@ -83,8 +87,11 @@ export function Overview() {
   // instead of the refreshing bar. A ref sidesteps this: `.current` is
   // always read fresh at call time, never captured by a stale closure.
   const hasLoadedOnce = useRef(false);
+  const requestIdRef = useRef(0);
+  const [removingFavoriteId, setRemovingFavoriteId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (!hasLoadedOnce.current) setLoading(true); else setRefreshing(true);
     setError(null);
 
@@ -108,8 +115,12 @@ export function Overview() {
       ]);
 
       if (dashRes.status === 'rejected') throw dashRes.reason;
+      if (requestId !== requestIdRef.current) return;
+
       setDashboard(dashRes.value);
       hasLoadedOnce.current = true;
+
+      if (requestId !== requestIdRef.current) return;
 
       // Clear stale widget data up-front so a failed refetch never leaves old
       // numbers on screen masquerading as current ones.
@@ -141,12 +152,19 @@ export function Overview() {
       if (favoritesRes.status === 'fulfilled') setFavorites(favoritesRes.value.favorites ?? []);
       else { setFavorites([]); console.error('Favorites widget failed to load:', favoritesRes.reason); }
     } catch (err) {
-      const message = friendlyErrorMessage(err, 'Failed to load the Overview dashboard.');
+      if (requestId !== requestIdRef.current) return;
+
+      const message = friendlyErrorMessage(
+        err,
+        'Failed to load the Overview dashboard.',
+      );
       setError(message);
       toast(message, 'error');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [region, dateRange, toast]);
 
@@ -166,28 +184,79 @@ export function Overview() {
   }, [location.hash, loading]);
 
   async function removeFavorite(id: string) {
+    if (removingFavoriteId) return;
+
+    setRemovingFavoriteId(id);
+
     try {
       await api.removeFavorite(id);
       setFavorites(prev => prev.filter(f => f.id !== id));
     } catch (err) {
-      toast(friendlyErrorMessage(err, 'Failed to remove favorite.'), 'error');
+      toast(
+        friendlyErrorMessage(err, 'Failed to remove favorite.'),
+        'error',
+      );
+    } finally {
+      setRemovingFavoriteId(null);
     }
   }
 
   const topServices = useMemo(
-    () => Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 6),
+    () =>
+      Object.entries(costByService)
+        .filter(([, cost]) => Number.isFinite(cost) && cost >= 0)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 6),
     [costByService],
   );
 
-  const totalResources = dashboard?.resources.total ?? 0;
-  const totalConnections = dashboard?.connections.total ?? 0;
-  const errorConnections = dashboard?.connections.error ?? 0;
-  const monthToDate = dashboard?.cost.monthToDate ?? 0;
+  const folderProjectCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const project of projects) {
+      if (!project.folder_id) continue;
+      counts.set(project.folder_id, (counts.get(project.folder_id) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [projects]);
+
+  const unfiledProjects = useMemo(
+    () => projects.filter(project => !project.folder_id),
+    [projects],
+  );
+
+  const resourceDistribution = useMemo(
+    () =>
+      Object.entries(dashboard?.resources.byCategory ?? {})
+        .filter(([, value]) => Number.isFinite(value) && value > 0)
+        .map(([label, value]) => ({
+          label,
+          value,
+          colorCategory: label,
+        })),
+    [dashboard?.resources.byCategory],
+  );
+
+  const totalResources = Math.max(0, dashboard?.resources.total ?? 0);
+  const totalConnections = Math.max(0, dashboard?.connections.total ?? 0);
+  const errorConnections = Math.max(0, dashboard?.connections.error ?? 0);
+  const monthToDate = Math.max(0, dashboard?.cost.monthToDate ?? 0);
   // With zero connections there is nothing to score -- showing "100%" would
   // read as "everything is fine", so surface an explicit em-dash instead.
   const hasConnections = totalConnections > 0;
   const healthScore = hasConnections
-    ? Math.round(((totalConnections - errorConnections) / totalConnections) * 100)
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(
+            ((totalConnections - Math.min(errorConnections, totalConnections)) /
+              totalConnections) *
+              100,
+          ),
+        ),
+      )
     : null;
 
   if (loading && !dashboard) {
@@ -217,13 +286,20 @@ export function Overview() {
     return (
       <div>
         <FilterBar title="Overview" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
-        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
+        <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm">
           <Icon name="alert-triangle" size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-red-800 dark:text-red-300 font-medium">Couldn't load the Overview dashboard</p>
             <p className="text-red-700 dark:text-red-400 text-xs mt-0.5">{error}</p>
           </div>
-          <button onClick={() => void load()} className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0">Retry</button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={refreshing}
+            className="text-xs font-medium text-red-700 dark:text-red-300 hover:underline whitespace-nowrap shrink-0 disabled:opacity-50"
+          >
+            {refreshing ? 'Retrying…' : 'Retry'}
+          </button>
         </div>
       </div>
     );
@@ -325,7 +401,7 @@ export function Overview() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {quickActions.map(qa => (
-              <button
+              <button type="button"
                 key={qa.key}
                 onClick={() => navigate(qa.path)}
                 title={qa.description}
@@ -369,9 +445,7 @@ export function Overview() {
             <span className="text-xs text-slate-400">By category</span>
           </div>
           <Donut
-            data={Object.entries(dashboard?.resources.byCategory ?? {})
-              .filter(([, v]) => v > 0)
-              .map(([label, value]) => ({ label, value, colorCategory: label }))}
+            data={resourceDistribution}
             centerLabel={{ value: String(totalResources), caption: 'resources' }}
           />
         </div>
@@ -408,10 +482,10 @@ export function Overview() {
                     <Icon name="folder" size={14} className="text-slate-400" />
                     {f.name}
                   </span>
-                  <span className="text-xs text-slate-400">{projectCountFor(f.id, projects)}</span>
+                  <span className="text-xs text-slate-400">{`${folderProjectCounts.get(f.id) ?? 0} project${(folderProjectCounts.get(f.id) ?? 0) === 1 ? '' : 's'}`}</span>
                 </li>
               ))}
-              {projects.filter(p => !p.folder_id).map(p => (
+              {unfiledProjects.map(p => (
                 <li key={p.id} className="flex items-center justify-between py-2 text-sm">
                   <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -439,14 +513,14 @@ export function Overview() {
             <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
               {favorites.map(f => (
                 <li key={f.id} className="flex items-center justify-between py-2 text-sm">
-                  <button
+                  <button type="button"
                     onClick={() => navigate(f.path)}
                     className="text-slate-700 dark:text-slate-200 hover:underline flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded"
                   >
                     <Icon name="star-filled" size={14} className="text-amber-400" />
                     <span className="text-xs text-slate-400">{f.type}</span> {f.label}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => void removeFavorite(f.id)}
                     className="text-xs text-slate-400 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"
                   >
@@ -476,7 +550,7 @@ export function Overview() {
                     <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span>
                   </span>
                   <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">
-                    {new Date(entry.occurredAt).toLocaleString()}
+                    {formatActivityDate(entry.occurredAt)}
                   </span>
                 </li>
               ))}

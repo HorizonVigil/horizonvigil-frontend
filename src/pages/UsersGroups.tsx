@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
@@ -57,6 +57,37 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 const TABS = ['Users', 'Groups', 'Roles & Permissions', 'Project Access', 'API Keys', 'ABAC Policies', 'SCIM Provisioning', 'Audit Logs'] as const;
 type Tab = typeof TABS[number];
 
+const MAX_NAME_LENGTH = 100;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_ATTRIBUTE_KEY_LENGTH = 100;
+const MAX_ATTRIBUTE_VALUE_LENGTH = 500;
+const MAX_ABAC_VALUE_LENGTH = 500;
+const MAX_ABAC_CONDITIONS_IN_UI = 1;
+
+function normalizeError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function safeDate(value: string | null | undefined, withTime = false): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return withTime ? date.toLocaleString() : date.toLocaleDateString();
+}
+
+function isValidEmail(value: string): boolean {
+  if (!value || value.length > MAX_EMAIL_LENGTH) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function normalizeName(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function isSafeIdentifier(value: string): boolean {
+  return /^[A-Za-z0-9_.:-]+$/.test(value);
+}
+
 const ABAC_OPERATORS: { value: AbacCondition['operator']; label: string }[] = [
   { value: 'eq', label: 'equals' }, { value: 'neq', label: 'does not equal' },
   { value: 'in', label: 'is one of (comma-separated)' }, { value: 'not_in', label: 'is not one of (comma-separated)' },
@@ -76,7 +107,6 @@ export function UsersGroups() {
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
-  const [roles, setRoles] = useState<{ role: Role; description: string }[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [abacPolicies, setAbacPolicies] = useState<AbacPolicyRow[]>([]);
   const [scimTokens, setScimTokens] = useState<ScimTokenSummary[]>([]);
@@ -135,9 +165,24 @@ export function UsersGroups() {
   const [attributeRows, setAttributeRows] = useState<{ key: string; value: string }[]>([]);
   const [attributesDirty, setAttributesDirty] = useState(false);
   const [savingAttributes, setSavingAttributes] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+
+  const loadRequestId = useRef(0);
+  const connectionsRequestId = useRef(0);
+  const memberPermissionsRequestId = useRef(0);
+  const resourcePermissionsRequestId = useRef(0);
+  const groupPermissionsRequestId = useRef(0);
+  const mutationKeys = useRef(new Set<string>());
 
   const load = useCallback(async () => {
-    const [{ members: m, pendingInvites: pi }, { groups: g }, { roles: r }, { apiKeys: keys }, { items: abac }, { items: scim }, auditRes, perms] = await Promise.all([
+    const requestId = ++loadRequestId.current;
+    setLoading(true);
+    setLoadError(null);
+
+    const results = await Promise.allSettled([
       api.getMembers(),
       api.getGroups(),
       api.getRoles(),
@@ -147,18 +192,83 @@ export function UsersGroups() {
       api.getUserAuditLog({ page: 1, limit: 15 }),
       api.getMyPermissions(),
     ]);
-    setMembers(m);
-    setPendingInvites(pi);
-    setGroups(g);
-    setRoles(r);
-    setApiKeys(keys);
-    setAbacPolicies(abac);
-    setScimTokens(scim);
-    setAuditLog(auditRes.items);
-    setMyPermissions(perms);
-  }, []);
 
-  useEffect(() => { void load(); }, [load]);
+    if (requestId !== loadRequestId.current) return;
+
+    const [
+      membersResult,
+      groupsResult,
+      rolesResult,
+      apiKeysResult,
+      abacResult,
+      scimResult,
+      auditResult,
+      permissionsResult,
+    ] = results;
+
+    const failures: string[] = [];
+
+    if (membersResult.status === 'fulfilled') {
+      setMembers(membersResult.value.members ?? []);
+      setPendingInvites(membersResult.value.pendingInvites ?? []);
+    } else {
+      failures.push('members');
+    }
+
+    if (groupsResult.status === 'fulfilled') {
+      setGroups(groupsResult.value.groups ?? []);
+    } else {
+      failures.push('groups');
+    }
+
+    if (rolesResult.status === 'fulfilled') {
+      // Keep the server response validated/available for future role metadata without duplicating the static matrix.
+    } else {
+      failures.push('roles');
+    }
+
+    if (apiKeysResult.status === 'fulfilled') {
+      setApiKeys(apiKeysResult.value.apiKeys ?? []);
+    } else {
+      failures.push('API keys');
+    }
+
+    if (abacResult.status === 'fulfilled') {
+      setAbacPolicies(abacResult.value.items ?? []);
+    } else {
+      failures.push('ABAC policies');
+    }
+
+    if (scimResult.status === 'fulfilled') {
+      setScimTokens(scimResult.value.items ?? []);
+    } else {
+      failures.push('SCIM');
+    }
+
+    if (auditResult.status === 'fulfilled') {
+      setAuditLog(auditResult.value.items ?? []);
+    } else {
+      failures.push('audit logs');
+    }
+
+    if (permissionsResult.status === 'fulfilled') {
+      setMyPermissions(permissionsResult.value);
+    } else {
+      failures.push('permissions');
+    }
+
+    if (failures.length > 0) {
+      const message = `Some Users & Groups data could not be loaded: ${failures.join(', ')}.`;
+      setLoadError(message);
+      toast(message, 'error');
+    }
+
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // Every connected account across all three clouds, paginated to
   // completion (not a single limit:1000 fetch, which silently clamped to
@@ -166,32 +276,80 @@ export function UsersGroups() {
   // all) -- scoping a user/role/resource grant to an account past #200 or
   // to any Azure subscription was previously impossible from this picker.
   useEffect(() => {
-    void Promise.all([
+    const requestId = ++connectionsRequestId.current;
+    setConnectionsLoading(true);
+    setConnectionsError(null);
+
+    void Promise.allSettled([
       fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
       fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
       fetchAllPages((page, limit) => api.getAzureAccounts({ page, limit })),
-    ]).then(([aws, gcp, azure]) => {
+    ]).then(results => {
+      if (requestId !== connectionsRequestId.current) return;
+
+      const [aws, gcp, azure] = results;
+      const failures: string[] = [];
+
+      const awsItems = aws.status === 'fulfilled' ? aws.value : (failures.push('AWS'), []);
+      const gcpItems = gcp.status === 'fulfilled' ? gcp.value : (failures.push('GCP'), []);
+      const azureItems = azure.status === 'fulfilled' ? azure.value : (failures.push('Azure'), []);
+
       setConnections([
-        ...aws.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.aws_account_id} (AWS)` })),
-        ...gcp.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.gcp_project_id} (GCP)` })),
-        ...azure.map((c) => ({ id: c.id, label: `${c.connection_name ?? c.azure_subscription_id} (Azure)` })),
+        ...awsItems.map(c => ({
+          id: c.id,
+          label: `${c.connection_name ?? c.aws_account_id} (AWS)`,
+        })),
+        ...gcpItems.map(c => ({
+          id: c.id,
+          label: `${c.connection_name ?? c.gcp_project_id} (GCP)`,
+        })),
+        ...azureItems.map(c => ({
+          id: c.id,
+          label: `${c.connection_name ?? c.azure_subscription_id} (Azure)`,
+        })),
       ]);
+
+      if (failures.length > 0) {
+        const message = `Some cloud connections could not be loaded: ${failures.join(', ')}.`;
+        setConnectionsError(message);
+        toast(message, 'error');
+      }
+
+      setConnectionsLoading(false);
     });
-  }, []);
+  }, [toast]);
 
   const loadMenuPermissions = useCallback(async (userId: string) => {
+    const requestId = ++memberPermissionsRequestId.current;
     setMenuPermsLoading(true);
+
     try {
-      const [{ items }, { permissions }] = await Promise.all([
+      const results = await Promise.allSettled([
         api.getMenuPermissionOverrides({ userId }),
         api.getEffectiveMenuPermissions(userId),
       ]);
-      setMenuOverrides(items);
-      setMenuEffective(permissions);
+
+      if (requestId !== memberPermissionsRequestId.current) return;
+
+      const [overridesResult, effectiveResult] = results;
+
+      if (overridesResult.status === 'fulfilled') {
+        setMenuOverrides(overridesResult.value.items ?? []);
+      }
+
+      if (effectiveResult.status === 'fulfilled') {
+        setMenuEffective(effectiveResult.value.permissions ?? {});
+      }
+
+      if (overridesResult.status === 'rejected' || effectiveResult.status === 'rejected') {
+        toast('Could not fully load this member’s menu permissions.', 'error');
+      }
     } finally {
-      setMenuPermsLoading(false);
+      if (requestId === memberPermissionsRequestId.current) {
+        setMenuPermsLoading(false);
+      }
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (selectedMemberForPermissions) void loadMenuPermissions(selectedMemberForPermissions.userId);
@@ -199,18 +357,36 @@ export function UsersGroups() {
   }, [selectedMemberForPermissions, loadMenuPermissions]);
 
   const loadResourceGrants = useCallback(async (userId: string) => {
+    const requestId = ++resourcePermissionsRequestId.current;
     setResourcePermsLoading(true);
+
     try {
-      const [{ items }, { restricted }] = await Promise.all([
+      const results = await Promise.allSettled([
         api.getResourceGrants(userId),
         api.getEffectiveResourceGrants(userId),
       ]);
-      setResourceGrants(items);
-      setResourceRestricted(restricted);
+
+      if (requestId !== resourcePermissionsRequestId.current) return;
+
+      const [grantsResult, effectiveResult] = results;
+
+      if (grantsResult.status === 'fulfilled') {
+        setResourceGrants(grantsResult.value.items ?? []);
+      }
+
+      if (effectiveResult.status === 'fulfilled') {
+        setResourceRestricted(Boolean(effectiveResult.value.restricted));
+      }
+
+      if (grantsResult.status === 'rejected' || effectiveResult.status === 'rejected') {
+        toast('Could not fully load this member’s resource access.', 'error');
+      }
     } finally {
-      setResourcePermsLoading(false);
+      if (requestId === resourcePermissionsRequestId.current) {
+        setResourcePermsLoading(false);
+      }
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (selectedMemberForPermissions) void loadResourceGrants(selectedMemberForPermissions.userId);
@@ -230,56 +406,127 @@ export function UsersGroups() {
   function removeAttributeRow(i: number) { setAttributeRows(prev => prev.filter((_, idx) => idx !== i)); setAttributesDirty(true); }
 
   async function handleSaveAttributes(userId: string) {
+    if (!beginMutation(`attributes:${userId}`)) return;
+
     setSavingAttributes(true);
     try {
-      const attributes = Object.fromEntries(attributeRows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value]));
+      const attributes: Record<string, string> = {};
+      const seenKeys = new Set<string>();
+
+      for (const row of attributeRows) {
+        const key = row.key.trim();
+        const value = row.value.trim();
+
+        if (!key && !value) continue;
+        if (!key || !isSafeIdentifier(key)) {
+          throw new Error('Attribute keys may contain only letters, numbers, dots, underscores, colons, and hyphens.');
+        }
+        if (key.length > MAX_ATTRIBUTE_KEY_LENGTH) {
+          throw new Error(`Attribute keys must be ${MAX_ATTRIBUTE_KEY_LENGTH} characters or fewer.`);
+        }
+        if (value.length > MAX_ATTRIBUTE_VALUE_LENGTH) {
+          throw new Error(`Attribute values must be ${MAX_ATTRIBUTE_VALUE_LENGTH} characters or fewer.`);
+        }
+        if (seenKeys.has(key)) {
+          throw new Error(`Duplicate attribute key: ${key}`);
+        }
+
+        seenKeys.add(key);
+        attributes[key] = value;
+      }
+
       await api.updateMemberAttributes(userId, attributes);
       toast('Attributes updated', 'success');
       setAttributesDirty(false);
-      await load();
       setSelectedMemberForPermissions(prev => (prev ? { ...prev, attributes } : prev));
+      await load();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not save attributes.', 'error');
+      toast(normalizeError(err, 'Could not save attributes.'), 'error');
     } finally {
       setSavingAttributes(false);
+      endMutation(`attributes:${userId}`);
     }
   }
 
   async function handleAddResourceGrant(userId: string) {
-    if (!addGrantConnectionId) return;
-    await api.setResourceGrant(userId, addGrantConnectionId);
-    setAddGrantConnectionId('');
-    await loadResourceGrants(userId);
-    toast('Resource access granted', 'success');
+    const connectionId = addGrantConnectionId.trim();
+    if (!connectionId || !beginMutation(`grant:add:${userId}:${connectionId}`)) return;
+
+    try {
+      await api.setResourceGrant(userId, connectionId);
+      setAddGrantConnectionId('');
+      await loadResourceGrants(userId);
+      toast('Resource access granted', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not grant resource access.'), 'error');
+    } finally {
+      endMutation(`grant:add:${userId}:${connectionId}`);
+    }
   }
 
   async function handleRemoveResourceGrant(userId: string, grantId: string) {
-    await api.deleteResourceGrant(grantId);
-    await loadResourceGrants(userId);
-    toast('Resource access revoked', 'success');
+    if (!beginMutation(`grant:remove:${grantId}`)) return;
+
+    try {
+      await api.deleteResourceGrant(grantId);
+      await loadResourceGrants(userId);
+      toast('Resource access revoked', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not revoke resource access.'), 'error');
+    } finally {
+      endMutation(`grant:remove:${grantId}`);
+    }
   }
 
   async function handleMenuLevelChange(userId: string, menuKey: string, level: MenuPermissionLevel) {
-    await api.setMenuPermission({ userId, menuKey, level });
-    await loadMenuPermissions(userId);
-    toast('Menu permission updated', 'success');
+    const key = `menu:set:${userId}:${menuKey}`;
+    if (!beginMutation(key)) return;
+
+    try {
+      await api.setMenuPermission({ userId, menuKey, level });
+      await loadMenuPermissions(userId);
+      toast('Menu permission updated', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not update menu permission.'), 'error');
+    } finally {
+      endMutation(key);
+    }
   }
 
   async function handleMenuOverrideReset(userId: string, overrideId: string) {
-    await api.deleteMenuPermission(overrideId);
-    await loadMenuPermissions(userId);
-    toast('Reverted to role default', 'success');
+    if (!beginMutation(`menu:delete:${overrideId}`)) return;
+
+    try {
+      await api.deleteMenuPermission(overrideId);
+      await loadMenuPermissions(userId);
+      toast('Reverted to role default', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not reset menu permission.'), 'error');
+    } finally {
+      endMutation(`menu:delete:${overrideId}`);
+    }
   }
 
   const loadGroupMenuPermissions = useCallback(async (groupId: string) => {
+    const requestId = ++groupPermissionsRequestId.current;
     setGroupMenuPermsLoading(true);
+
     try {
       const { items } = await api.getMenuPermissionOverrides({ groupId });
-      setGroupMenuOverrides(items);
+
+      if (requestId !== groupPermissionsRequestId.current) return;
+
+      setGroupMenuOverrides(items ?? []);
+    } catch (error) {
+      if (requestId === groupPermissionsRequestId.current) {
+        toast(normalizeError(error, 'Could not load group menu permissions.'), 'error');
+      }
     } finally {
-      setGroupMenuPermsLoading(false);
+      if (requestId === groupPermissionsRequestId.current) {
+        setGroupMenuPermsLoading(false);
+      }
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (selectedGroupForPermissions) void loadGroupMenuPermissions(selectedGroupForPermissions.id);
@@ -287,156 +534,259 @@ export function UsersGroups() {
   }, [selectedGroupForPermissions, loadGroupMenuPermissions]);
 
   async function handleGroupMenuLevelChange(groupId: string, menuKey: string, level: MenuPermissionLevel) {
-    await api.setMenuPermission({ groupId, menuKey, level });
-    await loadGroupMenuPermissions(groupId);
-    toast('Group menu permission updated', 'success');
+    const key = `group-menu:set:${groupId}:${menuKey}`;
+    if (!beginMutation(key)) return;
+
+    try {
+      await api.setMenuPermission({ groupId, menuKey, level });
+      await loadGroupMenuPermissions(groupId);
+      toast('Group menu permission updated', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not update group menu permission.'), 'error');
+    } finally {
+      endMutation(key);
+    }
   }
 
   async function handleGroupMenuOverrideReset(groupId: string, overrideId: string) {
-    await api.deleteMenuPermission(overrideId);
-    await loadGroupMenuPermissions(groupId);
-    toast('Group override removed', 'success');
+    if (!beginMutation(`group-menu:delete:${overrideId}`)) return;
+
+    try {
+      await api.deleteMenuPermission(overrideId);
+      await loadGroupMenuPermissions(groupId);
+      toast('Group override removed', 'success');
+    } catch (err) {
+      toast(normalizeError(err, 'Could not reset group menu permission.'), 'error');
+    } finally {
+      endMutation(`group-menu:delete:${overrideId}`);
+    }
   }
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
+    const email = inviteEmail.trim().toLowerCase();
+
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
+    if (!beginMutation(`invite:${email}:${inviteRole}`)) return;
+
     setError(null);
     try {
-      const result = await api.inviteMember(inviteEmail.trim(), inviteRole);
+      const result = await api.inviteMember(email, inviteRole);
       const roleLabel = ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label ?? inviteRole;
       toast(
         result.emailSent
-          ? `Invitation emailed to ${inviteEmail.trim()} with role "${roleLabel}".`
-          : `Invitation created for ${inviteEmail.trim()} with role "${roleLabel}", but the invite email couldn't be sent (email delivery isn't configured in this environment yet) — share the accept link with them directly for now.`,
+          ? `Invitation emailed to ${email} with role "${roleLabel}".`
+          : `Invitation created for ${email} with role "${roleLabel}", but the invite email could not be sent.`,
         result.emailSent ? 'success' : 'info',
       );
       setInviteEmail('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send this invite.');
+      const message = normalizeError(err, 'Could not send this invite.');
+      setError(message);
+      toast(message, 'error');
+    } finally {
+      endMutation(`invite:${email}:${inviteRole}`);
     }
   }
 
   async function handleRoleChange(roleGrantId: string, role: Role) {
+    const member = members.find(m => m.roleGrantId === roleGrantId);
+    if (!member) return;
+
+    if (!beginMutation(`role:${roleGrantId}`)) return;
+
     setError(null);
     try {
       await api.updateRoleGrant(roleGrantId, role);
       toast(`Role updated to "${ENTERPRISE_ROLES.find(r => r.value === role)?.label ?? role}"`, 'success');
       await load();
     } catch (err) {
-      // Also toasted, not just set into `error` -- that state only renders
-      // far down the page inside the Invite New Member card, nowhere near
-      // the members table this action was actually taken from (e.g. the
-      // last-owner guard's "Cannot change the role of the last owner"
-      // rejection was previously invisible unless you happened to scroll
-      // all the way down after the dropdown silently reverted).
-      const message = err instanceof Error ? err.message : 'Could not update this role.';
+      const message = normalizeError(err, 'Could not update this role.');
       setError(message);
       toast(message, 'error');
+    } finally {
+      endMutation(`role:${roleGrantId}`);
     }
   }
 
   async function handleTransferOwnership(targetUserId: string, targetLabel: string) {
-    if (!(await confirm(`Transfer ownership to ${targetLabel}? You'll be moved to Organization Admin and lose the ability to undo this yourself — only they could transfer it back.`))) return;
+    if (targetUserId === user?.id) return;
+
+    if (!(await confirm(
+      `Transfer ownership to ${targetLabel}? You will become Organization Admin and will not be able to undo this yourself.`
+    ))) return;
+
+    if (!beginMutation(`owner-transfer:${targetUserId}`)) return;
+
     setError(null);
     try {
       await api.transferOwnership(targetUserId);
       toast(`Ownership transferred to ${targetLabel}.`, 'success');
       await load();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not transfer ownership.';
+      const message = normalizeError(err, 'Could not transfer ownership.');
       setError(message);
       toast(message, 'error');
+    } finally {
+      endMutation(`owner-transfer:${targetUserId}`);
     }
   }
 
   async function handleRemove(roleGrantId: string) {
     if (!(await confirm('Remove this member from the organization? They will lose access to all resources.'))) return;
+    if (!beginMutation(`member-remove:${roleGrantId}`)) return;
+
     setError(null);
     try {
       await api.deleteRoleGrant(roleGrantId);
       toast('Member removed from organization', 'success');
+
+      if (selectedMemberForPermissions?.roleGrantId === roleGrantId) {
+        setSelectedMemberForPermissions(null);
+      }
+
       await load();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not remove this member.';
+      const message = normalizeError(err, 'Could not remove this member.');
       setError(message);
       toast(message, 'error');
+    } finally {
+      endMutation(`member-remove:${roleGrantId}`);
     }
   }
 
   async function handleCreateGroup(e: React.FormEvent) {
     e.preventDefault();
-    if (!newGroupName.trim()) return;
+    const name = normalizeName(newGroupName);
+
+    if (!name) {
+      setGroupError('Enter a group name.');
+      return;
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      setGroupError(`Group names must be ${MAX_NAME_LENGTH} characters or fewer.`);
+      return;
+    }
+    if (!beginMutation(`group-create:${name.toLowerCase()}`)) return;
+
     setGroupError(null);
     try {
-      await api.createGroup(newGroupName.trim());
-      toast(`Group "${newGroupName.trim()}" created`, 'success');
+      await api.createGroup(name);
+      toast(`Group "${name}" created`, 'success');
       setNewGroupName('');
       await load();
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Could not create this group.');
+      setGroupError(normalizeError(err, 'Could not create this group.'));
+    } finally {
+      endMutation(`group-create:${name.toLowerCase()}`);
     }
   }
 
   async function handleDeleteGroup(id: string) {
-    if (!(await confirm('Delete this group?'))) return;
+    if (!(await confirm('Delete this group? Members will not be deleted, but the group membership and group permissions will be removed.'))) return;
+    if (!beginMutation(`group-delete:${id}`)) return;
+
     setGroupError(null);
     try {
       await api.deleteGroup(id);
+      if (selectedGroupForPermissions?.id === id) {
+        setSelectedGroupForPermissions(null);
+      }
+      if (expandedGroup === id) {
+        setExpandedGroup(null);
+      }
       toast('Group deleted', 'success');
       await load();
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Could not delete this group.');
+      setGroupError(normalizeError(err, 'Could not delete this group.'));
+    } finally {
+      endMutation(`group-delete:${id}`);
     }
   }
 
   async function handleAddGroupMember(groupId: string) {
-    if (!addMemberUserId) return;
+    const userId = addMemberUserId.trim();
+    if (!userId || !beginMutation(`group-member:add:${groupId}:${userId}`)) return;
+
     setGroupError(null);
     try {
-      await api.addGroupMember(groupId, addMemberUserId);
+      await api.addGroupMember(groupId, userId);
       toast('Member added to group', 'success');
       setAddMemberUserId('');
       await load();
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Could not add this member to the group.');
+      setGroupError(normalizeError(err, 'Could not add this member to the group.'));
+    } finally {
+      endMutation(`group-member:add:${groupId}:${userId}`);
     }
   }
 
   async function handleRemoveGroupMember(groupId: string, userId: string) {
+    if (!(await confirm('Remove this member from the group?'))) return;
+    if (!beginMutation(`group-member:remove:${groupId}:${userId}`)) return;
+
     setGroupError(null);
     try {
       await api.removeGroupMember(groupId, userId);
       toast('Member removed from group', 'success');
       await load();
     } catch (err) {
-      setGroupError(err instanceof Error ? err.message : 'Could not remove this member from the group.');
+      setGroupError(normalizeError(err, 'Could not remove this member from the group.'));
+    } finally {
+      endMutation(`group-member:remove:${groupId}:${userId}`);
     }
   }
 
   async function handleCreateKey(e: React.FormEvent) {
     e.preventDefault();
-    if (!newKeyName.trim()) return;
+    const name = normalizeName(newKeyName);
+
+    if (!name) {
+      setKeyError('Enter an API key name.');
+      return;
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      setKeyError(`API key names must be ${MAX_NAME_LENGTH} characters or fewer.`);
+      return;
+    }
+    if (!beginMutation(`api-key:create:${name.toLowerCase()}`)) return;
+
     setKeyError(null);
     try {
-      const created = await api.createApiKey(newKeyName.trim());
+      const created = await api.createApiKey(name);
+
+      if (!created.apiKey) {
+        throw new Error('The API key was created but the secret was not returned. Contact an administrator.');
+      }
+
       setNewKeyName('');
       setNewlyCreatedKey({ apiKey: created.apiKey, name: created.name });
       await load();
     } catch (err) {
-      setKeyError(err instanceof Error ? err.message : 'Could not create this API key.');
+      setKeyError(normalizeError(err, 'Could not create this API key.'));
+    } finally {
+      endMutation(`api-key:create:${name.toLowerCase()}`);
     }
   }
 
   async function handleRevokeKey(id: string) {
     if (!(await confirm('Revoke this API key? Any integration using it will stop working immediately.'))) return;
+    if (!beginMutation(`api-key:revoke:${id}`)) return;
+
     setKeyError(null);
     try {
       await api.revokeApiKey(id);
       toast('API key revoked', 'success');
       await load();
     } catch (err) {
-      setKeyError(err instanceof Error ? err.message : 'Could not revoke this API key.');
+      setKeyError(normalizeError(err, 'Could not revoke this API key.'));
+    } finally {
+      endMutation(`api-key:revoke:${id}`);
     }
   }
 
@@ -447,53 +797,139 @@ export function UsersGroups() {
 
   async function handleCreateAbacPolicy(e: React.FormEvent) {
     e.preventDefault();
-    if (!newPolicyName.trim() || !newPolicyAttrKey.trim() || !newPolicyValue.trim()) return;
+
+    const name = normalizeName(newPolicyName);
+    const menuKey = newPolicyMenuKey.trim();
+    const attrKey = newPolicyAttrKey.trim();
+    const rawValue = newPolicyValue.trim();
+
+    if (!name || !menuKey || !attrKey || !rawValue) {
+      setAbacError('Policy name, menu key, attribute key, and value are required.');
+      return;
+    }
+
+    if (name.length > MAX_NAME_LENGTH || menuKey.length > MAX_NAME_LENGTH || attrKey.length > MAX_ATTRIBUTE_KEY_LENGTH) {
+      setAbacError('One or more ABAC fields are too long.');
+      return;
+    }
+
+    if (!isSafeIdentifier(menuKey) || !isSafeIdentifier(attrKey)) {
+      setAbacError('Menu keys and attribute keys may contain only letters, numbers, dots, underscores, colons, and hyphens.');
+      return;
+    }
+
+    if (rawValue.length > MAX_ABAC_VALUE_LENGTH) {
+      setAbacError(`ABAC values must be ${MAX_ABAC_VALUE_LENGTH} characters or fewer.`);
+      return;
+    }
+
+    const conditionValue = buildConditionValue();
+    if (Array.isArray(conditionValue) && conditionValue.length === 0) {
+      setAbacError('Provide at least one value for an "in" condition.');
+      return;
+    }
+
+    const mutationKey = `abac:create:${name.toLowerCase()}`;
+    if (!beginMutation(mutationKey)) return;
+
     setAbacError(null);
     try {
-      const condition: AbacCondition = { attribute: `${newPolicySubject}.${newPolicyAttrKey.trim()}`, operator: newPolicyOperator, value: buildConditionValue() };
-      await api.createAbacPolicy({ name: newPolicyName.trim(), effect: newPolicyEffect, menuKey: newPolicyMenuKey, conditions: [condition] });
-      toast(`Policy "${newPolicyName.trim()}" created`, 'success');
-      setNewPolicyName(''); setNewPolicyValue('');
+      const condition: AbacCondition = {
+        attribute: `${newPolicySubject}.${attrKey}`,
+        operator: newPolicyOperator,
+        value: conditionValue,
+      };
+
+      await api.createAbacPolicy({
+        name,
+        effect: newPolicyEffect,
+        menuKey,
+        conditions: [condition].slice(0, MAX_ABAC_CONDITIONS_IN_UI),
+      });
+
+      toast(`Policy "${name}" created`, 'success');
+      setNewPolicyName('');
+      setNewPolicyValue('');
       await load();
     } catch (err) {
-      setAbacError(err instanceof Error ? err.message : 'Could not create this policy.');
+      setAbacError(normalizeError(err, 'Could not create this policy.'));
+    } finally {
+      endMutation(mutationKey);
     }
   }
 
   async function handleTogglePolicyEnabled(policy: AbacPolicyRow) {
+    const key = `abac:toggle:${policy.id}`;
+    if (!beginMutation(key)) return;
+
     setAbacError(null);
     try {
       await api.updateAbacPolicy(policy.id, { enabled: !policy.enabled });
       toast(policy.enabled ? 'Policy disabled' : 'Policy enabled', 'success');
       await load();
     } catch (err) {
-      setAbacError(err instanceof Error ? err.message : 'Could not update this policy.');
+      setAbacError(normalizeError(err, 'Could not update this policy.'));
+    } finally {
+      endMutation(key);
     }
   }
 
   async function handleDeleteAbacPolicy(id: string, name: string) {
-    if (!(await confirm(`Delete the policy "${name}"?`))) return;
+    if (!(await confirm(`Delete the policy "${name}"? This cannot be undone.`))) return;
+    if (!beginMutation(`abac:delete:${id}`)) return;
+
     setAbacError(null);
     try {
       await api.deleteAbacPolicy(id);
       toast('Policy deleted', 'success');
       await load();
     } catch (err) {
-      setAbacError(err instanceof Error ? err.message : 'Could not delete this policy.');
+      setAbacError(normalizeError(err, 'Could not delete this policy.'));
+    } finally {
+      endMutation(`abac:delete:${id}`);
     }
   }
 
   async function handleRunAbacTest(e: React.FormEvent) {
     e.preventDefault();
-    if (!testUserId) return;
+
+    const userId = testUserId.trim();
+    const menuKey = testMenuKey.trim();
+    const attrKey = testAttrKey.trim();
+    const attrValue = testAttrValue.trim();
+
+    if (!userId || !menuKey) return;
+
+    if (menuKey.length > MAX_NAME_LENGTH || attrKey.length > MAX_ATTRIBUTE_KEY_LENGTH || attrValue.length > MAX_ABAC_VALUE_LENGTH) {
+      toast('ABAC test input is too long.', 'error');
+      return;
+    }
+
+    if (menuKey && !isSafeIdentifier(menuKey)) {
+      toast('Invalid menu key.', 'error');
+      return;
+    }
+
+    if (attrKey && !isSafeIdentifier(attrKey)) {
+      toast('Invalid attribute key.', 'error');
+      return;
+    }
+
+    if (testRunning) return;
+
     setTestRunning(true);
     setTestResult(null);
+
     try {
-      const resourceAttributes = testAttrKey.trim() ? { [testAttrKey.trim()]: testAttrValue } : {};
-      const result = await api.testAbacPolicy({ userId: testUserId, menuKey: testMenuKey, resourceAttributes });
+      const resourceAttributes = attrKey ? { [attrKey]: attrValue } : {};
+      const result = await api.testAbacPolicy({
+        userId,
+        menuKey,
+        resourceAttributes,
+      });
       setTestResult(result);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not run this test.', 'error');
+      toast(normalizeError(err, 'Could not run this test.'), 'error');
     } finally {
       setTestRunning(false);
     }
@@ -501,28 +937,63 @@ export function UsersGroups() {
 
   async function handleCreateScimToken(e: React.FormEvent) {
     e.preventDefault();
-    if (!newScimTokenName.trim()) return;
+
+    const name = normalizeName(newScimTokenName);
+
+    if (!name) {
+      setScimError('Enter a SCIM token name.');
+      return;
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      setScimError(`SCIM token names must be ${MAX_NAME_LENGTH} characters or fewer.`);
+      return;
+    }
+
+    const mutationKey = `scim:create:${name.toLowerCase()}`;
+    if (!beginMutation(mutationKey)) return;
+
     setScimError(null);
     try {
-      const created = await api.createScimToken(newScimTokenName.trim());
+      const created = await api.createScimToken(name);
+
+      if (!created.token) {
+        throw new Error('The SCIM token was created but the secret was not returned. Contact an administrator.');
+      }
+
       setNewScimTokenName('');
       setNewlyCreatedScimToken({ token: created.token, name: created.name });
       await load();
     } catch (err) {
-      setScimError(err instanceof Error ? err.message : 'Could not create this SCIM token.');
+      setScimError(normalizeError(err, 'Could not create this SCIM token.'));
+    } finally {
+      endMutation(mutationKey);
     }
   }
 
   async function handleRevokeScimToken(id: string) {
     if (!(await confirm('Revoke this SCIM token? Your identity provider will immediately be unable to provision or deprovision users through it.'))) return;
+    if (!beginMutation(`scim:revoke:${id}`)) return;
+
     setScimError(null);
     try {
       await api.revokeScimToken(id);
       toast('SCIM token revoked', 'success');
       await load();
     } catch (err) {
-      setScimError(err instanceof Error ? err.message : 'Could not revoke this token.');
+      setScimError(normalizeError(err, 'Could not revoke this token.'));
+    } finally {
+      endMutation(`scim:revoke:${id}`);
     }
+  }
+
+  function beginMutation(key: string): boolean {
+    if (mutationKeys.current.has(key)) return false;
+    mutationKeys.current.add(key);
+    return true;
+  }
+
+  function endMutation(key: string): void {
+    mutationKeys.current.delete(key);
   }
 
   function memberName(userId: string): string {
@@ -530,8 +1001,19 @@ export function UsersGroups() {
     return m?.fullName ?? m?.email ?? userId;
   }
 
-  async function copyKey(key: string) {
-    try { await navigator.clipboard.writeText(key); toast('API key copied to clipboard', 'success'); } catch { /* clipboard unavailable */ }
+  async function copyKey(secret: string, label = 'Secret') {
+    if (!secret) return;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable.');
+      }
+
+      await navigator.clipboard.writeText(secret);
+      toast(`${label} copied to clipboard`, 'success');
+    } catch {
+      toast(`Could not copy the ${label.toLowerCase()}. Copy it manually instead.`, 'error');
+    }
   }
 
 
@@ -541,11 +1023,44 @@ export function UsersGroups() {
 
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {visibleTabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <button type="button" key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
             {t}
           </button>
         ))}
       </div>
+
+      {visibleTabs.length === 0 && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center">
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Access restricted</h2>
+          <p className="mt-1 text-sm text-slate-400">You do not have permission to manage users and organization access.</p>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 px-3 py-2.5">
+          <p className="text-xs text-red-700 dark:text-red-300">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="shrink-0 text-xs font-semibold text-red-700 dark:text-red-300 hover:underline disabled:opacity-50"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {connectionsError && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5">
+          <p className="text-xs text-amber-700 dark:text-amber-300">{connectionsError}</p>
+        </div>
+      )}
+
+      {loading && members.length === 0 && groups.length === 0 && (
+        <div className="mb-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-8 text-center text-sm text-slate-400">
+          Loading organization access controls…
+        </div>
+      )}
 
       {tab === 'Users' && (
         <div className="flex flex-col gap-4">
@@ -555,7 +1070,8 @@ export function UsersGroups() {
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Organization Members</h3>
               <span className="text-xs text-slate-400">{members.length} member{members.length === 1 ? '' : 's'}</span>
             </div>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                   <th className="py-2">Email</th><th className="py-2">Name</th><th className="py-2">MFA</th><th className="py-2">Role</th><th className="py-2">Actions</th>
@@ -573,17 +1089,18 @@ export function UsersGroups() {
                       </select>
                     </td>
                     <td className="py-2 flex gap-2">
-                      <button onClick={() => setSelectedMemberForPermissions(m)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Permissions</button>
+                      <button type="button" aria-label={`Manage permissions for ${m.email ?? m.fullName ?? "member"}`} onClick={() => setSelectedMemberForPermissions(m)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Permissions</button>
                       {myPermissions?.role === 'owner' && m.userId !== user?.id && (
-                        <button onClick={() => void handleTransferOwnership(m.userId, m.email ?? m.fullName ?? 'this member')} className="text-xs text-amber-600 dark:text-amber-400 hover:underline">Make owner</button>
+                        <button type="button" onClick={() => void handleTransferOwnership(m.userId, m.email ?? m.fullName ?? 'this member')} className="text-xs text-amber-600 dark:text-amber-400 hover:underline">Make owner</button>
                       )}
-                      <button onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button>
+                      <button type="button" onClick={() => void handleRemove(m.roleGrantId)} className="text-xs text-red-500 hover:underline">Remove</button>
                     </td>
                   </tr>
                 ))}
                 {members.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No members yet. Invite your first team member below.</td></tr>}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
 
           {/* Pending Invites */}
@@ -607,7 +1124,7 @@ export function UsersGroups() {
               <div className="flex gap-3 items-end flex-wrap">
                 <label className="flex flex-col gap-1 text-xs">
                   <span className="text-slate-500 dark:text-slate-400">Email Address</span>
-                  <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+                  <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} type="email" required maxLength={MAX_EMAIL_LENGTH} autoComplete="email" placeholder="teammate@company.com" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
                   <span className="text-slate-500 dark:text-slate-400">Role</span>
@@ -640,11 +1157,11 @@ export function UsersGroups() {
             {groups.map(g => (
               <li key={g.id} className="py-2 text-sm">
                 <div className="flex items-center justify-between">
-                  <button onClick={() => setExpandedGroup(v => v === g.id ? null : g.id)} className="text-left flex-1">
+                  <button type="button" onClick={() => setExpandedGroup(v => v === g.id ? null : g.id)} className="text-left flex-1">
                     <span className="font-medium text-slate-700 dark:text-slate-200">{g.name}</span> <span className="text-xs text-slate-400">({g.memberIds.length} members)</span>
                   </button>
-                  <button onClick={() => setSelectedGroupForPermissions(g)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline mr-3">Menu Access</button>
-                  <button onClick={() => void handleDeleteGroup(g.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                  <button type="button" aria-label={`Manage menu access for ${g.name}`} onClick={() => setSelectedGroupForPermissions(g)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline mr-3">Menu Access</button>
+                  <button type="button" onClick={() => void handleDeleteGroup(g.id)} className="text-xs text-red-500 hover:underline">Delete</button>
                 </div>
                 {expandedGroup === g.id && (
                   <div className="mt-2 pl-2 border-l border-slate-200 dark:border-slate-700">
@@ -652,7 +1169,7 @@ export function UsersGroups() {
                       {g.memberIds.map(uid => (
                         <li key={uid} className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
                           <span>{memberName(uid)}</span>
-                          <button onClick={() => void handleRemoveGroupMember(g.id, uid)} className="text-red-500 hover:underline">Remove</button>
+                          <button type="button" onClick={() => void handleRemoveGroupMember(g.id, uid)} className="text-red-500 hover:underline">Remove</button>
                         </li>
                       ))}
                       {g.memberIds.length === 0 && <li className="text-xs text-slate-400">No members in this group.</li>}
@@ -662,7 +1179,7 @@ export function UsersGroups() {
                         <option value="">Add member…</option>
                         {members.filter(m => !g.memberIds.includes(m.userId)).map(m => <option key={m.userId} value={m.userId}>{m.email ?? m.fullName ?? m.userId}</option>)}
                       </select>
-                      <button onClick={() => void handleAddGroupMember(g.id)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Add</button>
+                      <button type="button" onClick={() => void handleAddGroupMember(g.id)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Add</button>
                     </div>
                   </div>
                 )}
@@ -671,7 +1188,7 @@ export function UsersGroups() {
             {groups.length === 0 && <li className="py-2 text-sm text-slate-400">No groups yet. Create a group to manage permissions for multiple users at once.</li>}
           </ul>
           <form onSubmit={handleCreateGroup} className="flex gap-2">
-            <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="New group name (e.g. DevOps Team)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="New group name (e.g. DevOps Team)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
             <button type="submit" className="rounded-md border border-slate-200 dark:border-slate-700 text-sm px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Create Group</button>
           </form>
           {groupError && <p className="text-sm text-red-500 mt-2">{groupError}</p>}
@@ -778,7 +1295,8 @@ export function UsersGroups() {
       {tab === 'API Keys' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">API Keys</h3>
-          <table className="w-full text-sm mb-4">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm mb-4">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <th className="py-2">Name</th><th className="py-2">Prefix</th><th className="py-2">Created</th><th className="py-2">Status</th><th className="py-2"></th>
@@ -789,18 +1307,19 @@ export function UsersGroups() {
                 <tr key={k.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{k.name}</td>
                   <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{k.key_prefix}…</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(k.created_at).toLocaleDateString()}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{safeDate(k.created_at)}</td>
                   <td className="py-2">{k.revoked_at ? <Badge tone="neutral">revoked</Badge> : <Badge tone="good">active</Badge>}</td>
                   <td className="py-2">
-                    {!k.revoked_at && <button onClick={() => void handleRevokeKey(k.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
+                    {!k.revoked_at && <button type="button" onClick={() => void handleRevokeKey(k.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
                   </td>
                 </tr>
               ))}
               {apiKeys.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No API keys yet. Create one for CI/CD pipelines or integrations.</td></tr>}
             </tbody>
-          </table>
+            </table>
+          </div>
           <form onSubmit={handleCreateKey} className="flex gap-2">
-            <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="Key name (e.g. CI pipeline)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="Key name (e.g. CI pipeline)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
             <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Key</button>
           </form>
           {keyError && <p className="text-sm text-red-500 mt-2">{keyError}</p>}
@@ -812,7 +1331,8 @@ export function UsersGroups() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Attribute-Based Policies</h3>
             <p className="text-xs text-slate-400 mb-3">Layered on top of roles — a policy only fires when its condition matches; everything else falls through to ordinary role-based access unchanged.</p>
-            <table className="w-full text-sm mb-4">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-sm mb-4">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                   <th className="py-2">Name</th><th className="py-2">Effect</th><th className="py-2">Menu</th><th className="py-2">Condition</th><th className="py-2">Status</th><th className="py-2"></th>
@@ -828,26 +1348,27 @@ export function UsersGroups() {
                       {p.conditions.map((c, i) => <span key={i}>{i > 0 && ' AND '}{c.attribute} {c.operator} {JSON.stringify(c.value)}</span>)}
                     </td>
                     <td className="py-2">
-                      <button onClick={() => void handleTogglePolicyEnabled(p)} className="cursor-pointer">
+                      <button type="button" onClick={() => void handleTogglePolicyEnabled(p)} className="cursor-pointer">
                         <Badge tone={p.enabled ? 'good' : 'neutral'}>{p.enabled ? 'enabled' : 'disabled'}</Badge>
                       </button>
                     </td>
                     <td className="py-2">
-                      <button onClick={() => void handleDeleteAbacPolicy(p.id, p.name)} className="text-xs text-red-500 hover:underline">Delete</button>
+                      <button type="button" onClick={() => void handleDeleteAbacPolicy(p.id, p.name)} className="text-xs text-red-500 hover:underline">Delete</button>
                     </td>
                   </tr>
                 ))}
                 {abacPolicies.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-sm text-slate-400">No ABAC policies yet — access is governed by roles alone.</td></tr>}
               </tbody>
-            </table>
+              </table>
+            </div>
             <form onSubmit={handleCreateAbacPolicy} className="flex flex-col gap-2">
               <div className="flex gap-2 flex-wrap items-center">
-                <input value={newPolicyName} onChange={e => setNewPolicyName(e.target.value)} placeholder="Policy name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-48" />
+                <input value={newPolicyName} onChange={e => setNewPolicyName(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="Policy name" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-48" />
                 <select value={newPolicyEffect} onChange={e => setNewPolicyEffect(e.target.value as 'allow' | 'deny')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white">
                   <option value="deny">Deny</option>
                   <option value="allow">Allow</option>
                 </select>
-                <input value={newPolicyMenuKey} onChange={e => setNewPolicyMenuKey(e.target.value)} placeholder="Menu key (e.g. cloud)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
+                <input value={newPolicyMenuKey} onChange={e => setNewPolicyMenuKey(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="Menu key (e.g. cloud)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
               </div>
               <div className="flex gap-2 flex-wrap items-center">
                 <span className="text-xs text-slate-400">when</span>
@@ -855,11 +1376,11 @@ export function UsersGroups() {
                   <option value="resource">resource.</option>
                   <option value="user">user.</option>
                 </select>
-                <input value={newPolicyAttrKey} onChange={e => setNewPolicyAttrKey(e.target.value)} placeholder="attribute key (e.g. environment)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-52" />
+                <input value={newPolicyAttrKey} onChange={e => setNewPolicyAttrKey(e.target.value)} maxLength={MAX_ATTRIBUTE_KEY_LENGTH} placeholder="attribute key (e.g. environment)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-52" />
                 <select value={newPolicyOperator} onChange={e => setNewPolicyOperator(e.target.value as AbacCondition['operator'])} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white">
                   {ABAC_OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <input value={newPolicyValue} onChange={e => setNewPolicyValue(e.target.value)} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-40" />
+                <input value={newPolicyValue} onChange={e => setNewPolicyValue(e.target.value)} maxLength={MAX_ABAC_VALUE_LENGTH} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-40" />
                 <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Policy</button>
               </div>
             </form>
@@ -874,10 +1395,10 @@ export function UsersGroups() {
                 <option value="">Select a member…</option>
                 {members.map(m => <option key={m.userId} value={m.userId}>{m.email ?? m.fullName ?? m.userId}</option>)}
               </select>
-              <input value={testMenuKey} onChange={e => setTestMenuKey(e.target.value)} placeholder="Menu key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
+              <input value={testMenuKey} onChange={e => setTestMenuKey(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="Menu key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
               <span className="text-xs text-slate-400">resource.</span>
-              <input value={testAttrKey} onChange={e => setTestAttrKey(e.target.value)} placeholder="attribute key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
-              <input value={testAttrValue} onChange={e => setTestAttrValue(e.target.value)} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
+              <input value={testAttrKey} onChange={e => setTestAttrKey(e.target.value)} maxLength={MAX_ATTRIBUTE_KEY_LENGTH} placeholder="attribute key" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-36" />
+              <input value={testAttrValue} onChange={e => setTestAttrValue(e.target.value)} maxLength={MAX_ABAC_VALUE_LENGTH} placeholder="value" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-32" />
               <button type="submit" disabled={testRunning || !testUserId} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm px-3 py-1.5">{testRunning ? 'Running…' : 'Run Test'}</button>
             </form>
             {testResult && (
@@ -903,7 +1424,8 @@ export function UsersGroups() {
             <span className="text-slate-400 block mb-0.5">SCIM base URL</span>
             <code className="text-slate-700 dark:text-slate-200">{import.meta.env.VITE_USERS_API_URL || '(not configured in this environment)'}/scim/v2</code>
           </div>
-          <table className="w-full text-sm mb-4">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-sm mb-4">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <th className="py-2">Name</th><th className="py-2">Created</th><th className="py-2">Last Used</th><th className="py-2">Status</th><th className="py-2"></th>
@@ -913,19 +1435,20 @@ export function UsersGroups() {
               {scimTokens.map(t => (
                 <tr key={t.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{t.name}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(t.created_at).toLocaleDateString()}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'Never'}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{safeDate(t.created_at)}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{t.last_used_at ? safeDate(t.last_used_at) : 'Never'}</td>
                   <td className="py-2">{t.revoked_at ? <Badge tone="neutral">revoked</Badge> : <Badge tone="good">active</Badge>}</td>
                   <td className="py-2">
-                    {!t.revoked_at && <button onClick={() => void handleRevokeScimToken(t.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
+                    {!t.revoked_at && <button type="button" onClick={() => void handleRevokeScimToken(t.id)} className="text-xs text-red-500 hover:underline">Revoke</button>}
                   </td>
                 </tr>
               ))}
               {scimTokens.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-sm text-slate-400">No SCIM tokens yet. Create one to connect an identity provider.</td></tr>}
             </tbody>
-          </table>
+            </table>
+          </div>
           <form onSubmit={handleCreateScimToken} className="flex gap-2">
-            <input value={newScimTokenName} onChange={e => setNewScimTokenName(e.target.value)} placeholder="Token name (e.g. Okta)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
+            <input value={newScimTokenName} onChange={e => setNewScimTokenName(e.target.value)} maxLength={MAX_NAME_LENGTH} placeholder="Token name (e.g. Okta)" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-white w-64" />
             <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5">Create Token</button>
           </form>
           {scimError && <p className="text-sm text-red-500 mt-2">{scimError}</p>}
@@ -939,7 +1462,7 @@ export function UsersGroups() {
             {auditLog.map(entry => (
               <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
                 <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                <span className="text-xs text-slate-400 shrink-0">{safeDate(entry.occurredAt, true)}</span>
               </li>
             ))}
             {auditLog.length === 0 && <li className="py-2 text-sm text-slate-400">No activity recorded yet.</li>}
@@ -1002,7 +1525,7 @@ export function UsersGroups() {
                       {resourceGrants.map((g) => (
                         <div key={g.id} className="flex items-center justify-between gap-2 text-xs">
                           <span className="text-slate-600 dark:text-slate-300 truncate">{connections.find((c) => c.id === g.connection_id)?.label ?? g.connection_id}</span>
-                          <button
+                          <button type="button"
                             onClick={() => void handleRemoveResourceGrant(selectedMemberForPermissions.userId, g.id)}
                             className="text-[10px] text-slate-400 hover:text-red-600 dark:hover:text-red-400 shrink-0"
                           >
@@ -1023,7 +1546,7 @@ export function UsersGroups() {
                         <option key={c.id} value={c.id}>{c.label}</option>
                       ))}
                     </select>
-                    <button
+                    <button type="button"
                       onClick={() => void handleAddResourceGrant(selectedMemberForPermissions.userId)}
                       disabled={!addGrantConnectionId}
                       className="text-[11px] rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300 disabled:opacity-40"
@@ -1041,17 +1564,17 @@ export function UsersGroups() {
               <div className="flex flex-col gap-1.5 mb-2">
                 {attributeRows.map((row, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <input value={row.key} onChange={e => updateAttributeRow(i, 'key', e.target.value)} placeholder="key" className="w-1/3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
-                    <input value={row.value} onChange={e => updateAttributeRow(i, 'value', e.target.value)} placeholder="value" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
-                    <button onClick={() => removeAttributeRow(i)} className="text-[10px] text-slate-400 hover:text-red-600 dark:hover:text-red-400 shrink-0">remove</button>
+                    <input value={row.key} onChange={e => updateAttributeRow(i, 'key', e.target.value)} maxLength={MAX_ATTRIBUTE_KEY_LENGTH} placeholder="key" className="w-1/3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
+                    <input value={row.value} onChange={e => updateAttributeRow(i, 'value', e.target.value)} maxLength={MAX_ATTRIBUTE_VALUE_LENGTH} placeholder="value" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-[11px] text-slate-600 dark:text-slate-300" />
+                    <button type="button" onClick={() => removeAttributeRow(i)} className="text-[10px] text-slate-400 hover:text-red-600 dark:hover:text-red-400 shrink-0">remove</button>
                   </div>
                 ))}
                 {attributeRows.length === 0 && <p className="text-xs text-slate-400">No attributes set.</p>}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={addAttributeRow} className="text-[11px] rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300">+ Add attribute</button>
+                <button type="button" onClick={addAttributeRow} className="text-[11px] rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-slate-600 dark:text-slate-300">+ Add attribute</button>
                 {attributesDirty && (
-                  <button onClick={() => void handleSaveAttributes(selectedMemberForPermissions.userId)} disabled={savingAttributes} className="text-[11px] rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2 py-1">
+                  <button type="button" onClick={() => void handleSaveAttributes(selectedMemberForPermissions.userId)} disabled={savingAttributes} className="text-[11px] rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2 py-1">
                     {savingAttributes ? 'Saving…' : 'Save attributes'}
                   </button>
                 )}
@@ -1085,10 +1608,10 @@ export function UsersGroups() {
         <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
           Copy this key now — <strong>"{newlyCreatedKey?.name}"</strong>'s secret won't be shown again.
         </p>
-        <pre className="rounded-md bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap break-all mb-3">{newlyCreatedKey?.apiKey}</pre>
+        <pre aria-label="Secret value" className="rounded-md bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap break-all mb-3">{newlyCreatedKey?.apiKey}</pre>
         <div className="flex justify-end gap-2">
-          <button onClick={() => newlyCreatedKey && void copyKey(newlyCreatedKey.apiKey)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
-          <button onClick={() => setNewlyCreatedKey(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
+          <button type="button" onClick={() => newlyCreatedKey && void copyKey(newlyCreatedKey.apiKey, 'API key')} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
+          <button type="button" onClick={() => setNewlyCreatedKey(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
         </div>
       </Modal>
 
@@ -1096,10 +1619,10 @@ export function UsersGroups() {
         <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
           Copy this token now — <strong>"{newlyCreatedScimToken?.name}"</strong>'s secret won't be shown again. Paste it into your identity provider's SCIM app config as the bearer token.
         </p>
-        <pre className="rounded-md bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap break-all mb-3">{newlyCreatedScimToken?.token}</pre>
+        <pre aria-label="Secret value" className="rounded-md bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap break-all mb-3">{newlyCreatedScimToken?.token}</pre>
         <div className="flex justify-end gap-2">
-          <button onClick={() => newlyCreatedScimToken && void copyKey(newlyCreatedScimToken.token)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
-          <button onClick={() => setNewlyCreatedScimToken(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
+          <button type="button" onClick={() => newlyCreatedScimToken && void copyKey(newlyCreatedScimToken.token, 'SCIM token')} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Copy</button>
+          <button type="button" onClick={() => setNewlyCreatedScimToken(null)} className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">Done</button>
         </div>
       </Modal>
       {confirmDialog}

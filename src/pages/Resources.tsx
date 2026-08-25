@@ -133,11 +133,21 @@ function HealthRow({ label, count, percent }: { label: string; count: number; pe
 }
 
 function timeAgo(ts: string): string {
-  const mins = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
+  const timestamp = new Date(ts).getTime();
+  if (!Number.isFinite(timestamp)) return 'unknown';
+
+  const mins = Math.round((Date.now() - timestamp) / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
   if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
   return `${Math.round(mins / (60 * 24))}d ago`;
+}
+
+
+function formatDateOnly(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
 }
 
 export function Resources() {
@@ -280,17 +290,30 @@ export function Resources() {
   const load = useCallback(async () => {
     const thisRequest = ++requestId.current;
     setLoading(true);
+
     try {
       const filters = {
-        category: category || undefined, status: status || undefined,
-        region: region === 'all' ? undefined : region, search: search || undefined,
-        service: service || undefined, connectionId: account === 'all' ? undefined : account,
+        category: category || undefined,
+        status: status || undefined,
+        region: region === 'all' ? undefined : region,
+        search: search.trim() || undefined,
+        service: service || undefined,
+        connectionId: account === 'all' ? undefined : account,
       };
-      // Generous limit so DataTable can page through this client-side, like before.
-      const inventory = await api.getResourceInventory({ ...filters, limit: 200 });
-      if (thisRequest !== requestId.current) return; // a newer request already landed
-      setResources(inventory.items);
-      setFilteredTotal(inventory.pagination.total);
+
+      const inventory = await api.getResourceInventory({
+        ...filters,
+        limit: 200,
+      });
+
+      if (thisRequest !== requestId.current) return;
+
+      setResources(inventory.items ?? []);
+      setFilteredTotal(Math.max(0, inventory.pagination?.total ?? 0));
+    } catch {
+      if (thisRequest !== requestId.current) return;
+      setResources([]);
+      setFilteredTotal(0);
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
     }
@@ -298,42 +321,113 @@ export function Resources() {
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
+  const globalRequestId = useRef(0);
+
   const loadGlobal = useCallback(async () => {
+    const thisRequest = ++globalRequestId.current;
     const connectionId = account === 'all' ? undefined : account;
     const scopedRegion = region === 'all' ? undefined : region;
-    const [dash, explorer] = await Promise.all([
-      api.getResourcesDashboard({ region: scopedRegion, connectionId }),
-      api.getResourceExplorer({ connectionId, region: scopedRegion }),
-    ]);
-    setDashboard(dash);
-    const svc: Record<string, number> = {};
-    for (const cat of explorer.categories) for (const s of cat.services) svc[s.service] = (svc[s.service] ?? 0) + s.count;
-    setExplorerServices(svc);
+
+    try {
+      const [dash, explorer] = await Promise.all([
+        api.getResourcesDashboard({ region: scopedRegion, connectionId }),
+        api.getResourceExplorer({ connectionId, region: scopedRegion }),
+      ]);
+
+      if (thisRequest !== globalRequestId.current) return;
+
+      setDashboard(dash);
+      const svc: Record<string, number> = {};
+
+      for (const cat of explorer.categories ?? []) {
+        for (const s of cat.services ?? []) {
+          svc[s.service] = (svc[s.service] ?? 0) + s.count;
+        }
+      }
+
+      setExplorerServices(svc);
+    } catch {
+      if (thisRequest !== globalRequestId.current) return;
+      setDashboard(null);
+      setExplorerServices({});
+    }
   }, [region, account]);
   useEffect(() => { void loadGlobal(); }, [loadGlobal, refreshToken]);
 
-  useEffect(() => { void api.getResourceCatalog().then(r => setCatalog(r.items)); }, []);
+  useEffect(() => {
+    let active = true;
+
+    void api.getResourceCatalog()
+      .then(r => {
+        if (active) setCatalog(r.items ?? []);
+      })
+      .catch(() => {
+        if (active) setCatalog([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const eventsRequestId = useRef(0);
 
   const loadEvents = useCallback(async () => {
-    const timeline = await api.getResourceTimeline({ limit: 20, connectionId: account === 'all' ? undefined : account });
-    setRecentEvents(timeline.items);
+    const thisRequest = ++eventsRequestId.current;
+
+    try {
+      const timeline = await api.getResourceTimeline({
+        limit: 20,
+        connectionId: account === 'all' ? undefined : account,
+      });
+
+      if (thisRequest !== eventsRequestId.current) return;
+      setRecentEvents(timeline.items ?? []);
+    } catch {
+      if (thisRequest !== eventsRequestId.current) return;
+      setRecentEvents([]);
+    }
   }, [account]);
-  useEffect(() => { void loadEvents(); }, [loadEvents, refreshToken]);
+
+  useEffect(() => {
+    void loadEvents();
+  }, [loadEvents, refreshToken]);
 
   // Tags Explorer tab — fetched when opened, refreshed on external refresh or
   // when the top FilterBar's Account selection changes (this used to ignore
   // it entirely -- switching accounts left the exact same org-wide tag list
   // showing regardless of which one was selected).
+  const tagsRequestId = useRef(0);
+
   useEffect(() => {
     if (tab !== 'Tags Explorer') return;
+
+    const thisRequest = ++tagsRequestId.current;
     setTagsLoading(true);
-    void api.getResourceTags(account === 'all' ? undefined : account).then(r => setTagKeys(r.keys)).finally(() => setTagsLoading(false));
+
+    void api.getResourceTags(account === 'all' ? undefined : account)
+      .then(r => {
+        if (thisRequest === tagsRequestId.current) {
+          setTagKeys(r.keys ?? []);
+        }
+      })
+      .catch(() => {
+        if (thisRequest === tagsRequestId.current) setTagKeys([]);
+      })
+      .finally(() => {
+        if (thisRequest === tagsRequestId.current) setTagsLoading(false);
+      });
   }, [tab, refreshToken, account]);
 
   // Resource Timeline tab — real filters, loaded on open and whenever they change.
+  const timelineRequestId = useRef(0);
+
   const loadTimeline = useCallback(async () => {
     if (tab !== 'Resource Timeline') return;
+
+    const thisRequest = ++timelineRequestId.current;
     setTimelineLoading(true);
+
     try {
       const res = await api.getResourceTimeline({
         eventType: timelineEventType || undefined,
@@ -342,9 +436,14 @@ export function Resources() {
         connectionId: account === 'all' ? undefined : account,
         limit: 100,
       });
-      setTimelineEvents(res.items);
+
+      if (thisRequest !== timelineRequestId.current) return;
+      setTimelineEvents(res.items ?? []);
+    } catch {
+      if (thisRequest !== timelineRequestId.current) return;
+      setTimelineEvents([]);
     } finally {
-      setTimelineLoading(false);
+      if (thisRequest === timelineRequestId.current) setTimelineLoading(false);
     }
   }, [tab, timelineEventType, timelineFrom, timelineTo, account]);
   useEffect(() => { void loadTimeline(); }, [loadTimeline, refreshToken]);
@@ -353,36 +452,99 @@ export function Resources() {
   // top FilterBar's Account selection like every other tab on this page (it
   // used to ignore that filter entirely, so picking a specific AWS/GCP
   // account and searching still surfaced every other account's resources).
+  const globalSearchRequestId = useRef(0);
+
   useEffect(() => {
-    if (tab !== 'Global Search' || !globalQuery.trim()) { setGlobalResults([]); return; }
+    if (tab !== 'Global Search' || !globalQuery.trim()) {
+      setGlobalResults([]);
+      setGlobalCapped(false);
+      setGlobalLoading(false);
+      return;
+    }
+
+    const thisRequest = ++globalSearchRequestId.current;
     setGlobalLoading(true);
-    const handle = setTimeout(() => {
-      void api.searchResources(globalQuery.trim(), account === 'all' ? undefined : account)
-        .then(res => { setGlobalResults(res.items); setGlobalCapped(!!res.capped); })
-        .finally(() => setGlobalLoading(false));
+
+    const handle = window.setTimeout(() => {
+      void api.searchResources(
+        globalQuery.trim(),
+        account === 'all' ? undefined : account,
+      )
+        .then(res => {
+          if (thisRequest !== globalSearchRequestId.current) return;
+          setGlobalResults(res.items ?? []);
+          setGlobalCapped(!!res.capped);
+        })
+        .catch(() => {
+          if (thisRequest !== globalSearchRequestId.current) return;
+          setGlobalResults([]);
+          setGlobalCapped(false);
+        })
+        .finally(() => {
+          if (thisRequest === globalSearchRequestId.current) {
+            setGlobalLoading(false);
+          }
+        });
     }, 300);
-    return () => clearTimeout(handle);
+
+    return () => window.clearTimeout(handle);
   }, [tab, globalQuery, account]);
 
   // Resource Relationships tab — same debounced search to find a resource,
   // then the real relationships endpoint once one is picked.
+  const relationshipSearchRequestId = useRef(0);
+
   useEffect(() => {
-    if (tab !== 'Resource Relationships' || !relQuery.trim()) { setRelResults([]); return; }
-    const handle = setTimeout(() => {
-      void api.searchResources(relQuery.trim(), account === 'all' ? undefined : account).then(res => setRelResults(res.items));
+    if (tab !== 'Resource Relationships' || !relQuery.trim()) {
+      setRelResults([]);
+      return;
+    }
+
+    const thisRequest = ++relationshipSearchRequestId.current;
+
+    const handle = window.setTimeout(() => {
+      void api.searchResources(
+        relQuery.trim(),
+        account === 'all' ? undefined : account,
+      )
+        .then(res => {
+          if (thisRequest === relationshipSearchRequestId.current) {
+            setRelResults(res.items ?? []);
+          }
+        })
+        .catch(() => {
+          if (thisRequest === relationshipSearchRequestId.current) {
+            setRelResults([]);
+          }
+        });
     }, 300);
-    return () => clearTimeout(handle);
+
+    return () => window.clearTimeout(handle);
   }, [tab, relQuery, account]);
 
+  const relationshipRequestId = useRef(0);
+
   async function pickRelationshipResource(r: CloudResource) {
+    const thisRequest = ++relationshipRequestId.current;
+
     setRelSelected(r);
     setRelData(null);
     setRelLoading(true);
+
     try {
       const data = await api.getResourceRelationships(r.id);
-      setRelData(data);
+
+      if (thisRequest === relationshipRequestId.current) {
+        setRelData(data);
+      }
+    } catch {
+      if (thisRequest === relationshipRequestId.current) {
+        setRelData(null);
+      }
     } finally {
-      setRelLoading(false);
+      if (thisRequest === relationshipRequestId.current) {
+        setRelLoading(false);
+      }
     }
   }
 
@@ -390,14 +552,28 @@ export function Resources() {
   // so switching resources doesn't briefly show the last one's dependency graph.
   useEffect(() => { setGraph(null); }, [selected?.id]);
 
+  const graphRequestId = useRef(0);
+
   async function loadDependencyGraph(resourceId: string) {
+    const thisRequest = ++graphRequestId.current;
+
     setGraphLoading(true);
     setGraph(null);
+
     try {
       const g = await api.getDependencyGraph(resourceId);
-      setGraph(g);
+
+      if (thisRequest === graphRequestId.current) {
+        setGraph(g);
+      }
+    } catch {
+      if (thisRequest === graphRequestId.current) {
+        setGraph(null);
+      }
     } finally {
-      setGraphLoading(false);
+      if (thisRequest === graphRequestId.current) {
+        setGraphLoading(false);
+      }
     }
   }
 
@@ -411,20 +587,55 @@ export function Resources() {
 
   async function submitBulkOperation(e: React.FormEvent) {
     e.preventDefault();
+
+    const tagKey = bulkTagKey.trim();
+    const tagValue = bulkTagValue.trim();
+
+    if (selectedIds.size === 0) {
+      setBulkResult('Select at least one resource.');
+      return;
+    }
+
+    if (!tagKey) {
+      setBulkResult('Tag key is required.');
+      return;
+    }
+
+    if (tagKey.length > 128) {
+      setBulkResult('Tag key must be 128 characters or fewer.');
+      return;
+    }
+
+    if (bulkOperation === 'add_tag' && !tagValue) {
+      setBulkResult('Tag value is required when adding a tag.');
+      return;
+    }
+
+    if (tagValue.length > 256) {
+      setBulkResult('Tag value must be 256 characters or fewer.');
+      return;
+    }
+
     setBulkBusy(true);
     setBulkResult(null);
+
     try {
       const res = await api.bulkTagResources({
         resourceIds: [...selectedIds],
         operation: bulkOperation,
-        tagKey: bulkTagKey.trim(),
-        tagValue: bulkOperation === 'add_tag' ? bulkTagValue.trim() : undefined,
+        tagKey,
+        tagValue: bulkOperation === 'add_tag' ? tagValue : undefined,
       });
-      setBulkResult(`Updated ${res.updatedCount} of ${res.requestedCount} selected resources.`);
+
+      setBulkResult(
+        `Updated ${res.updatedCount} of ${res.requestedCount} selected resources.`,
+      );
       setSelectedIds(new Set());
       await load();
     } catch (err) {
-      setBulkResult(err instanceof Error ? err.message : 'Bulk operation failed.');
+      setBulkResult(
+        err instanceof Error ? err.message : 'Bulk operation failed.',
+      );
     } finally {
       setBulkBusy(false);
     }
@@ -454,6 +665,15 @@ export function Resources() {
     if (providerFilter === 'all') return resources;
     return resources.filter(r => providerFor(r.connection_id) === providerFilter);
   }, [resources, providerFilter, providerFor]);
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+
+    const visibleIds = new Set(providerFilteredResources.map(r => r.id));
+    setSelectedIds(prev => {
+      const next = new Set([...prev].filter(id => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [providerFilteredResources, selectedIds.size]);
 
   // Provider-filtered service options — only show services that have
   // resources for the selected provider.
@@ -489,7 +709,11 @@ export function Resources() {
       byCategory[r.category] = (byCategory[r.category] ?? 0) + 1;
       if (r.region) byRegion[r.region] = (byRegion[r.region] ?? 0) + 1;
     }
-    return { total: providerFilteredResources.length, byCategory, byRegion };
+    return {
+      total: providerFilteredResources.length,
+      byCategory,
+      byRegion,
+    };
   }, [providerFilteredResources, providerFilter]);
 
   // Top services — org-wide from explorerServices, or provider-filtered
@@ -606,7 +830,7 @@ export function Resources() {
     { key: 'category', header: 'Category', render: r => r.category, sortValue: r => r.category },
     { key: 'status', header: 'Status', render: r => <Badge>{r.status}</Badge>, sortValue: r => r.status },
     { key: 'isDefault', header: 'Default', render: r => r.is_default ? <Badge tone="neutral">Default</Badge> : '—', sortValue: r => (r.is_default ? 1 : 0) },
-    { key: 'firstSeenAt', header: 'First Seen', render: r => new Date(r.first_seen_at).toLocaleDateString(), sortValue: r => r.first_seen_at },
+    { key: 'firstSeenAt', header: 'First Seen', render: r => formatDateOnly(r.first_seen_at), sortValue: r => r.first_seen_at },
   ];
 
   const eventColumns: Column<ResourceLifecycleEvent>[] = [
@@ -632,9 +856,20 @@ export function Resources() {
     <div>
       <FilterBar title={isWorkspaceView ? serviceLabel(presetService, presetCategory) : 'Resources'} breadcrumb={workspaceCrumb} showDateFilter={false} />
 
-      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+      <div
+        className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto"
+        role="tablist"
+        aria-label="Resource sections"
+      >
         {visibleTabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <button
+            type="button"
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+          >
             {t}
           </button>
         ))}
@@ -713,11 +948,16 @@ export function Resources() {
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">{isWorkspaceView ? `${serviceLabel(presetService, presetCategory)} Resources` : 'All Resources'}</h3>
             <div className="flex items-center gap-2">
               {bulkMode && selectedIds.size > 0 && (
-                <button onClick={() => { setBulkResult(null); setBulkModalOpen(true); }} className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setBulkResult(null); setBulkModalOpen(true); }}
+                  disabled={bulkBusy}
+                  className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 disabled:opacity-50"
+                >
                   Bulk Tag {selectedIds.size} selected
                 </button>
               )}
-              <button
+              <button type="button"
                 onClick={() => { setBulkMode(m => !m); setSelectedIds(new Set()); }}
                 className={`text-xs rounded-md border px-3 py-1.5 ${bulkMode ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
               >
@@ -737,7 +977,7 @@ export function Resources() {
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
+              <input aria-label="Search resources" value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or ID…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-56" />
             </label>
             {!isWorkspaceView && (
               <>
@@ -765,10 +1005,17 @@ export function Resources() {
               </select>
             </label>
             {(status || search || providerFilter !== 'all' || (!isWorkspaceView && (category || service))) && (
-              <button onClick={() => { setStatus(''); setSearch(''); setProviderFilter('all'); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+              <button type="button" onClick={() => { setStatus(''); setSearch(''); setProviderFilter('all'); if (!isWorkspaceView) { setCategory(''); setService(''); } }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
             {loading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
           </div>
+
+          {providerFilter !== 'all' && filteredTotal > providerFilteredResources.length && (
+            <p className="text-xs text-slate-400 mb-2">
+              Provider filtering is applied to the currently loaded resource page.
+              Narrow the account or other filters for a complete provider-specific view.
+            </p>
+          )}
 
           <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
         </>
@@ -778,7 +1025,7 @@ export function Resources() {
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Global Search</h3>
           <p className="text-xs text-slate-400 mb-3">Searches every discovered resource across every category at once — scoped to the Account filter above, same as the rest of this page (not the category/status filters specific to All Resources).</p>
-          <input value={globalQuery} onChange={e => setGlobalQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full max-w-md mb-3" />
+          <input aria-label="Global resource search" value={globalQuery} onChange={e => setGlobalQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full max-w-md mb-3" />
           {globalLoading && <p className="text-sm text-slate-400">Searching…</p>}
           {!globalLoading && globalQuery.trim() && (
             <>
@@ -794,11 +1041,11 @@ export function Resources() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Find a Resource</h3>
-            <input value={relQuery} onChange={e => setRelQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full mb-3" />
+            <input aria-label="Relationship resource search" value={relQuery} onChange={e => setRelQuery(e.target.value)} placeholder="Search by name, ID, or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-slate-700 dark:text-slate-200 w-full mb-3" />
             <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 max-h-96 overflow-y-auto">
               {relResults.map(r => (
                 <li key={r.id}>
-                  <button onClick={() => void pickRelationshipResource(r)} className={`w-full text-left py-2 text-sm px-2 rounded-md ${relSelected?.id === r.id ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
+                  <button type="button" onClick={() => void pickRelationshipResource(r)} className={`w-full text-left py-2 text-sm px-2 rounded-md ${relSelected?.id === r.id ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'}`}>
                     {r.resource_name ?? r.resource_id} <span className="text-xs text-slate-400">{catalogByKey.get(r.resource_type_key)?.display_name ?? r.resource_type_key}</span>
                   </button>
                 </li>
@@ -864,7 +1111,7 @@ export function Resources() {
               <input type="date" value={timelineTo} onChange={e => setTimelineTo(e.target.value)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200" />
             </label>
             {(timelineEventType || timelineFrom || timelineTo) && (
-              <button onClick={() => { setTimelineEventType(''); setTimelineFrom(''); setTimelineTo(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+              <button type="button" onClick={() => { setTimelineEventType(''); setTimelineFrom(''); setTimelineTo(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
             )}
             {timelineLoading && <span className="text-xs text-slate-400 pb-2">Loading…</span>}
           </div>
@@ -912,7 +1159,7 @@ export function Resources() {
               <div className="flex items-center justify-between mb-1.5">
                 <h4 className="font-medium text-slate-700 dark:text-slate-200">Dependency Graph</h4>
                 {!graph && !graphLoading && (
-                  <button onClick={() => void loadDependencyGraph(selected.id)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Load</button>
+                  <button type="button" onClick={() => void loadDependencyGraph(selected.id)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Load</button>
                 )}
               </div>
               {graphLoading && <p className="text-xs text-slate-400">Loading…</p>}

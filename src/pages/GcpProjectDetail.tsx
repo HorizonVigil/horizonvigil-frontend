@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { StatCard } from '../components/StatCard';
@@ -61,16 +61,45 @@ export function GcpProjectDetail() {
   const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
   const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadRequestRef = useRef(0);
+  const secondaryRequestRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!id) return;
-    const [conn, resourcesRes] = await Promise.all([
-      api.getGcpAccount(id),
-      api.getResourceInventory({ connectionId: id, limit: 200 }),
-    ]);
-    setConnection(conn);
-    setResources(resourcesRes.items);
-  }, [id]);
+
+    const requestId = ++loadRequestRef.current;
+    const hasExistingData = Boolean(connection);
+
+    setLoadError(null);
+    setLoading(!hasExistingData);
+    setRefreshing(hasExistingData);
+
+    try {
+      const [conn, resourcesRes] = await Promise.all([
+        api.getGcpAccount(id),
+        api.getResourceInventory({ connectionId: id, limit: 200 }),
+      ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
+      setConnection(conn);
+      setResources(resourcesRes.items);
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+      const message = err instanceof ApiError ? err.message : 'Failed to load the GCP project.';
+      setLoadError(message);
+      if (!hasExistingData) toast(message, 'error');
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [id, connection, toast]);
 
   useEffect(() => { void load(); }, [load]);
   useSyncCompletion(id ? [id] : [], load);
@@ -84,13 +113,45 @@ export function GcpProjectDetail() {
 
   useEffect(() => {
     if (!id) return;
-    if (tab === 'Permissions') void loadPermissions();
-    else if (tab === 'Sync History') void api.getGcpAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
-    else if (tab === 'Activity') void api.getGcpAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
-  }, [tab, id, loadPermissions]);
+
+    const requestId = ++secondaryRequestRef.current;
+    let cancelled = false;
+
+    const loadTabData = async () => {
+      try {
+        if (tab === 'Permissions') {
+          await loadPermissions();
+        } else if (tab === 'Sync History') {
+          const result = await api.getGcpAccountSyncHistory(id);
+          if (!cancelled && requestId === secondaryRequestRef.current) {
+            setSyncRuns(result.runs);
+            setRecurringFailures(result.recurringFailures);
+          }
+        } else if (tab === 'Activity') {
+          const result = await api.getGcpAccountActivity(id, { limit: 100 });
+          if (!cancelled && requestId === secondaryRequestRef.current) {
+            setActivity(result.items);
+          }
+        }
+      } catch (err) {
+        if (!cancelled && requestId === secondaryRequestRef.current) {
+          toast(
+            err instanceof ApiError ? err.message : `Failed to load ${tab.toLowerCase()}.`,
+            'error',
+          );
+        }
+      }
+    };
+
+    void loadTabData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, id, loadPermissions, toast]);
 
   async function runValidation() {
-    if (!id) return;
+    if (!id || validating) return;
     setValidating(true);
     try {
       const result = await api.validateGcpProjectPermissions(id);
@@ -132,10 +193,39 @@ export function GcpProjectDetail() {
   }
 
   if (!connection) {
+    if (loading) {
+      return (
+        <div className="flex flex-col gap-5" aria-busy="true" aria-label="Loading GCP project">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
+      <div className="min-h-[50vh] flex items-center justify-center px-4">
+        <div className="max-w-md w-full rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/20 p-5 text-center">
+          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40">
+            <Icon name="alert-triangle" size={18} className="text-red-600 dark:text-red-400" />
+          </div>
+          <h2 className="text-sm font-semibold text-red-800 dark:text-red-300">
+            Couldn’t load this GCP project
+          </h2>
+          <p className="mt-1 text-xs text-red-700 dark:text-red-400">
+            {loadError ?? 'The project could not be loaded.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-4 rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }
@@ -147,15 +237,48 @@ export function GcpProjectDetail() {
     <div>
       <FilterBar title={connection.connection_name ?? connection.gcp_project_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 -mt-2 flex items-center justify-between gap-3 rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-amber-800 dark:text-amber-300">
+              Could not refresh project data
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 truncate">
+              {loadError}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={refreshing}
+            onClick={() => void load()}
+            className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300 hover:underline disabled:opacity-50"
+          >
+            {refreshing ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 mb-4">
         <Badge>{connection.status}</Badge>
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.gcp_project_id}</span>
         <div className="flex-1" />
-        <button onClick={() => id && startDiscovery(id, 'gcpAccounts')} disabled={syncing} title="Scans this project for Compute Engine instances, Cloud Storage buckets, Cloud SQL instances, and GKE clusters" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <button type="button" onClick={() => id && startDiscovery(id, 'gcpAccounts')} disabled={syncing} title="Scans this project for Compute Engine instances, Cloud Storage buckets, Cloud SQL instances, and GKE clusters" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>
-        <button onClick={() => void runValidation()} disabled={validating} title="Runs a real oauth2 identity check plus Compute Engine/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={refreshing || loading}
+          title="Refreshes the connection and resource inventory without starting a discovery scan."
+          className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+        <button type="button" onClick={() => void runValidation()} disabled={validating} title="Runs a real oauth2 identity check plus Compute Engine/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
           {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
@@ -174,16 +297,31 @@ export function GcpProjectDetail() {
         </div>
       )}
 
-      <div className="flex gap-1 text-sm flex-wrap mb-5">
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-            {t}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex gap-1 text-sm flex-wrap" role="tablist" aria-label="GCP project detail">
+          {TABS.map(t => (
+            <button
+              type="button"
+              key={t}
+              role="tab"
+              aria-selected={tab === t}
+              aria-controls={`gcp-panel-${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+              onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        {refreshing && (
+          <span className="text-xs text-slate-400 whitespace-nowrap" aria-live="polite">
+            Refreshing…
+          </span>
+        )}
       </div>
 
       {tab === 'Overview' && (
-        <>
+        <div id="gcp-panel-overview" role="tabpanel" aria-labelledby="gcp-tab-overview">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
             <StatCard label="Last Sync" value={connection.last_sync_at ? new Date(connection.last_sync_at).toLocaleDateString() : 'Never'} />
@@ -197,7 +335,7 @@ export function GcpProjectDetail() {
               centerLabel={{ value: (connection.resource_summary?.totalResources ?? resources.length).toLocaleString(), caption: 'resources' }}
             />
           </div>
-        </>
+        </div>
       )}
 
       {tab === 'Resources' && (
@@ -227,7 +365,20 @@ export function GcpProjectDetail() {
                   {filteredResources.slice(0, 200).map(r => {
                     const action = eligibleGcpRemediationAction(r);
                     return (
-                      <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
+                      <tr
+                        key={r.id}
+                        className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
+                        onClick={() => navigate(`/resources/all?resource=${r.id}`)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            navigate(`/resources/all?resource=${r.id}`);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Open ${r.resource_name ?? r.resource_id}`}
+                      >
                         <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
                         <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
                         <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
@@ -235,7 +386,7 @@ export function GcpProjectDetail() {
                         <td className="px-3 py-2"><Badge>{r.status}</Badge></td>
                         <td className="px-3 py-2 text-xs">
                           {action && (
-                            <button onClick={e => { e.stopPropagation(); void requestGcpRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against GCP — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                            <button type="button" onClick={e => { e.stopPropagation(); void requestGcpRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against GCP — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
                               {remediating === r.id ? 'Requesting…' : GCP_ACTION_LABEL[action]}
                             </button>
                           )}
@@ -247,8 +398,13 @@ export function GcpProjectDetail() {
               </table>
             )}
             {resources.length >= 200 && (
-              <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
-                <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this project →</button>
+              <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <span className="text-xs text-slate-400">
+                  Showing the first 200 resources in this view.
+                </span>
+                <button type="button" onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap">
+                  View all resources →
+                </button>
               </div>
             )}
           </div>

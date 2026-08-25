@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { StatCard } from '../components/StatCard';
@@ -33,6 +33,12 @@ type Tab = typeof TABS[number];
  * granularity directly, no CUR-equivalent ingestion step needed the way
  * AWS's does.
  */
+function formatDate(value: string | null | undefined, fallback = 'Never'): string {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Invalid date' : date.toLocaleString();
+}
+
 export function AzureAccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -52,41 +58,160 @@ export function AzureAccountDetail() {
   const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
 
+  // Request generations prevent stale responses from an older account/tab
+  // from overwriting the current UI after navigation or retry.
+  const loadRequestRef = useRef(0);
+  const tabRequestRef = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tabError, setTabError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+
   const load = useCallback(async () => {
-    if (!id) return;
-    const [conn, resourcesRes] = await Promise.all([
-      api.getAzureAccount(id),
-      api.getResourceInventory({ connectionId: id, limit: 200 }),
-    ]);
-    setConnection(conn);
-    setResources(resourcesRes.items);
+    const accountId = id?.trim();
+
+    if (!accountId) {
+      setConnection(null);
+      setResources([]);
+      setLoadError('This Azure account URL is missing a subscription ID.');
+      return;
+    }
+
+    const requestId = ++loadRequestRef.current;
+    setLoadError(null);
+
+    try {
+      const [conn, resourcesRes] = await Promise.all([
+        api.getAzureAccount(accountId),
+        api.getResourceInventory({ connectionId: accountId, limit: 200 }),
+      ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
+      setConnection(conn);
+      setResources(resourcesRes.items);
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+      setLoadError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load the Azure subscription.',
+      );
+    }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setConnection(null);
+    setResources([]);
+    setAccountCost(null);
+    setPermissionRun(null);
+    setPermissionChecks([]);
+    setAzureIdentity(null);
+    setSyncRuns([]);
+    setRecurringFailures([]);
+    setActivity([]);
+    setCostSyncError(null);
+    setTabError(null);
+    void load();
+  }, [load, retryToken]);
+
   useSyncCompletion(id ? [id] : [], load);
 
   useEffect(() => {
-    if (!id || tab !== 'Cost') return;
-    void api.getAzureAccountCost(id).then(setAccountCost);
-  }, [tab, id]);
+    const accountId = id?.trim();
+    if (!accountId || tab !== 'Cost') return;
+
+    const requestId = ++tabRequestRef.current;
+    setTabError(null);
+
+    void api.getAzureAccountCost(accountId)
+      .then(result => {
+        if (requestId !== tabRequestRef.current) return;
+        setAccountCost(result);
+      })
+      .catch(err => {
+        if (requestId !== tabRequestRef.current) return;
+        setTabError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load Azure cost data.',
+        );
+      });
+  }, [tab, id, retryToken]);
+
 
   const loadPermissions = useCallback(async () => {
-    if (!id) return;
-    const res = await api.getAzureAccountPermissions(id);
+    const accountId = id?.trim();
+    if (!accountId) return;
+
+    const requestId = tabRequestRef.current;
+    const res = await api.getAzureAccountPermissions(accountId);
+
+    if (requestId !== tabRequestRef.current) return;
+
     setPermissionRun(res.run);
     setPermissionChecks(res.checks);
   }, [id]);
 
-  useEffect(() => {
-    if (!id || tab !== 'Permissions') return;
-    void loadPermissions();
-  }, [tab, id, loadPermissions]);
 
   useEffect(() => {
-    if (!id) return;
-    if (tab === 'Sync History') void api.getAzureAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
-    else if (tab === 'Activity') void api.getAzureAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
-  }, [tab, id]);
+    if (!id || tab !== 'Permissions') return;
+
+    const requestId = ++tabRequestRef.current;
+    setTabError(null);
+
+    void loadPermissions().catch(err => {
+      if (requestId !== tabRequestRef.current) return;
+      setTabError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load Azure permissions.',
+      );
+    });
+  }, [tab, id, loadPermissions, retryToken]);
+
+  useEffect(() => {
+    const accountId = id?.trim();
+    if (!accountId) return;
+
+    if (tab !== 'Sync History' && tab !== 'Activity') return;
+
+    const requestId = ++tabRequestRef.current;
+    setTabError(null);
+
+    const run = async () => {
+      try {
+        if (tab === 'Sync History') {
+          const result = await api.getAzureAccountSyncHistory(accountId);
+          if (requestId !== tabRequestRef.current) return;
+          setSyncRuns(result.runs);
+          setRecurringFailures(result.recurringFailures);
+        } else {
+          const result = await api.getAzureAccountActivity(accountId, { limit: 100 });
+          if (requestId !== tabRequestRef.current) return;
+          setActivity(result.items);
+        }
+      } catch (err) {
+        if (requestId !== tabRequestRef.current) return;
+        setTabError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : `Failed to load ${tab}.`,
+        );
+      }
+    };
+
+    void run();
+  }, [tab, id, retryToken]);
+
 
   async function runValidation() {
     if (!id) return;
@@ -119,7 +244,11 @@ export function AzureAccountDetail() {
     setCostSyncError(null);
     try {
       const result = await api.syncAzureAccountCost(id);
-      toast(result.synced > 0 ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from Azure` : 'Synced — no cost data found for this subscription this month', 'success');
+      const message = result.synced > 0
+        ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from Azure`
+        : 'Synced — no cost data found for this subscription this month';
+      setCostSyncError(null);
+      toast(message, 'success');
       setAccountCost(await api.getAzureAccountCost(id));
     } catch (err) {
       // A toast alone auto-dismisses and is easy to miss -- this also
@@ -131,6 +260,30 @@ export function AzureAccountDetail() {
     } finally {
       setSyncingCost(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <FilterBar
+          title="Unable to Load Azure Subscription"
+          breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>}
+          showAccountFilter={false}
+          showRegionFilter={false}
+          showDateFilter={false}
+        />
+        <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 p-5 flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-red-600 dark:text-red-300">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => setRetryToken(token => token + 1)}
+            className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!connection) {
@@ -154,10 +307,10 @@ export function AzureAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.azure_subscription_id}</span>
         <div className="flex-1" />
-        <button onClick={() => id && startDiscovery(id, 'azureAccounts')} disabled={syncing} title="Scans this subscription for VMs, storage accounts, SQL/Cosmos DBs, AKS clusters, networking, Key Vault, and more" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <button type="button" onClick={() => id && startDiscovery(id, 'azureAccounts')} disabled={syncing} title="Scans this subscription for VMs, storage accounts, SQL/Cosmos DBs, AKS clusters, networking, Key Vault, and more" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>
-        <button onClick={() => void runValidation()} disabled={validating} title="Runs a real ARM Get Subscription identity check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role Assignments read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+        <button type="button" onClick={() => void runValidation()} disabled={validating} title="Runs a real ARM Get Subscription identity check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role Assignments read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
           {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
@@ -175,10 +328,29 @@ export function AzureAccountDetail() {
           {connection.error_message}
         </div>
       )}
+      {tabError && (
+        <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3">
+          <span>Couldn't load {tab}: {tabError}</span>
+          <button
+            type="button"
+            onClick={() => setRetryToken(token => token + 1)}
+            className="shrink-0 text-xs underline hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-1 text-sm flex-wrap mb-5">
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+          <button
+            type="button"
+            key={t}
+            onClick={() => setTab(t)}
+            role="tab"
+            aria-selected={tab === t}
+            className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+          >
             {t}
           </button>
         ))}
@@ -188,7 +360,7 @@ export function AzureAccountDetail() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
-            <StatCard label="Last Sync" value={connection.last_sync_at ? new Date(connection.last_sync_at).toLocaleDateString() : 'Never'} />
+            <StatCard label="Last Sync" value={connection.last_sync_at ? formatDate(connection.last_sync_at, 'Never').split(',')[0] : 'Never'} />
             <StatCard label="Auth Method" value="Service principal" />
             <StatCard label="Tenant" value={connection.azure_tenant_id} />
           </div>
@@ -214,7 +386,8 @@ export function AzureAccountDetail() {
                 description={resources.length === 0 ? 'Run Discover Resources above to scan this subscription.' : undefined}
               />
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                     <th className="px-3 py-2">Name</th>
@@ -226,7 +399,19 @@ export function AzureAccountDetail() {
                 </thead>
                 <tbody>
                   {filteredResources.slice(0, 200).map(r => (
-                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>
+                    <tr
+                      key={r.id}
+                      className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer"
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => navigate(`/resources/all?resource=${r.id}`)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/resources/all?resource=${r.id}`);
+                        }
+                      }}
+                    >
                       <td className="px-3 py-2 text-slate-700 dark:text-slate-200">{r.resource_name ?? r.resource_id}</td>
                       <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs">{r.resource_type_key}</td>
                       <td className="px-3 py-2"><Badge tone="neutral">{r.category}</Badge></td>
@@ -236,10 +421,11 @@ export function AzureAccountDetail() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
             {resources.length >= 200 && (
               <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
-                <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this subscription →</button>
+                <button type="button" onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this subscription →</button>
               </div>
             )}
           </div>
@@ -249,7 +435,7 @@ export function AzureAccountDetail() {
       {tab === 'Cost' && (
         <div className="flex flex-col gap-3">
           <div className="flex justify-end">
-            <button onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from Azure Cost Management using this subscription's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
+            <button type="button" onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from Azure Cost Management using this subscription's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
               {syncingCost ? 'Syncing…' : 'Sync Cost from Azure'}
             </button>
           </div>
@@ -289,7 +475,7 @@ export function AzureAccountDetail() {
             {permissionRun ? (
               <div className="text-xs text-slate-400 flex flex-col gap-0.5">
                 {(azureIdentity?.subscriptionName ?? permissionRun.identity_arn) && <span className="font-mono">{azureIdentity?.subscriptionName ?? permissionRun.identity_arn}</span>}
-                <span>Started {new Date(permissionRun.started_at).toLocaleString()}{permissionRun.finished_at ? ` · Finished ${new Date(permissionRun.finished_at).toLocaleString()}` : ''}</span>
+                <span>Started {formatDate(permissionRun.started_at, 'Unknown')}{permissionRun.finished_at ? ` · Finished ${formatDate(permissionRun.finished_at, 'Unknown')}` : ''}</span>
                 {permissionRun.error_message && <span className="text-red-500">{permissionRun.error_message}</span>}
               </div>
             ) : (
@@ -349,8 +535,8 @@ export function AzureAccountDetail() {
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.run_type === 'discovery' ? 'Discover Resources' : 'Permission Check'}</td>
                   <td className="px-3 py-2"><Badge tone={run.status === 'succeeded' ? 'good' : run.status === 'running' ? 'warning' : 'critical'}>{run.status}</Badge></td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{run.identity_arn ?? '—'}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{new Date(run.started_at).toLocaleString()}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{formatDate(run.started_at, 'Unknown')}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? formatDate(run.finished_at, 'Unknown') : '—'}</td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.triggered_by ?? '—'}</td>
                   <td className="px-3 py-2 text-red-500 text-xs">{run.error_message ?? '—'}</td>
                 </tr>
@@ -368,7 +554,7 @@ export function AzureAccountDetail() {
             {activity.map(entry => (
               <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
                 <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                <span className="text-xs text-slate-400 shrink-0">{formatDate(entry.occurredAt, 'Unknown')}</span>
               </li>
             ))}
             {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this subscription yet.</li>}

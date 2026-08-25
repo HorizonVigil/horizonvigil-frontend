@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Badge } from '../components/Badge';
@@ -35,6 +35,38 @@ const CONNECTION_METHOD_LABELS: Record<string, string> = {
 
 const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
 
+function formatSafeDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
+}
+
+function isValidHttpUrl(value: string): boolean {
+  if (!value.trim()) return true;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidHexColor(value: string): boolean {
+  return !value.trim() || /^#[0-9a-fA-F]{6}$/.test(value.trim());
+}
+
+function parseBoundedNumber(
+  value: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+
 export function Settings() {
   const { user, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -55,21 +87,56 @@ export function Settings() {
 
   useEffect(() => {
     if (!user) return;
-    void supabase.from('profiles').select('full_name,timezone,date_format').eq('id', user.id).single().then(({ data }) => {
-      if (data) {
+
+    let active = true;
+
+    void supabase
+      .from('profiles')
+      .select('full_name,timezone,date_format')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        if (!active || !data) return;
+
         setFullName(data.full_name ?? '');
-        setTimezone(data.timezone ?? 'UTC');
-        setDateFormat(data.date_format ?? 'YYYY-MM-DD');
-      }
-    });
+        setTimezone(
+          TIMEZONES.includes(data.timezone ?? '')
+            ? (data.timezone ?? 'UTC')
+            : 'UTC',
+        );
+        setDateFormat(
+          DATE_FORMATS.includes(data.date_format ?? '')
+            ? (data.date_format ?? 'YYYY-MM-DD')
+            : 'YYYY-MM-DD',
+        );
+      });
+
+    return () => {
+      active = false;
+    };
   }, [user]);
 
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
-    await supabase.from('profiles').update({ full_name: fullName, timezone, date_format: dateFormat }).eq('id', user.id);
+
+    if (!TIMEZONES.includes(timezone) || !DATE_FORMATS.includes(dateFormat)) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName.trim(),
+        timezone,
+        date_format: dateFormat,
+      })
+      .eq('id', user.id);
+
+    if (error) return;
+
     setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 2000);
+    window.setTimeout(() => setProfileSaved(false), 2000);
   }
 
   // ── Notification settings (settings-api) ──
@@ -116,8 +183,12 @@ export function Settings() {
   const [mfaError, setMfaError] = useState<string | null>(null);
   const planLimits = license?.planLimits ?? null;
 
+  const loadRequestId = useRef(0);
+
   const load = useCallback(async () => {
-    const [notif, sys, rec, git, brand, aws, lic, creds, rbac] = await Promise.all([
+    const thisRequest = ++loadRequestId.current;
+
+    const results = await Promise.allSettled([
       api.getNotificationSettings(),
       api.getSystemSettings(),
       api.getRecommendationRules(),
@@ -128,30 +199,84 @@ export function Settings() {
       api.getSettingsCredentials(),
       api.getRbac(),
     ]);
-    setGitInstallations(git.items);
-    setNotifications(notif);
-    setSystemSettings(sys);
-    setDefaultRegion(typeof sys.defaultRegion === 'string' ? sys.defaultRegion : 'us-east-1');
-    setSessionTimeoutMinutes(typeof sys.sessionTimeoutMinutes === 'number' ? String(sys.sessionTimeoutMinutes) : '60');
-    setRules({
-      idleDetectionEnabled: typeof rec.idleDetectionEnabled === 'boolean' ? rec.idleDetectionEnabled : DEFAULT_RECOMMENDATION_RULES.idleDetectionEnabled,
-      rightsizingEnabled: typeof rec.rightsizingEnabled === 'boolean' ? rec.rightsizingEnabled : DEFAULT_RECOMMENDATION_RULES.rightsizingEnabled,
-      rightsizingCpuThresholdPct: typeof rec.rightsizingCpuThresholdPct === 'number' ? rec.rightsizingCpuThresholdPct : DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct,
-      minMonthlySavingsToFlag: typeof rec.minMonthlySavingsToFlag === 'number' ? rec.minMonthlySavingsToFlag : DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
-    });
-    setBranding(brand);
-    setLogoUrl(typeof brand.logoUrl === 'string' ? brand.logoUrl : '');
-    setPrimaryColor(typeof brand.primaryColor === 'string' ? brand.primaryColor : '');
-    setCompanyName(typeof brand.companyName === 'string' ? brand.companyName : '');
-    setAwsIntegrations(aws.connections);
-    setLicense(lic);
-    setCredentials(creds.credentials);
-    setRoleGrants(rbac.roleGrants);
-    setRoleDefinitions(rbac.roleDefinitions);
+
+    if (thisRequest !== loadRequestId.current) return;
+
+    const [
+      notif,
+      sys,
+      rec,
+      git,
+      brand,
+      aws,
+      lic,
+      creds,
+      rbac,
+    ] = results;
+
+    if (notif.status === 'fulfilled') {
+      setNotifications(notif.value);
+    }
+
+    if (sys.status === 'fulfilled') {
+      const value = sys.value;
+      setSystemSettings(value);
+      setDefaultRegion(
+        typeof value.defaultRegion === 'string' && REGIONS.includes(value.defaultRegion)
+          ? value.defaultRegion
+          : 'us-east-1',
+      );
+      setSessionTimeoutMinutes(
+        typeof value.sessionTimeoutMinutes === 'number'
+          ? String(value.sessionTimeoutMinutes)
+          : '60',
+      );
+    }
+
+    if (rec.status === 'fulfilled') {
+      const value = rec.value;
+      setRules({
+        idleDetectionEnabled:
+          typeof value.idleDetectionEnabled === 'boolean'
+            ? value.idleDetectionEnabled
+            : DEFAULT_RECOMMENDATION_RULES.idleDetectionEnabled,
+        rightsizingEnabled:
+          typeof value.rightsizingEnabled === 'boolean'
+            ? value.rightsizingEnabled
+            : DEFAULT_RECOMMENDATION_RULES.rightsizingEnabled,
+        rightsizingCpuThresholdPct:
+          typeof value.rightsizingCpuThresholdPct === 'number'
+            ? value.rightsizingCpuThresholdPct
+            : DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct,
+        minMonthlySavingsToFlag:
+          typeof value.minMonthlySavingsToFlag === 'number'
+            ? value.minMonthlySavingsToFlag
+            : DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
+      });
+    }
+
+    if (git.status === 'fulfilled') setGitInstallations(git.value.items ?? []);
+
+    if (brand.status === 'fulfilled') {
+      const value = brand.value;
+      setBranding(value);
+      setLogoUrl(typeof value.logoUrl === 'string' ? value.logoUrl : '');
+      setPrimaryColor(typeof value.primaryColor === 'string' ? value.primaryColor : '');
+      setCompanyName(typeof value.companyName === 'string' ? value.companyName : '');
+    }
+
+    if (aws.status === 'fulfilled') setAwsIntegrations(aws.value.connections ?? []);
+    if (lic.status === 'fulfilled') setLicense(lic.value);
+    if (creds.status === 'fulfilled') setCredentials(creds.value.credentials ?? []);
+
+    if (rbac.status === 'fulfilled') {
+      setRoleGrants(rbac.value.roleGrants ?? []);
+      setRoleDefinitions(rbac.value.roleDefinitions ?? []);
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (currentOrg) setMfaRequired(currentOrg.mfa_required); }, [currentOrg]);
+  useEffect(() => { if (currentOrg) setMfaRequired(Boolean(currentOrg.mfa_required)); }, [currentOrg]);
 
   // GitHub redirects back with ?installation_id=... after the App install
   // flow (once the App's Setup URL is pointed here) — pre-fill rather than
@@ -162,40 +287,113 @@ export function Settings() {
   }, []);
 
   async function handleConnectGit() {
-    const installationId = Number(connectInstallationId);
-    if (!Number.isInteger(installationId) || installationId <= 0) {
+    const rawInstallationId = connectInstallationId.trim();
+
+    if (!/^\d{1,20}$/.test(rawInstallationId)) {
       setGitError('Enter a valid numeric installation ID.');
       return;
     }
+
+    const installationId = Number(rawInstallationId);
+
+    if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+      setGitError('Enter a valid numeric installation ID.');
+      return;
+    }
+
+    if (gitInstallations.some(inst => Number(inst.id) === installationId)) {
+      setGitError('This GitHub installation is already connected.');
+      return;
+    }
+
     setGitError(null);
     setGitConnecting(true);
+
     try {
       const created = await api.connectGitInstallation(installationId);
-      setGitInstallations(prev => [created, ...prev]);
+      setGitInstallations(prev => [
+        created,
+        ...prev.filter(inst => inst.id !== created.id),
+      ]);
       setConnectInstallationId('');
     } catch (err) {
-      setGitError(err instanceof Error ? err.message : 'Could not connect this installation.');
+      setGitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not connect this installation.',
+      );
     } finally {
       setGitConnecting(false);
     }
   }
 
+  const [gitDisconnecting, setGitDisconnecting] = useState<string | null>(null);
+
   async function handleDisconnectGit(id: string) {
-    await api.disconnectGitInstallation(id);
-    setGitInstallations(prev => prev.filter(i => i.id !== id));
-    setGitReposByInstallation(prev => { const next = { ...prev }; delete next[id]; return next; });
+    if (gitDisconnecting === id) return;
+
+    setGitDisconnecting(id);
+
+    try {
+      await api.disconnectGitInstallation(id);
+      setGitInstallations(prev => prev.filter(i => i.id !== id));
+      setGitReposByInstallation(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setGitReposError(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (err) {
+      setGitError(
+        err instanceof Error
+          ? err.message
+          : 'Could not disconnect this installation.',
+      );
+    } finally {
+      setGitDisconnecting(null);
+    }
   }
 
+  const gitRepoRequestIds = useRef<Record<string, number>>({});
+
   async function handleLoadRepos(id: string) {
+    const requestId = (gitRepoRequestIds.current[id] ?? 0) + 1;
+    gitRepoRequestIds.current[id] = requestId;
+
     setGitReposLoading(id);
-    setGitReposError(prev => { const next = { ...prev }; delete next[id]; return next; });
+    setGitReposError(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+
     try {
       const res = await api.getInstallationRepos(id);
-      setGitReposByInstallation(prev => ({ ...prev, [id]: res.items }));
+
+      if (gitRepoRequestIds.current[id] !== requestId) return;
+
+      setGitReposByInstallation(prev => ({
+        ...prev,
+        [id]: res.items ?? [],
+      }));
     } catch (err) {
-      setGitReposError(prev => ({ ...prev, [id]: err instanceof Error ? err.message : 'Could not load repositories.' }));
+      if (gitRepoRequestIds.current[id] !== requestId) return;
+
+      setGitReposError(prev => ({
+        ...prev,
+        [id]:
+          err instanceof Error
+            ? err.message
+            : 'Could not load repositories.',
+      }));
     } finally {
-      setGitReposLoading(null);
+      if (gitRepoRequestIds.current[id] === requestId) {
+        setGitReposLoading(null);
+      }
     }
   }
 
@@ -215,52 +413,150 @@ export function Settings() {
   async function handleSaveSystem(e: React.FormEvent) {
     e.preventDefault();
     setSystemError(null);
+
+    if (!REGIONS.includes(defaultRegion)) {
+      setSystemError('Select a valid default region.');
+      return;
+    }
+
+    const timeout = parseBoundedNumber(sessionTimeoutMinutes, 5, 1440, 60);
+
+    if (!Number.isFinite(Number(sessionTimeoutMinutes))) {
+      setSystemError('Session timeout must be a valid number.');
+      return;
+    }
+
     try {
-      const data = { ...systemSettings, defaultRegion, sessionTimeoutMinutes: Number(sessionTimeoutMinutes) || 60 };
+      const data = {
+        ...systemSettings,
+        defaultRegion,
+        sessionTimeoutMinutes: timeout,
+      };
+
       const saved = await api.updateSystemSettings(data);
       setSystemSettings(saved);
+      setSessionTimeoutMinutes(String(timeout));
       setSystemSaved(true);
-      setTimeout(() => setSystemSaved(false), 2000);
+      window.setTimeout(() => setSystemSaved(false), 2000);
     } catch (err) {
-      setSystemError(err instanceof Error ? err.message : 'Could not save system settings.');
+      setSystemError(
+        err instanceof Error
+          ? err.message
+          : 'Could not save system settings.',
+      );
     }
   }
 
   async function handleSaveRules(e: React.FormEvent) {
     e.preventDefault();
     setRulesError(null);
+
+    const validatedRules: RecommendationRules = {
+      idleDetectionEnabled: Boolean(rules.idleDetectionEnabled),
+      rightsizingEnabled: Boolean(rules.rightsizingEnabled),
+      rightsizingCpuThresholdPct: parseBoundedNumber(
+        String(rules.rightsizingCpuThresholdPct),
+        1,
+        100,
+        DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct,
+      ),
+      minMonthlySavingsToFlag: parseBoundedNumber(
+        String(rules.minMonthlySavingsToFlag),
+        0,
+        1_000_000_000,
+        DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
+      ),
+    };
+
     try {
-      const saved = await api.updateRecommendationRules(rules);
+      const saved = await api.updateRecommendationRules(validatedRules);
       setRules(saved);
       setRulesSaved(true);
-      setTimeout(() => setRulesSaved(false), 2000);
+      window.setTimeout(() => setRulesSaved(false), 2000);
     } catch (err) {
-      setRulesError(err instanceof Error ? err.message : 'Could not save recommendation rules.');
+      setRulesError(
+        err instanceof Error
+          ? err.message
+          : 'Could not save recommendation rules.',
+      );
     }
   }
 
   async function handleSaveBranding(e: React.FormEvent) {
     e.preventDefault();
     setBrandingError(null);
+
+    const normalizedLogoUrl = logoUrl.trim();
+    const normalizedColor = primaryColor.trim();
+    const normalizedCompanyName = companyName.trim();
+
+    if (!isValidHttpUrl(normalizedLogoUrl)) {
+      setBrandingError('Logo URL must be a valid HTTP or HTTPS URL.');
+      return;
+    }
+
+    if (!isValidHexColor(normalizedColor)) {
+      setBrandingError('Primary color must be a 6-digit hex color such as #2a78d6.');
+      return;
+    }
+
+    if (normalizedCompanyName.length > 200) {
+      setBrandingError('Company name must be 200 characters or fewer.');
+      return;
+    }
+
     try {
-      const data = { ...branding, logoUrl, primaryColor, companyName };
+      const data = {
+        ...branding,
+        logoUrl: normalizedLogoUrl,
+        primaryColor: normalizedColor,
+        companyName: normalizedCompanyName,
+      };
+
       const saved = await api.updateBranding(data);
       setBranding(saved);
+      setLogoUrl(typeof saved.logoUrl === 'string' ? saved.logoUrl : normalizedLogoUrl);
+      setPrimaryColor(
+        typeof saved.primaryColor === 'string'
+          ? saved.primaryColor
+          : normalizedColor,
+      );
+      setCompanyName(
+        typeof saved.companyName === 'string'
+          ? saved.companyName
+          : normalizedCompanyName,
+      );
       setBrandingSaved(true);
-      setTimeout(() => setBrandingSaved(false), 2000);
+      window.setTimeout(() => setBrandingSaved(false), 2000);
     } catch (err) {
-      setBrandingError(err instanceof Error ? err.message : 'Could not save branding.');
+      setBrandingError(
+        err instanceof Error
+          ? err.message
+          : 'Could not save branding.',
+      );
     }
   }
 
+  const [mfaUpdating, setMfaUpdating] = useState(false);
+
   async function handleToggleMfaRequired() {
+    if (mfaUpdating) return;
+
     setMfaError(null);
+    setMfaUpdating(true);
     const next = !mfaRequired;
+
     try {
       const res = await api.setMfaRequired(next);
-      setMfaRequired(res.mfaRequired);
+      setMfaRequired(Boolean(res.mfaRequired));
     } catch (err) {
-      setMfaError(err instanceof Error ? err.message : 'Could not update this setting.');
+      setMfaError(
+        err instanceof Error
+          ? err.message
+          : 'Could not update this setting.',
+      );
+    } finally {
+      setMfaUpdating(false);
     }
   }
 
@@ -268,9 +564,20 @@ export function Settings() {
     <div>
       <FilterBar title="Settings" showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
-      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+      <div
+        className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto"
+        role="tablist"
+        aria-label="Settings sections"
+      >
         {visibleTabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+          <button
+            type="button"
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`text-sm px-3 py-2 border-b-2 -mb-px whitespace-nowrap ${tab === t ? 'border-brand-600 text-brand-600 dark:text-brand-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}
+          >
             {t}
           </button>
         ))}
@@ -282,21 +589,21 @@ export function Settings() {
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Profile</h3>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Email</span>
-              <input disabled value={user?.email ?? ''} className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-500" />
+              <input aria-label="Email" disabled value={user?.email ?? ''} className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-slate-500" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Full name</span>
-              <input value={fullName} onChange={e => setFullName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+              <input aria-label="Full name" value={fullName} maxLength={200} onChange={e => setFullName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Timezone</span>
-              <select value={timezone} onChange={e => setTimezone(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <select aria-label="Timezone" value={timezone} onChange={e => setTimezone(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
                 {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Date format</span>
-              <select value={dateFormat} onChange={e => setDateFormat(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <select aria-label="Date format" value={dateFormat} onChange={e => setDateFormat(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
                 {DATE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
             </label>
@@ -309,7 +616,7 @@ export function Settings() {
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Appearance</h3>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600 dark:text-slate-300">Theme</span>
-                <button onClick={toggleTheme} className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300">{theme === 'dark' ? 'Dark' : 'Light'} — switch</button>
+                <button type="button" onClick={toggleTheme} className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300">{theme === 'dark' ? 'Dark' : 'Light'} — switch</button>
               </div>
             </div>
 
@@ -317,7 +624,7 @@ export function Settings() {
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Session</h3>
-              <button onClick={() => void signOut()} className="text-sm text-red-500 hover:underline">Sign out of this device</button>
+              <button type="button" onClick={() => void signOut()} className="text-sm text-red-500 hover:underline">Sign out of this device</button>
             </div>
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -353,15 +660,15 @@ export function Settings() {
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Notifications</h3>
           <label className="flex items-center justify-between text-sm">
             <span className="text-slate-600 dark:text-slate-300">Email digest</span>
-            <input type="checkbox" checked={Boolean(notifications.emailDigest)} onChange={e => setNotifications(prev => ({ ...prev, emailDigest: e.target.checked }))} />
+            <input type="checkbox" aria-label="Email digest" checked={Boolean(notifications.emailDigest)} onChange={e => setNotifications(prev => ({ ...prev, emailDigest: e.target.checked }))} />
           </label>
           <label className="flex items-center justify-between text-sm">
             <span className="text-slate-600 dark:text-slate-300">Critical alert emails</span>
-            <input type="checkbox" checked={Boolean(notifications.criticalAlertEmails)} onChange={e => setNotifications(prev => ({ ...prev, criticalAlertEmails: e.target.checked }))} />
+            <input type="checkbox" aria-label="Critical alert emails" checked={Boolean(notifications.criticalAlertEmails)} onChange={e => setNotifications(prev => ({ ...prev, criticalAlertEmails: e.target.checked }))} />
           </label>
           <label className="flex items-center justify-between text-sm">
             <span className="text-slate-600 dark:text-slate-300">Weekly summary</span>
-            <input type="checkbox" checked={Boolean(notifications.weeklySummary)} onChange={e => setNotifications(prev => ({ ...prev, weeklySummary: e.target.checked }))} />
+            <input type="checkbox" aria-label="Weekly summary" checked={Boolean(notifications.weeklySummary)} onChange={e => setNotifications(prev => ({ ...prev, weeklySummary: e.target.checked }))} />
           </label>
           <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save</button>
           {notificationsSaved && <p className="text-xs text-emerald-500">Saved.</p>}
@@ -382,9 +689,9 @@ export function Settings() {
               {credentials.map(c => (
                 <tr key={c.connectionId} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{c.connectionName}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{CONNECTION_METHOD_LABELS[c.connectionMethod] ?? c.connectionMethod}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{(CONNECTION_METHOD_LABELS[c.connectionMethod] ?? c.connectionMethod) || 'Unknown'}</td>
                   <td className="py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{c.maskedAccessKey ?? '—'}</td>
-                  <td className="py-2 text-slate-500 dark:text-slate-400">{c.keyRotatedAt ? new Date(c.keyRotatedAt).toLocaleDateString() : '—'}</td>
+                  <td className="py-2 text-slate-500 dark:text-slate-400">{c.keyRotatedAt ? formatSafeDate(c.keyRotatedAt) : '—'}</td>
                   <td className="py-2">
                     {c.rotationDueInDays === null ? <span className="text-slate-400">—</span>
                       : c.rotationOverdue ? <Badge tone="critical">overdue</Badge>
@@ -405,7 +712,15 @@ export function Settings() {
             <div className="flex items-center justify-between text-sm mb-1">
               <span className="text-slate-600 dark:text-slate-300">Require MFA for all members</span>
               {isOwner ? (
-                <button onClick={() => void handleToggleMfaRequired()} className={`rounded-full w-10 h-5 relative transition-colors ${mfaRequired ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-700'}`}>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={mfaRequired}
+                  aria-label="Require MFA for all members"
+                  disabled={mfaUpdating}
+                  onClick={() => void handleToggleMfaRequired()}
+                  className={`rounded-full w-10 h-5 relative transition-colors disabled:opacity-50 ${mfaRequired ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                >
                   <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${mfaRequired ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </button>
               ) : (
@@ -429,7 +744,7 @@ export function Settings() {
                   <tr key={g.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                     <td className="py-2 text-slate-700 dark:text-slate-200">{g.profiles?.email ?? g.user_id}</td>
                     <td className="py-2"><Badge tone="neutral">{g.role}</Badge></td>
-                    <td className="py-2 text-slate-500 dark:text-slate-400">{new Date(g.created_at).toLocaleDateString()}</td>
+                    <td className="py-2 text-slate-500 dark:text-slate-400">{formatSafeDate(g.created_at)}</td>
                   </tr>
                 ))}
                 {roleGrants.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-sm text-slate-400">No role grants yet.</td></tr>}
@@ -459,7 +774,7 @@ export function Settings() {
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Session timeout (minutes)</span>
-            <input type="number" min={5} value={sessionTimeoutMinutes} onChange={e => setSessionTimeoutMinutes(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <input type="number" min={5} max={1440} value={sessionTimeoutMinutes} onChange={e => setSessionTimeoutMinutes(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
           </label>
           <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save</button>
           {systemSaved && <p className="text-xs text-emerald-500">Saved.</p>}
@@ -475,12 +790,12 @@ export function Settings() {
 
             <label className="flex items-center justify-between text-sm pt-1">
               <span className="text-slate-600 dark:text-slate-300">Unused resource detection (idle instances, unattached volumes/IPs)</span>
-              <input type="checkbox" checked={rules.idleDetectionEnabled} onChange={e => setRules(r => ({ ...r, idleDetectionEnabled: e.target.checked }))} />
+              <input type="checkbox" aria-label="Unused resource detection" checked={rules.idleDetectionEnabled} onChange={e => setRules(r => ({ ...r, idleDetectionEnabled: e.target.checked }))} />
             </label>
 
             <label className="flex items-center justify-between text-sm">
               <span className="text-slate-600 dark:text-slate-300">Rightsizing detection</span>
-              <input type="checkbox" checked={rules.rightsizingEnabled} onChange={e => setRules(r => ({ ...r, rightsizingEnabled: e.target.checked }))} />
+              <input type="checkbox" aria-label="Rightsizing detection" checked={rules.rightsizingEnabled} onChange={e => setRules(r => ({ ...r, rightsizingEnabled: e.target.checked }))} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-slate-500 dark:text-slate-400">Flag instances averaging below this CPU %</span>
@@ -491,7 +806,7 @@ export function Settings() {
 
             <label className="flex flex-col gap-1 text-sm pt-1">
               <span className="text-slate-500 dark:text-slate-400">Minimum $/month savings to flag (reduces noise)</span>
-              <input type="number" min={0} step={0.5} value={rules.minMonthlySavingsToFlag}
+              <input type="number" min={0} step={0.5} value={rules.minMonthlySavingsToFlag} max={1000000000}
                 onChange={e => setRules(r => ({ ...r, minMonthlySavingsToFlag: Number(e.target.value) || 0 }))}
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
             </label>
@@ -517,8 +832,8 @@ export function Settings() {
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Connect a GitHub repository</h3>
             <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the CloudOps360 GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
             <div className="flex gap-2">
-              <input value={connectInstallationId} onChange={e => setConnectInstallationId(e.target.value)} placeholder="Installation ID, e.g. 12345678" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
-              <button onClick={() => void handleConnectGit()} disabled={gitConnecting} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 disabled:opacity-50">{gitConnecting ? 'Connecting…' : 'Connect'}</button>
+              <input aria-label="GitHub installation ID" value={connectInstallationId} inputMode="numeric" maxLength={20} onChange={e => setConnectInstallationId(e.target.value)} placeholder="Installation ID, e.g. 12345678" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              <button type="button" onClick={() => void handleConnectGit()} disabled={gitConnecting} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 disabled:opacity-50">{gitConnecting ? 'Connecting…' : 'Connect'}</button>
             </div>
             {gitError && <p className="text-xs text-red-500">{gitError}</p>}
           </div>
@@ -531,8 +846,15 @@ export function Settings() {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-700 dark:text-slate-200 font-medium">{inst.account_login}</span>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => void handleLoadRepos(inst.id)} disabled={gitReposLoading === inst.id} className="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">{gitReposLoading === inst.id ? 'Loading…' : 'View repos'}</button>
-                      <button onClick={() => void handleDisconnectGit(inst.id)} className="text-xs text-red-500 hover:underline">Disconnect</button>
+                      <button type="button" onClick={() => void handleLoadRepos(inst.id)} disabled={gitReposLoading === inst.id} className="text-xs text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">{gitReposLoading === inst.id ? 'Loading…' : 'View repos'}</button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDisconnectGit(inst.id)}
+                        disabled={gitDisconnecting === inst.id}
+                        className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                      >
+                        {gitDisconnecting === inst.id ? 'Disconnecting…' : 'Disconnect'}
+                      </button>
                     </div>
                   </div>
                   {gitReposError[inst.id] && <p className="text-xs text-red-500 mt-1">{gitReposError[inst.id]}</p>}
@@ -560,15 +882,15 @@ export function Settings() {
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Branding</h3>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Company name</span>
-            <input value={companyName} onChange={e => setCompanyName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <input aria-label="Company name" value={companyName} maxLength={200} onChange={e => setCompanyName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Logo URL</span>
-            <input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://…" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <input aria-label="Logo URL" value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://…" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Primary color</span>
-            <input value={primaryColor} onChange={e => setPrimaryColor(e.target.value)} placeholder="#2a78d6" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <input aria-label="Primary color" value={primaryColor} onChange={e => setPrimaryColor(e.target.value)} placeholder="#2a78d6" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
           </label>
           <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save</button>
           {brandingSaved && <p className="text-xs text-emerald-500">Saved.</p>}

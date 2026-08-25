@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { StatCard } from '../components/StatCard';
@@ -57,6 +57,12 @@ type AccountCredentials = {
   rotationDueInDays: number | null; roleArn: string | null; externalId: string | null;
 };
 
+function formatDate(value: string | null | undefined, fallback = 'Never'): string {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Invalid date' : date.toLocaleString();
+}
+
 export function AwsAccountDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -85,62 +91,190 @@ export function AwsAccountDetail() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [favorite, setFavorite] = useState<Favorite | null>(null);
 
+  // Request generations prevent a slower response for a previous account/tab
+  // from overwriting state after navigation or a retry.
+  const loadRequestRef = useRef(0);
+  const tabRequestRef = useRef(0);
+  const favoriteRequestRef = useRef(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tabError, setTabError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+
   useEffect(() => {
-    if (!id) return;
-    void api.getFavorites().then(r => setFavorite(r.favorites.find(f => f.path === `/cloud-accounts/${id}`) ?? null));
-  }, [id]);
+    const requestId = ++favoriteRequestRef.current;
+    const accountId = id?.trim();
+
+    setFavorite(null);
+
+    if (!accountId) return;
+
+    void api.getFavorites()
+      .then(r => {
+        if (requestId !== favoriteRequestRef.current) return;
+        setFavorite(
+          r.favorites.find(f => f.path === `/cloud-accounts/${accountId}`) ?? null,
+        );
+      })
+      .catch(err => {
+        if (requestId !== favoriteRequestRef.current) return;
+        toast(
+          err instanceof ApiError ? err.message : 'Failed to load Favorites.',
+          'error',
+        );
+      });
+  }, [id, toast]);
+
 
   async function toggleFavorite() {
-    if (!id || !connection) return;
+    const accountId = id?.trim();
+    if (!accountId || !connection) return;
+
     const name = connection.connection_name ?? connection.aws_account_id;
-    if (favorite) {
-      await api.removeFavorite(favorite.id);
-      setFavorite(null);
-      toast(`Removed "${name}" from Favorites`, 'success');
-    } else {
-      const { favorite: created } = await api.addFavorite({ type: 'aws-account', label: name, path: `/cloud-accounts/${id}` });
-      setFavorite(created);
-      toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
+
+    try {
+      if (favorite) {
+        await api.removeFavorite(favorite.id);
+        setFavorite(null);
+        toast(`Removed "${name}" from Favorites`, 'success');
+      } else {
+        const { favorite: created } = await api.addFavorite({
+          type: 'aws-account',
+          label: name,
+          path: `/cloud-accounts/${accountId}`,
+        });
+        setFavorite(created);
+        toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
+      }
+    } catch (err) {
+      toast(
+        err instanceof ApiError ? err.message : 'Failed to update Favorites.',
+        'error',
+      );
     }
   }
 
+
   const load = useCallback(async () => {
-    if (!id) return;
-    const [conn, resourcesRes, costRes, creds] = await Promise.all([
-      api.getAccount(id),
-      api.getResourceInventory({ connectionId: id, limit: 200 }),
-      api.getCostExplorer({ connectionId: id, limit: 200 }),
-      api.getAccountCredentials(id),
-    ]);
-    setConnection(conn);
-    setResources(resourcesRes.items);
-    setCostSnapshots(costRes.items);
-    setCredentials(creds);
+    const accountId = id?.trim();
+    if (!accountId) {
+      setConnection(null);
+      setResources([]);
+      setCostSnapshots([]);
+      setCredentials(null);
+      setLoadError('This cloud account URL is missing an account ID.');
+      return;
+    }
+
+    const requestId = ++loadRequestRef.current;
+    setLoadError(null);
+
+    try {
+      const [conn, resourcesRes, costRes, creds] = await Promise.all([
+        api.getAccount(accountId),
+        api.getResourceInventory({ connectionId: accountId, limit: 200 }),
+        api.getCostExplorer({ connectionId: accountId, limit: 200 }),
+        api.getAccountCredentials(accountId),
+      ]);
+
+      if (requestId !== loadRequestRef.current) return;
+
+      setConnection(conn);
+      setResources(resourcesRes.items);
+      setCostSnapshots(costRes.items);
+      setCredentials(creds);
+    } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
+      setLoadError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load the AWS account.',
+      );
+    }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setConnection(null);
+    setResources([]);
+    setCostSnapshots([]);
+    setCredentials(null);
+    setAccountCost(null);
+    setPermissionRun(null);
+    setPermissionChecks([]);
+    setRegions([]);
+    setSyncRuns([]);
+    setRecurringFailures([]);
+    setRecommendations([]);
+    setActivity([]);
+    void load();
+  }, [load, retryToken]);
   // Test-connection state keeps running in the background (see syncContext.tsx)
   // even if you navigate away mid-request — this refreshes once it finishes,
   // whether that happens while you're sitting on this page or you come back later.
   useSyncCompletion(id ? [id] : [], load);
 
   const loadPermissions = useCallback(async () => {
-    if (!id) return;
-    const res = await api.getAccountPermissions(id);
+    const accountId = id?.trim();
+    if (!accountId) return;
+
+    const requestId = tabRequestRef.current;
+    const res = await api.getAccountPermissions(accountId);
+    if (requestId !== tabRequestRef.current) return;
+
     setPermissionRun(res.run);
     setPermissionChecks(res.checks);
   }, [id]);
 
+
   // Each secondary tab's data is only fetched once you actually open it.
   useEffect(() => {
-    if (!id) return;
-    if (tab === 'Cost') void api.getAccountCost(id).then(setAccountCost);
-    else if (tab === 'Permissions') void loadPermissions();
-    else if (tab === 'Regions') void api.getAccountRegions(id).then(r => setRegions(r.regions));
-    else if (tab === 'Sync History') void api.getAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
-    else if (tab === 'Recommendations') void api.getAccountRecommendations(id).then(r => setRecommendations(r.recommendations));
-    else if (tab === 'Activity') void api.getAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
-  }, [tab, id, loadPermissions]);
+    const accountId = id?.trim();
+    if (!accountId) return;
+
+    const requestId = ++tabRequestRef.current;
+    setTabError(null);
+
+    const run = async () => {
+      try {
+        if (tab === 'Cost') {
+          setAccountCost(await api.getAccountCost(accountId));
+        } else if (tab === 'Permissions') {
+          await loadPermissions();
+        } else if (tab === 'Regions') {
+          const r = await api.getAccountRegions(accountId);
+          if (requestId !== tabRequestRef.current) return;
+          setRegions(r.regions);
+        } else if (tab === 'Sync History') {
+          const r = await api.getAccountSyncHistory(accountId);
+          if (requestId !== tabRequestRef.current) return;
+          setSyncRuns(r.runs);
+          setRecurringFailures(r.recurringFailures);
+        } else if (tab === 'Recommendations') {
+          const r = await api.getAccountRecommendations(accountId);
+          if (requestId !== tabRequestRef.current) return;
+          setRecommendations(r.recommendations);
+        } else if (tab === 'Activity') {
+          const r = await api.getAccountActivity(accountId, { limit: 100 });
+          if (requestId !== tabRequestRef.current) return;
+          setActivity(r.items);
+        }
+      } catch (err) {
+        if (requestId !== tabRequestRef.current) return;
+        setTabError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : `Failed to load ${tab}.`,
+        );
+      }
+    };
+
+    void run();
+  }, [tab, id, loadPermissions, retryToken]);
+
 
   async function syncCost() {
     if (!id) return;
@@ -230,6 +364,30 @@ export function AwsAccountDetail() {
   const resourceFilters = useResourceFilters(resources);
   const filteredResources = resourceFilters.filtered;
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col gap-4">
+        <FilterBar
+          title="Unable to Load AWS Account"
+          breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>}
+          showAccountFilter={false}
+          showRegionFilter={false}
+          showDateFilter={false}
+        />
+        <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 p-5 flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-red-600 dark:text-red-300">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => setRetryToken(token => token + 1)}
+            className="text-sm rounded-md bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!connection) {
     return (
       <div className="flex flex-col gap-5">
@@ -264,16 +422,16 @@ export function AwsAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.aws_account_id}</span>
         <div className="flex-1" />
-        <button onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-amber-400 hover:text-amber-500 px-1">
+        <button type="button" onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-amber-400 hover:text-amber-500 px-1">
           <Icon name={favorite ? 'star-filled' : 'star'} size={18} />
         </button>
-        <button onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <button type="button" onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Test Connection'}
         </button>
-        <button onClick={() => id && startDiscovery(id)} disabled={syncing} title="Scans this account's regions for resources across 30+ AWS services, plus real GuardDuty, Security Hub, and IAM Access Analyzer findings (see Vulnerability Management) — real AWS API calls" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+        <button type="button" onClick={() => id && startDiscovery(id)} disabled={syncing} title="Scans this account's regions for resources across 30+ AWS services, plus real GuardDuty, Security Hub, and IAM Access Analyzer findings (see Vulnerability Management) — real AWS API calls" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>
-        <button onClick={() => void runValidation()} disabled={validating} title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
+        <button type="button" onClick={() => void runValidation()} disabled={validating} title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
           {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
       </div>
@@ -291,6 +449,18 @@ export function AwsAccountDetail() {
           {connection.error_message}
         </div>
       )}
+      {tabError && (
+        <div className="mb-4 -mt-2 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3">
+          <span>Couldn't load {tab}: {tabError}</span>
+          <button
+            type="button"
+            onClick={() => setRetryToken(token => token + 1)}
+            className="shrink-0 text-xs underline hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-1 text-sm flex-wrap mb-5">
         {TABS.map(t => (
@@ -305,7 +475,7 @@ export function AwsAccountDetail() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
             <StatCard label="IAM Users / Roles / Policies" value={`${iamCounts.users} / ${iamCounts.roles} / ${iamCounts.policies}`} />
-            <StatCard label="Last Sync" value={connection.last_sync_at ? new Date(connection.last_sync_at).toLocaleDateString() : 'Never'} />
+            <StatCard label="Last Sync" value={connection.last_sync_at ? formatDate(connection.last_sync_at, 'Never').split(',')[0] : 'Never'} />
             <StatCard label="Cost (Explorer, loaded range)" value={money(totalCost)} />
           </div>
 
@@ -381,14 +551,16 @@ export function AwsAccountDetail() {
                   const action = eligibleRemediationAction(r);
                   return (
                     <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.resource_name ?? r.resource_id}</td>
+                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 cursor-pointer" role="link" tabIndex={0}
+                          onClick={() => navigate(`/resources/all?resource=${r.id}`)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/resources/all?resource=${r.id}`); } }}>{r.resource_name ?? r.resource_id}</td>
                       <td className="px-3 py-2 text-slate-500 dark:text-slate-400 font-mono text-xs cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.resource_type_key}</td>
                       <td className="px-3 py-2 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}><Badge tone="neutral">{r.category}</Badge></td>
                       <td className="px-3 py-2 text-slate-500 dark:text-slate-400 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}>{r.region ?? '—'}</td>
                       <td className="px-3 py-2 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}><Badge>{r.status}</Badge></td>
                       <td className="px-3 py-2 text-xs">
                         {action && (
-                          <button onClick={e => { e.stopPropagation(); void requestRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against AWS — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                          <button type="button" onClick={e => { e.stopPropagation(); void requestRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against AWS — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
                             {remediating === r.id ? 'Requesting…' : ACTION_LABEL[action]}
                           </button>
                         )}
@@ -452,7 +624,7 @@ export function AwsAccountDetail() {
             {permissionRun ? (
               <div className="text-xs text-slate-400 flex flex-col gap-0.5">
                 {permissionRun.identity_arn && <span className="font-mono">{permissionRun.identity_arn}</span>}
-                <span>Started {new Date(permissionRun.started_at).toLocaleString()}{permissionRun.finished_at ? ` · Finished ${new Date(permissionRun.finished_at).toLocaleString()}` : ''}</span>
+                <span>Started {formatDate(permissionRun.started_at, 'Unknown')}{permissionRun.finished_at ? ` · Finished ${formatDate(permissionRun.finished_at, 'Unknown')}` : ''}</span>
                 {permissionRun.error_message && <span className="text-red-500">{permissionRun.error_message}</span>}
               </div>
             ) : (
@@ -489,7 +661,7 @@ export function AwsAccountDetail() {
                   <td className="px-3 py-2 text-slate-700 dark:text-slate-200 font-mono text-xs">{r.region}</td>
                   <td className="px-3 py-2">{r.isDefault && <Badge tone="neutral">Default</Badge>}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{r.resourceCount.toLocaleString()}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.lastScan ? new Date(r.lastScan).toLocaleString() : 'Never'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.lastScan ? formatDate(r.lastScan, 'Never') : 'Never'}</td>
                 </tr>
               ))}
               {regions.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400">No regions enabled for this account.</td></tr>}
@@ -538,8 +710,8 @@ export function AwsAccountDetail() {
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.run_type === 'discovery' ? 'Discover Resources' : 'Permission Check'}</td>
                   <td className="px-3 py-2"><Badge tone={run.status === 'succeeded' ? 'good' : run.status === 'running' ? 'warning' : 'critical'}>{run.status}</Badge></td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{run.identity_arn ?? '—'}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{new Date(run.started_at).toLocaleString()}</td>
-                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{formatDate(run.started_at, 'Unknown')}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? formatDate(run.finished_at, 'Unknown') : '—'}</td>
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.triggered_by ?? '—'}</td>
                   <td className="px-3 py-2 text-red-500 text-xs">{run.error_message ?? '—'}</td>
                 </tr>
@@ -575,7 +747,7 @@ export function AwsAccountDetail() {
             {activity.map(entry => (
               <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
                 <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                <span className="text-xs text-slate-400 shrink-0">{formatDate(entry.occurredAt, 'Unknown')}</span>
               </li>
             ))}
             {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this account yet.</li>}
