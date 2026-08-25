@@ -248,6 +248,10 @@ class ApiClient {
   getGcpProjectPermissions(id: string) {
     return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/permissions`);
   }
+  getGcpAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/sync-history`); }
+  getGcpAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ActivityEntry>>('gcpAccounts', `/api/gcp-accounts/projects/${id}/activity${qs(params)}`);
+  }
 
   // ── azure-accounts-api ────────────────────────────────────────────────────
   // Same one-service-principal-connects-a-subscription shape as GCP's service
@@ -289,6 +293,10 @@ class ApiClient {
   }
   getAzureAccountPermissions(id: string) {
     return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permissions`);
+  }
+  getAzureAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/sync-history`); }
+  getAzureAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ActivityEntry>>('azureAccounts', `/api/azure-accounts/accounts/${id}/activity${qs(params)}`);
   }
 
   getAwsAccountsDashboard() {

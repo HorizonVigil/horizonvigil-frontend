@@ -8,10 +8,11 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
+import { Icon } from '../components/icons';
 import { useToast } from '../lib/toast';
-import { api, ApiError, type AzureConnection, type CloudResource, type ValidationRun, type PermissionCheckResult, type AzureIdentitySummary } from '../lib/api';
+import { api, ApiError, type AzureConnection, type CloudResource, type ValidationRun, type RecurringFailure, type PermissionCheckResult, type AzureIdentitySummary, type ActivityEntry } from '../lib/api';
 
-const TABS = ['Overview', 'Resources', 'Cost', 'Permissions'] as const;
+const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Sync History', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 function money(n: number): string {
@@ -19,13 +20,15 @@ function money(n: number): string {
 }
 
 /**
- * Four tabs, not AwsAccountDetail.tsx's eight — azure-accounts-api still has
- * no sync-history/recommendations/activity endpoints (only accounts +
- * discovery + cost + permissions), same "only show what's real" reasoning as
- * GcpProjectDetail.tsx. Permissions is real (routes/permissions.ts — ARM Get
- * Subscription identity check plus Virtual Machines/Storage/SQL/AKS/Key
- * Vault/Role Assignments read probes), mirroring GcpProjectDetail.tsx's tab
- * exactly except for AzureIdentitySummary's subscription id+name shape. No
+ * Six tabs — Recommendations is still the one AwsAccountDetail.tsx tab with
+ * no Azure equivalent (no recommendations engine exists for this provider
+ * yet). Sync History and Activity are now real: both reuse
+ * connection_validation_runs/audit_log, the same tables AWS already wrote
+ * to, just via routes discovery.ts and permissions.ts didn't call yet.
+ * Permissions is real (routes/permissions.ts — ARM Get Subscription
+ * identity check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role
+ * Assignments read probes), mirroring GcpProjectDetail.tsx's tab exactly
+ * except for AzureIdentitySummary's subscription id+name shape. No
  * remediation actions either: connector-azure has no remediation routes
  * built. The Cost tab is real — Azure Cost Management gives per-service
  * granularity directly, no CUR-equivalent ingestion step needed the way
@@ -50,6 +53,9 @@ export function AzureAccountDetail() {
   const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
   const [azureIdentity, setAzureIdentity] = useState<AzureIdentitySummary | null>(null);
   const [validating, setValidating] = useState(false);
+  const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
+  const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -80,6 +86,12 @@ export function AzureAccountDetail() {
     if (!id || tab !== 'Permissions') return;
     void loadPermissions();
   }, [tab, id, loadPermissions]);
+
+  useEffect(() => {
+    if (!id) return;
+    if (tab === 'Sync History') void api.getAzureAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
+    else if (tab === 'Activity') void api.getAzureAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
+  }, [tab, id]);
 
   async function runValidation() {
     if (!id) return;
@@ -340,6 +352,73 @@ export function AzureAccountDetail() {
             ))}
             {permissionChecks.length === 0 && <p className="text-sm text-slate-400">No permission checks recorded yet.</p>}
           </div>
+        </div>
+      )}
+
+      {tab === 'Sync History' && (
+        <div className="flex flex-col gap-4">
+          {recurringFailures.length > 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
+              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2 flex items-center gap-1.5">
+                <Icon name="alert-triangle" size={14} />
+                Recurring Failures
+              </h3>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+                These steps have failed consistently across recent runs. Each run below still shows "succeeded" overall — a small, stable failure rate doesn't flip the whole run to an error state — but a step failing this often is worth a closer look.
+              </p>
+              <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
+                {recurringFailures.map(f => (
+                  <li key={f.step} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                    <span className="font-mono text-xs text-amber-900 dark:text-amber-200">{f.step}</span>
+                    <span className="text-xs text-amber-700 dark:text-amber-400 shrink-0">{f.failureCount} of last {f.runsChecked} runs</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Identity</th>
+                <th className="px-3 py-2">Started</th>
+                <th className="px-3 py-2">Finished</th>
+                <th className="px-3 py-2">Triggered By</th>
+                <th className="px-3 py-2">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {syncRuns.map(run => (
+                <tr key={run.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.run_type === 'discovery' ? 'Discover Resources' : 'Permission Check'}</td>
+                  <td className="px-3 py-2"><Badge tone={run.status === 'succeeded' ? 'good' : run.status === 'running' ? 'warning' : 'critical'}>{run.status}</Badge></td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{run.identity_arn ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{new Date(run.started_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.triggered_by ?? '—'}</td>
+                  <td className="px-3 py-2 text-red-500 text-xs">{run.error_message ?? '—'}</td>
+                </tr>
+              ))}
+              {syncRuns.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No sync activity yet.</td></tr>}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'Activity' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {activity.map(entry => (
+              <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
+                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+              </li>
+            ))}
+            {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this subscription yet.</li>}
+          </ul>
         </div>
       )}
     </div>

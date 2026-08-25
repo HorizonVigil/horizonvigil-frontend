@@ -8,11 +8,12 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/EmptyState';
+import { Icon } from '../components/icons';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type GcpConnection, type CloudResource, type ValidationRun, type PermissionCheckResult, type GcpIdentitySummary } from '../lib/api';
+import { api, ApiError, type GcpConnection, type CloudResource, type ValidationRun, type RecurringFailure, type PermissionCheckResult, type GcpIdentitySummary, type ActivityEntry } from '../lib/api';
 
-const TABS = ['Overview', 'Resources', 'Permissions'] as const;
+const TABS = ['Overview', 'Resources', 'Permissions', 'Sync History', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 /** GCP Compute Engine's own status values (RUNNING/TERMINATED/...), not AWS's lowercase 'running'/'stopped' — see gcp-accounts-api's scanners/compute.ts, which stores GCP's status verbatim. Only stop/start are wired yet (see gcpRemediation.ts's doc comment on why setMachineType/disk-delete equivalents of AWS's resize/delete_volume aren't built in this pass). */
@@ -25,16 +26,17 @@ function eligibleGcpRemediationAction(r: CloudResource): 'stop_instance' | 'star
 const GCP_ACTION_LABEL: Record<'stop_instance' | 'start_instance', string> = { stop_instance: 'Stop instance', start_instance: 'Start instance' };
 
 /**
- * Deliberately three tabs, not a mirror of AwsAccountDetail.tsx's eight — GCP
- * still has no cost/sync-history/activity backend endpoints (see
- * gcp-accounts-api/src/routes), so this only shows what's real. Permissions
- * is now real too (routes/permissions.ts — oauth2 tokeninfo identity check
- * plus Compute/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager
- * read probes), mirroring AwsAccountDetail.tsx's tab exactly except for
- * GcpIdentitySummary's email+scopes shape instead of an ARN. The Resources
- * tab reuses the existing provider-agnostic api.getResourceInventory
- * (cloud_resources has no AWS-specific columns), same as AwsAccountDetail.tsx
- * does.
+ * Five tabs — still not a full mirror of AwsAccountDetail.tsx's eight (Cost
+ * and Recommendations have no GCP backend yet), but Sync History and
+ * Activity now do: both reuse connection_validation_runs/audit_log, the
+ * same tables AWS already wrote to, just via routes GCP's discovery.ts and
+ * permissions.ts didn't call yet. Permissions is real too (routes/
+ * permissions.ts — oauth2 tokeninfo identity check plus Compute/Cloud SQL/
+ * GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager read probes), mirroring
+ * AwsAccountDetail.tsx's tab exactly except for GcpIdentitySummary's
+ * email+scopes shape instead of an ARN. The Resources tab reuses the
+ * existing provider-agnostic api.getResourceInventory (cloud_resources has
+ * no AWS-specific columns), same as AwsAccountDetail.tsx does.
  *
  * All hooks (including the two useMemo below) run unconditionally before
  * the `!connection` early return — see the exact bug this avoids, found
@@ -58,6 +60,9 @@ export function GcpProjectDetail() {
   const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
   const [gcpIdentity, setGcpIdentity] = useState<GcpIdentitySummary | null>(null);
   const [validating, setValidating] = useState(false);
+  const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
+  const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -82,6 +87,8 @@ export function GcpProjectDetail() {
   useEffect(() => {
     if (!id) return;
     if (tab === 'Permissions') void loadPermissions();
+    else if (tab === 'Sync History') void api.getGcpAccountSyncHistory(id).then(r => { setSyncRuns(r.runs); setRecurringFailures(r.recurringFailures); });
+    else if (tab === 'Activity') void api.getGcpAccountActivity(id, { limit: 100 }).then(r => setActivity(r.items));
   }, [tab, id, loadPermissions]);
 
   async function runValidation() {
@@ -318,6 +325,73 @@ export function GcpProjectDetail() {
             ))}
             {permissionChecks.length === 0 && <p className="text-sm text-slate-400">No permission checks recorded yet.</p>}
           </div>
+        </div>
+      )}
+
+      {tab === 'Sync History' && (
+        <div className="flex flex-col gap-4">
+          {recurringFailures.length > 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
+              <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2 flex items-center gap-1.5">
+                <Icon name="alert-triangle" size={14} />
+                Recurring Failures
+              </h3>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">
+                These steps have failed consistently across recent runs. Each run below still shows "succeeded" overall — a small, stable failure rate doesn't flip the whole run to an error state — but a step failing this often is worth a closer look.
+              </p>
+              <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
+                {recurringFailures.map(f => (
+                  <li key={f.step} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                    <span className="font-mono text-xs text-amber-900 dark:text-amber-200">{f.step}</span>
+                    <span className="text-xs text-amber-700 dark:text-amber-400 shrink-0">{f.failureCount} of last {f.runsChecked} runs</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Identity</th>
+                <th className="px-3 py-2">Started</th>
+                <th className="px-3 py-2">Finished</th>
+                <th className="px-3 py-2">Triggered By</th>
+                <th className="px-3 py-2">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {syncRuns.map(run => (
+                <tr key={run.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.run_type === 'discovery' ? 'Discover Resources' : 'Permission Check'}</td>
+                  <td className="px-3 py-2"><Badge tone={run.status === 'succeeded' ? 'good' : run.status === 'running' ? 'warning' : 'critical'}>{run.status}</Badge></td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-500 dark:text-slate-400">{run.identity_arn ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{new Date(run.started_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}</td>
+                  <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{run.triggered_by ?? '—'}</td>
+                  <td className="px-3 py-2 text-red-500 text-xs">{run.error_message ?? '—'}</td>
+                </tr>
+              ))}
+              {syncRuns.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No sync activity yet.</td></tr>}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'Activity' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {activity.map(entry => (
+              <li key={entry.id} className="px-3 py-2.5 flex justify-between text-sm">
+                <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+              </li>
+            ))}
+            {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this project yet.</li>}
+          </ul>
         </div>
       )}
       {confirmDialog}
