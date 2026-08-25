@@ -1,8 +1,38 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
-import { api, type CloudAccountService } from './api';
+import { api, ApiError, type CloudAccountService } from './api';
 import { useAuth } from './auth';
 import { useOrg } from './orgContext';
 import { fetchAllPages } from './fetchAllPages';
+
+/**
+ * A raw `fetch()` failure (a dropped connection, a Cloud Run cold-start
+ * timeout, a momentary network blip) throws a plain TypeError — "Failed to
+ * fetch" in Chrome — not an ApiError, and previously that one failure
+ * aborted an entire multi-step discovery scan immediately, surfacing as a
+ * scary persistent error banner even when the account itself is healthy
+ * (confirmed live: a real account showed this banner with
+ * cloud_connections.error_message still null, meaning the *previous* real
+ * scan had succeeded fine — this was a transient hiccup on a later,
+ * automatic 24h-sweep retry, not an actual account problem). Retries only
+ * transient network failures with backoff, per the Cross-Phase Standards'
+ * own "exponential backoff with jitter and bounded retries" rule — a real
+ * ApiError (403, 500, ...) is a server-confirmed failure and retrying it
+ * blindly wouldn't help, so those still fail immediately as before.
+ */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 800): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof ApiError) throw err;
+      if (i === attempts - 1) break;
+      await new Promise(r => setTimeout(r, baseDelayMs * 2 ** i + Math.random() * 250));
+    }
+  }
+  throw lastErr;
+}
 
 export interface SyncState {
   status: 'running' | 'done' | 'error';
@@ -59,7 +89,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const result = await api.testAccount(connectionId, service);
+        const result = await withRetry(() => api.testAccount(connectionId, service));
         setSyncStates(prev => ({
           ...prev,
           [connectionId]: {
@@ -85,16 +115,25 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const runStartedAt = new Date().toISOString();
       const stepErrors: { message: string; severity: 'error' | 'info' }[] = [];
       try {
-        const { steps } = await api.getDiscoverySteps(connectionId, service);
+        const { steps } = await withRetry(() => api.getDiscoverySteps(connectionId, service));
         const total = steps.length || 1;
         for (let done = 0; done < steps.length; done++) {
           const stepId = steps[done];
           setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done, total, stepId } }));
-          const result = await api.runDiscoveryStep(connectionId, stepId, service);
-          if (result.error) stepErrors.push({ message: `${stepId}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
+          try {
+            const result = await withRetry(() => api.runDiscoveryStep(connectionId, stepId, service));
+            if (result.error) stepErrors.push({ message: `${stepId}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
+          } catch (err) {
+            // Retries exhausted on a real network failure for this one step —
+            // record it and move on to the next step rather than losing the
+            // whole scan's progress over one bad step (Cross-Phase Standards'
+            // "preserve partial results ... instead of reporting false
+            // completeness" — the opposite, aborting outright, was the bug).
+            stepErrors.push({ message: `${stepId}: ${(err as Error).message || 'Network error'}`, severity: 'error' });
+          }
         }
         setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
-        const summary = await api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service, steps.length);
+        const summary = await withRetry(() => api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service, steps.length));
         // Best-effort — a scan that found real resources should still report
         // success even if this fails. GCP has no recommendations engine yet
         // (Phase 1 scope, see the plan doc), so this is AWS-only for now.
