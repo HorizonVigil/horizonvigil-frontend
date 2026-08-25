@@ -13,10 +13,7 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { api, friendlyErrorMessage, type CustomDashboard, type DashboardWidgetCatalogEntry, type ActivityEntry, type MonitoringAlarm } from '../lib/api';
 import { useAuth } from '../lib/auth';
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
+import { money } from '../lib/format';
 
 /** Live data backing widget previews, fetched once per dashboard-detail open — reuses the same aggregate endpoints Overview.tsx already calls, so a widget shows the same real numbers a user would see there, not a separate mock. */
 interface WidgetData {

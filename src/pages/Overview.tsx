@@ -12,10 +12,7 @@ import { useOrg } from '../lib/orgContext';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
 import { useToast } from '../lib/toast';
 import { api, friendlyErrorMessage, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
+import { money } from '../lib/format';
 
 function daysAgoISO(days: number): string {
   return new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
+import { ResourceFilterBar } from '../components/ResourceFilterBar';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
@@ -16,6 +17,8 @@ import {
   type PermissionCheckResult, type ValidationRun, type RecurringFailure, type CostRecommendation, type ActivityEntry, type Favorite,
   type RemediationActionType,
 } from '../lib/api';
+import { money } from '../lib/format';
+import { useResourceFilters } from '../lib/useResourceFilters';
 
 /** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
 function eligibleRemediationAction(r: CloudResource): RemediationActionType | null {
@@ -45,9 +48,6 @@ const ACTION_LABEL: Record<RemediationActionType, string> = {
   delete_snapshot: 'Delete snapshot', deregister_ami: 'Deregister AMI', resize_instance: 'Resize instance',
 };
 
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
 
 const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Activity'] as const;
 type Tab = typeof TABS[number];
@@ -83,10 +83,6 @@ export function AwsAccountDetail() {
   const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const [resourceSearch, setResourceSearch] = useState('');
-  const [resourceCategory, setResourceCategory] = useState('');
-  const [resourceRegion, setResourceRegion] = useState('');
-  const [resourceStatus, setResourceStatus] = useState('');
   const [favorite, setFavorite] = useState<Favorite | null>(null);
 
   useEffect(() => {
@@ -225,24 +221,14 @@ export function AwsAccountDetail() {
     }
   }
 
-  // These must run unconditionally on every render, before the `!connection`
-  // early return below — calling useMemo only after that guard meant it ran
-  // zero times while loading and four times once `connection` populated,
-  // violating React's Rules of Hooks and crashing the whole render tree
-  // (a blank/black page on every account detail visit, prod included).
-  const resourceCategories = useMemo(() => Array.from(new Set(resources.map(r => r.category))).sort(), [resources]);
-  const resourceRegions = useMemo(() => Array.from(new Set(resources.map(r => r.region).filter((r): r is string => !!r))).sort(), [resources]);
-  const resourceStatuses = useMemo(() => Array.from(new Set(resources.map(r => r.status))).sort(), [resources]);
-  const filteredResources = useMemo(() => resources.filter(r => {
-    if (resourceCategory && r.category !== resourceCategory) return false;
-    if (resourceRegion && r.region !== resourceRegion) return false;
-    if (resourceStatus && r.status !== resourceStatus) return false;
-    if (resourceSearch) {
-      const q = resourceSearch.toLowerCase();
-      if (!(r.resource_name ?? r.resource_id).toLowerCase().includes(q) && !r.resource_type_key.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  }), [resources, resourceCategory, resourceRegion, resourceStatus, resourceSearch]);
+  // Must run unconditionally on every render, before the `!connection` early
+  // return below -- calling this only after that guard meant its internal
+  // useMemo/useState ran zero times while loading and four times once
+  // `connection` populated, violating React's Rules of Hooks and crashing
+  // the whole render tree (a blank/black page on every account detail
+  // visit, prod included).
+  const resourceFilters = useResourceFilters(resources);
+  const filteredResources = resourceFilters.filtered;
 
   if (!connection) {
     return (
@@ -376,37 +362,7 @@ export function AwsAccountDetail() {
 
       {tab === 'Resources' && (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Search</span>
-              <input value={resourceSearch} onChange={e => setResourceSearch(e.target.value)} placeholder="Name or type…" className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-700 dark:text-slate-200 w-52" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Category</span>
-              <select value={resourceCategory} onChange={e => setResourceCategory(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceCategory ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Categories</option>
-                {resourceCategories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Region</span>
-              <select value={resourceRegion} onChange={e => setResourceRegion(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceRegion ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Regions</option>
-                {resourceRegions.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wide text-slate-400">Status</span>
-              <select value={resourceStatus} onChange={e => setResourceStatus(e.target.value)} className={`text-sm rounded-md border px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 ${resourceStatus ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}>
-                <option value="">All Statuses</option>
-                {resourceStatuses.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </label>
-            {(resourceSearch || resourceCategory || resourceRegion || resourceStatus) && (
-              <button onClick={() => { setResourceSearch(''); setResourceCategory(''); setResourceRegion(''); setResourceStatus(''); }} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
-            )}
-            <span className="text-xs text-slate-400 pb-2 ml-auto">{filteredResources.length.toLocaleString()} of {resources.length.toLocaleString()} loaded</span>
-          </div>
+          <ResourceFilterBar filters={resourceFilters} totalCount={resources.length} />
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
             <table className="w-full text-sm">

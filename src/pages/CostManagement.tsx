@@ -12,10 +12,7 @@ import { useFilters, dateRangeToDays, type DateRangePreset } from '../lib/filter
 import { useOrg } from '../lib/orgContext';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
+import { money } from '../lib/format';
 
 const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as const;
 

@@ -13,6 +13,7 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
+import { money as formatMoney } from '../lib/format';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -33,8 +34,13 @@ function parseRecommendedType(recommendedAction: string): string | null {
   return /Downsize to (\S+)/.exec(recommendedAction)?.[1] ?? null;
 }
 
+// This page's recommendations often deal in small dollar amounts (e.g. an
+// unassociated EIP at $3.65/mo) where the shared money()'s default
+// whole-dollar rounding would round the number away entirely -- pinned to
+// 2 decimal places here, same behavior as before, now delegating to the
+// shared formatter instead of reimplementing it.
 function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+  return formatMoney(n, 2);
 }
 
 const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'History'] as const;

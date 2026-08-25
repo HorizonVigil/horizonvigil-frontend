@@ -24,6 +24,7 @@ import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
 import { fetchAllPages } from '../lib/fetchAllPages';
+import { money } from '../lib/format';
 
 // Consolidated from an earlier version that had Account Explorer, Connection
 // Validation, Cross-Account Roles, Credentials, Sync Status, Health, and
@@ -82,10 +83,6 @@ const REPORT_KINDS = [
   { kind: 'sync' as const, label: 'Sync Report' },
   { kind: 'cost' as const, label: 'Cost Report' },
 ];
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
 
 /**
  * Each cloud models "permissions" differently, so this reads the exact
