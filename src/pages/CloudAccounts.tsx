@@ -187,6 +187,8 @@ export function CloudAccounts() {
   const [identitySearch, setIdentitySearch] = useState('');
   const [identityPrivilegeFilter, setIdentityPrivilegeFilter] = useState('');
   const [identityHumanFilter, setIdentityHumanFilter] = useState<'' | 'true' | 'false'>('');
+  const [identityProviderFilter, setIdentityProviderFilter] = useState('');
+  const [identitiesError, setIdentitiesError] = useState<string | null>(null);
   const [selectedIdentity, setSelectedIdentity] = useState<CloudIdentity | null>(null);
   const [identityEdges, setIdentityEdges] = useState<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] } | null>(null);
 
@@ -254,22 +256,31 @@ export function CloudAccounts() {
 
   const loadIdentities = useCallback(async () => {
     setIdentitiesLoading(true);
-    try {
-      const [listRes, summaryRes] = await Promise.all([
-        api.getIdentities({
-          page: identityPage, limit: identityPageSize, search: identitySearch || undefined,
-          privilegeLevel: identityPrivilegeFilter || undefined,
-          isHuman: identityHumanFilter === '' ? undefined : identityHumanFilter === 'true',
-        }),
-        api.getIdentitySummary(),
-      ]);
-      setIdentities(listRes.items);
-      setIdentitiesTotal(listRes.pagination.total);
-      setIdentitySummary(summaryRes);
-    } finally {
-      setIdentitiesLoading(false);
+    // Two independent calls (list + summary), each surfaced on its own --
+    // a Promise.all here once meant a single failing call (a real routing
+    // bug, since fixed, made /identities/summary 400 on every request)
+    // silently blanked out the whole tab, since neither state setter below
+    // it ever ran and the empty initial `identities` array rendered
+    // identically to "genuinely zero identities." allSettled means a
+    // failure on one call no longer hides real data the other call
+    // successfully returned.
+    const [listRes, summaryRes] = await Promise.allSettled([
+      api.getIdentities({
+        page: identityPage, limit: identityPageSize, search: identitySearch || undefined,
+        provider: identityProviderFilter || undefined,
+        privilegeLevel: identityPrivilegeFilter || undefined,
+        isHuman: identityHumanFilter === '' ? undefined : identityHumanFilter === 'true',
+      }),
+      api.getIdentitySummary(),
+    ]);
+    if (listRes.status === 'fulfilled') {
+      setIdentities(listRes.value.items);
+      setIdentitiesTotal(listRes.value.pagination.total);
     }
-  }, [identityPage, identityPageSize, identitySearch, identityPrivilegeFilter, identityHumanFilter]);
+    if (summaryRes.status === 'fulfilled') setIdentitySummary(summaryRes.value);
+    setIdentitiesError(listRes.status === 'rejected' ? (listRes.reason as Error).message || 'Failed to load identities.' : null);
+    setIdentitiesLoading(false);
+  }, [identityPage, identityPageSize, identitySearch, identityPrivilegeFilter, identityHumanFilter, identityProviderFilter]);
 
   useEffect(() => {
     if (tab === 'Identities') void loadIdentities();
@@ -405,6 +416,7 @@ export function CloudAccounts() {
         <span className="text-xs text-slate-400">{r.native_id}</span>
       </div>
     ) },
+    { key: 'provider', header: 'Cloud', sortValue: r => r.provider, render: r => <Badge tone="neutral">{r.provider.toUpperCase()}</Badge> },
     { key: 'identity_type', header: 'Type', sortValue: r => r.identity_type, render: r => <span className="capitalize">{r.identity_type.replace(/_/g, ' ')}</span> },
     { key: 'is_human', header: 'Kind', sortValue: r => (r.is_human ? 'Human' : 'Non-human'), render: r => <Badge tone="neutral">{r.is_human ? 'Human' : 'Non-human'}</Badge> },
     { key: 'privilege_level', header: 'Privilege', sortValue: r => r.privilege_level ?? '', render: r => r.privilege_level ? <Badge tone={IDENTITY_PRIVILEGE_TONE[r.privilege_level]}>{r.privilege_level.replace(/_/g, ' ')}</Badge> : <span className="text-slate-400">—</span> },
@@ -916,8 +928,13 @@ export function CloudAccounts() {
       {tab === 'Identities' && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-slate-400 max-w-2xl">
-            One row per AWS IAM user or role, with privilege level, MFA status, and access-key staleness computed from each account's own credential report — AWS-only for now, GCP/Azure identity ingestion isn't built yet.
+            One row per identity across every connected cloud — an AWS IAM user or role, a GCP service account or a real project IAM-policy member, or an Azure role-assignment principal. Privilege level is computed per-cloud from each account's own IAM data (AWS additionally has MFA/access-key staleness from its credential report; GCP/Azure don't expose that the same way). Azure identities show their principal ID rather than a resolved name — that needs Microsoft Graph access this connection doesn't have yet.
           </p>
+          {identitiesError && (
+            <div className="rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+              Couldn't load identities: {identitiesError}
+            </div>
+          )}
           {identitySummary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <StatCard label="Total Identities" value={String(identitySummary.total)} icon="users-2" />
@@ -927,7 +944,12 @@ export function CloudAccounts() {
             </div>
           )}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Privilege</span>
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Cloud</span>
+            <button onClick={() => { setIdentityProviderFilter(''); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!identityProviderFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
+            {PROVIDER_CHIPS.map(p => (
+              <button key={p.value} onClick={() => { setIdentityProviderFilter(p.value); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${identityProviderFilter === p.value ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{p.label}</button>
+            ))}
+            <span className="text-[11px] uppercase tracking-wide text-slate-400 ml-3 mr-1">Privilege</span>
             <button onClick={() => { setIdentityPrivilegeFilter(''); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${!identityPrivilegeFilter ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>All</button>
             {(['scoped', 'broad', 'admin_equivalent'] as const).map(level => (
               <button key={level} onClick={() => { setIdentityPrivilegeFilter(level); setIdentityPage(1); }} className={`text-xs rounded-full px-2.5 py-1 border capitalize transition-colors ${identityPrivilegeFilter === level ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{level.replace(/_/g, ' ')}</button>
@@ -946,7 +968,7 @@ export function CloudAccounts() {
               rowKey={r => r.id}
               pageSizeOptions={PAGE_SIZES}
               onRowClick={r => setSelectedIdentity(r)}
-              emptyMessage={identitiesTotal === 0 && !identitySearch && !identityPrivilegeFilter && !identityHumanFilter ? 'No identities found yet — run "Discover Resources" on a connected AWS account to populate this from its IAM users/roles.' : 'No identities match these filters.'}
+              emptyMessage={identitiesTotal === 0 && !identitySearch && !identityPrivilegeFilter && !identityHumanFilter && !identityProviderFilter ? 'No identities found yet — run "Discover Resources" on a connected account to populate this from its IAM data.' : 'No identities match these filters.'}
               server={{
                 page: identityPage, pageSize: identityPageSize, total: identitiesTotal,
                 search: identitySearch, loading: identitiesLoading,
