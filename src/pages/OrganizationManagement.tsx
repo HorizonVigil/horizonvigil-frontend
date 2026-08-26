@@ -3,6 +3,7 @@ import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge } from '../components/Badge';
 import { Icon } from '../components/icons';
+import { Modal } from '../components/Modal';
 import { useOrg } from '../lib/orgContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTabParam } from '../lib/useTabParam';
@@ -14,7 +15,13 @@ import {
   type CostCenter,
   type HierarchyNode,
   type HierarchyFolder,
+  type FolderRow,
+  type ProjectRow,
 } from '../lib/api';
+
+function parseCommaList(value: string): string[] {
+  return value.split(',').map(s => s.trim()).filter(Boolean);
+}
 
 const TABS = ['Organizations', 'Folders', 'Projects', 'Environments', 'Business Units', 'Cost Centers', 'Tags', 'Ownership'] as const;
 type Tab = typeof TABS[number];
@@ -70,6 +77,159 @@ export function OrganizationManagement() {
   const [projectBusy, setProjectBusy] = useState(false);
   const [buBusy, setBuBusy] = useState(false);
   const [ccBusy, setCcBusy] = useState(false);
+
+  const [editingFolder, setEditingFolder] = useState<FolderRow | null>(null);
+  const [folderEditForm, setFolderEditForm] = useState({ name: '', parentFolderId: '', monthlyBudget: '', requiredTags: '', allowedRegions: '', businessUnitId: '', costCenterId: '' });
+  const [folderEditBusy, setFolderEditBusy] = useState(false);
+  const [folderEditError, setFolderEditError] = useState<string | null>(null);
+
+  const [editingProject, setEditingProject] = useState<ProjectRow | null>(null);
+  const [projectEditForm, setProjectEditForm] = useState({ name: '', slug: '', folderId: '', monthlyBudget: '', businessUnitId: '', costCenterId: '' });
+  const [projectEditBusy, setProjectEditBusy] = useState(false);
+  const [projectEditError, setProjectEditError] = useState<string | null>(null);
+
+  const [editingBu, setEditingBu] = useState<BusinessUnit | null>(null);
+  const [buEditForm, setBuEditForm] = useState({ name: '', code: '' });
+  const [buEditBusy, setBuEditBusy] = useState(false);
+  const [buEditError, setBuEditError] = useState<string | null>(null);
+
+  const [editingCc, setEditingCc] = useState<CostCenter | null>(null);
+  const [ccEditForm, setCcEditForm] = useState({ name: '', code: '', businessUnitId: '' });
+  const [ccEditBusy, setCcEditBusy] = useState(false);
+  const [ccEditError, setCcEditError] = useState<string | null>(null);
+
+  function openEditFolder(f: FolderRow) {
+    setEditingFolder(f);
+    setFolderEditForm({
+      name: f.name,
+      parentFolderId: f.parent_folder_id ?? '',
+      monthlyBudget: f.monthly_budget != null ? String(f.monthly_budget) : '',
+      requiredTags: f.required_tags.join(', '),
+      allowedRegions: f.allowed_regions.join(', '),
+      businessUnitId: f.business_unit_id ?? '',
+      costCenterId: f.cost_center_id ?? '',
+    });
+    setFolderEditError(null);
+  }
+
+  async function handleSaveFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingFolder || folderEditBusy) return;
+    const name = folderEditForm.name.trim();
+    if (!name) { setFolderEditError('Name is required.'); return; }
+    setFolderEditBusy(true);
+    setFolderEditError(null);
+    try {
+      await api.updateFolder(editingFolder.id, {
+        name,
+        parentFolderId: folderEditForm.parentFolderId || null,
+        monthlyBudget: folderEditForm.monthlyBudget.trim() ? Number(folderEditForm.monthlyBudget) : undefined,
+        requiredTags: parseCommaList(folderEditForm.requiredTags),
+        allowedRegions: parseCommaList(folderEditForm.allowedRegions),
+        businessUnitId: folderEditForm.businessUnitId || null,
+        costCenterId: folderEditForm.costCenterId || null,
+      });
+      setEditingFolder(null);
+      await refresh();
+      await loadExtras();
+    } catch (err) {
+      setFolderEditError(err instanceof Error ? err.message : 'Could not update this folder.');
+    } finally {
+      setFolderEditBusy(false);
+    }
+  }
+
+  function openEditProject(p: ProjectRow) {
+    setEditingProject(p);
+    setProjectEditForm({
+      name: p.name,
+      slug: p.slug,
+      folderId: p.folder_id ?? '',
+      monthlyBudget: p.monthly_budget != null ? String(p.monthly_budget) : '',
+      businessUnitId: p.business_unit_id ?? '',
+      costCenterId: p.cost_center_id ?? '',
+    });
+    setProjectEditError(null);
+  }
+
+  async function handleSaveProject(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingProject || projectEditBusy) return;
+    const name = projectEditForm.name.trim();
+    const slug = projectEditForm.slug.trim().toLowerCase();
+    if (!name || !slug) { setProjectEditError('Name and slug are required.'); return; }
+    if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(slug)) {
+      setProjectEditError('Slug must use lowercase letters, numbers, hyphens, or underscores.');
+      return;
+    }
+    setProjectEditBusy(true);
+    setProjectEditError(null);
+    try {
+      await api.updateProject(editingProject.id, {
+        name,
+        slug,
+        folderId: projectEditForm.folderId || null,
+        monthlyBudget: projectEditForm.monthlyBudget.trim() ? Number(projectEditForm.monthlyBudget) : undefined,
+        businessUnitId: projectEditForm.businessUnitId || null,
+        costCenterId: projectEditForm.costCenterId || null,
+      });
+      setEditingProject(null);
+      await refresh();
+      await loadExtras();
+    } catch (err) {
+      setProjectEditError(err instanceof Error ? err.message : 'Could not update this project.');
+    } finally {
+      setProjectEditBusy(false);
+    }
+  }
+
+  function openEditBu(bu: BusinessUnit) {
+    setEditingBu(bu);
+    setBuEditForm({ name: bu.name, code: bu.code ?? '' });
+    setBuEditError(null);
+  }
+
+  async function handleSaveBu(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingBu || buEditBusy) return;
+    const name = buEditForm.name.trim();
+    if (!name) { setBuEditError('Name is required.'); return; }
+    setBuEditBusy(true);
+    setBuEditError(null);
+    try {
+      await api.updateBusinessUnit(editingBu.id, { name, code: buEditForm.code.trim() });
+      setEditingBu(null);
+      await loadExtras();
+    } catch (err) {
+      setBuEditError(err instanceof Error ? err.message : 'Could not update this business unit.');
+    } finally {
+      setBuEditBusy(false);
+    }
+  }
+
+  function openEditCc(cc: CostCenter) {
+    setEditingCc(cc);
+    setCcEditForm({ name: cc.name, code: cc.code ?? '', businessUnitId: cc.business_unit_id ?? '' });
+    setCcEditError(null);
+  }
+
+  async function handleSaveCc(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingCc || ccEditBusy) return;
+    const name = ccEditForm.name.trim();
+    if (!name) { setCcEditError('Name is required.'); return; }
+    setCcEditBusy(true);
+    setCcEditError(null);
+    try {
+      await api.updateCostCenter(editingCc.id, { name, code: ccEditForm.code.trim(), businessUnitId: ccEditForm.businessUnitId || undefined });
+      setEditingCc(null);
+      await loadExtras();
+    } catch (err) {
+      setCcEditError(err instanceof Error ? err.message : 'Could not update this cost center.');
+    } finally {
+      setCcEditBusy(false);
+    }
+  }
 
   const extrasRequestRef = useRef(0);
   const ownershipRequestRef = useRef(0);
@@ -607,7 +767,10 @@ export function OrganizationManagement() {
                     <Icon name="folder" size={14} className="text-slate-400" />
                     {f.name}
                   </span>
-                  <button type="button" disabled={folderBusy} onClick={() => void handleDeleteFolder(f.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                  <span className="flex gap-3 shrink-0">
+                    <button type="button" disabled={folderBusy} onClick={() => openEditFolder(f)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Edit</button>
+                    <button type="button" disabled={folderBusy} onClick={() => void handleDeleteFolder(f.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                  </span>
                 </li>
               ))}
               {folders.length === 0 && <li className="py-2 text-sm text-slate-400">No folders yet.</li>}
@@ -658,7 +821,10 @@ export function OrganizationManagement() {
             {projects.map(p => (
               <li key={p.id} className="flex items-center justify-between py-2 text-sm">
                 <span className="text-slate-700 dark:text-slate-200">{p.name} <span className="text-xs text-slate-400">{(p.folder_id ? folderNameById.get(p.folder_id) : undefined) ?? 'Top level'}</span></span>
-                <button type="button" disabled={projectBusy} onClick={() => void handleDeleteProject(p.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                <span className="flex gap-3 shrink-0">
+                  <button type="button" disabled={projectBusy} onClick={() => openEditProject(p)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Edit</button>
+                  <button type="button" disabled={projectBusy} onClick={() => void handleDeleteProject(p.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                </span>
               </li>
             ))}
             {projects.length === 0 && <li className="py-2 text-sm text-slate-400">No projects yet.</li>}
@@ -726,7 +892,12 @@ export function OrganizationManagement() {
                 <tr key={bu.id} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
                   <td className="py-2 text-slate-700 dark:text-slate-200">{bu.name}</td>
                   <td className="py-2 text-slate-500 dark:text-slate-400">{bu.code ?? '—'}</td>
-                  <td className="py-2"><button type="button" disabled={buBusy} onClick={() => void handleDeleteBu(bu.id)} className="text-xs text-red-500 hover:underline">Delete</button></td>
+                  <td className="py-2">
+                    <span className="flex gap-3">
+                      <button type="button" disabled={buBusy} onClick={() => openEditBu(bu)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Edit</button>
+                      <button type="button" disabled={buBusy} onClick={() => void handleDeleteBu(bu.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                    </span>
+                  </td>
                 </tr>
               ))}
               {businessUnits.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-sm text-slate-400">No business units yet.</td></tr>}
@@ -772,7 +943,12 @@ export function OrganizationManagement() {
                   <td className="py-2 text-slate-700 dark:text-slate-200">{cc.name}</td>
                   <td className="py-2 text-slate-500 dark:text-slate-400">{cc.code ?? '—'}</td>
                   <td className="py-2 text-slate-500 dark:text-slate-400">{(cc.business_unit_id ? businessUnitNameById.get(cc.business_unit_id) : undefined) ?? '—'}</td>
-                  <td className="py-2"><button type="button" disabled={ccBusy} onClick={() => void handleDeleteCc(cc.id)} className="text-xs text-red-500 hover:underline">Delete</button></td>
+                  <td className="py-2">
+                    <span className="flex gap-3">
+                      <button type="button" disabled={ccBusy} onClick={() => openEditCc(cc)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Edit</button>
+                      <button type="button" disabled={ccBusy} onClick={() => void handleDeleteCc(cc.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                    </span>
+                  </td>
                 </tr>
               ))}
               {costCenters.length === 0 && <tr><td colSpan={4} className="py-3 text-center text-sm text-slate-400">No cost centers yet.</td></tr>}
@@ -853,6 +1029,135 @@ export function OrganizationManagement() {
         </div>
       )}
       {confirmDialog}
+
+      <Modal open={!!editingFolder} onClose={() => setEditingFolder(null)} title="Edit Folder">
+        <form onSubmit={handleSaveFolder} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Name</span>
+            <input value={folderEditForm.name} onChange={e => setFolderEditForm(f => ({ ...f, name: e.target.value }))} maxLength={200} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Parent folder</span>
+            <select value={folderEditForm.parentFolderId} onChange={e => setFolderEditForm(f => ({ ...f, parentFolderId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">Top level</option>
+              {folders.filter(f => f.id !== editingFolder?.id).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Monthly budget (USD, optional)</span>
+            <input type="number" min={0} step="0.01" value={folderEditForm.monthlyBudget} onChange={e => setFolderEditForm(f => ({ ...f, monthlyBudget: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Required tags (comma-separated, optional)</span>
+            <input value={folderEditForm.requiredTags} onChange={e => setFolderEditForm(f => ({ ...f, requiredTags: e.target.value }))} placeholder="CostCenter, Owner" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Allowed regions (comma-separated, optional)</span>
+            <input value={folderEditForm.allowedRegions} onChange={e => setFolderEditForm(f => ({ ...f, allowedRegions: e.target.value }))} placeholder="us-east-1, eu-west-1" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Business unit (optional)</span>
+            <select value={folderEditForm.businessUnitId} onChange={e => setFolderEditForm(f => ({ ...f, businessUnitId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">None</option>
+              {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Cost center (optional)</span>
+            <select value={folderEditForm.costCenterId} onChange={e => setFolderEditForm(f => ({ ...f, costCenterId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">None</option>
+              {costCenters.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+            </select>
+          </label>
+          {folderEditError && <p className="text-sm text-red-500">{folderEditError}</p>}
+          <button type="submit" disabled={folderEditBusy} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
+            {folderEditBusy ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={!!editingProject} onClose={() => setEditingProject(null)} title="Edit Project">
+        <form onSubmit={handleSaveProject} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Name</span>
+            <input value={projectEditForm.name} onChange={e => setProjectEditForm(f => ({ ...f, name: e.target.value }))} maxLength={200} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Slug</span>
+            <input value={projectEditForm.slug} onChange={e => setProjectEditForm(f => ({ ...f, slug: e.target.value }))} maxLength={100} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Folder</span>
+            <select value={projectEditForm.folderId} onChange={e => setProjectEditForm(f => ({ ...f, folderId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">Top level</option>
+              {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Monthly budget (USD, optional)</span>
+            <input type="number" min={0} step="0.01" value={projectEditForm.monthlyBudget} onChange={e => setProjectEditForm(f => ({ ...f, monthlyBudget: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Business unit (optional)</span>
+            <select value={projectEditForm.businessUnitId} onChange={e => setProjectEditForm(f => ({ ...f, businessUnitId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">None</option>
+              {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Cost center (optional)</span>
+            <select value={projectEditForm.costCenterId} onChange={e => setProjectEditForm(f => ({ ...f, costCenterId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">None</option>
+              {costCenters.map(cc => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+            </select>
+          </label>
+          {projectEditError && <p className="text-sm text-red-500">{projectEditError}</p>}
+          <button type="submit" disabled={projectEditBusy} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
+            {projectEditBusy ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={!!editingBu} onClose={() => setEditingBu(null)} title="Edit Business Unit">
+        <form onSubmit={handleSaveBu} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Name</span>
+            <input value={buEditForm.name} onChange={e => setBuEditForm(f => ({ ...f, name: e.target.value }))} maxLength={200} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Code (optional)</span>
+            <input value={buEditForm.code} onChange={e => setBuEditForm(f => ({ ...f, code: e.target.value }))} maxLength={50} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          {buEditError && <p className="text-sm text-red-500">{buEditError}</p>}
+          <button type="submit" disabled={buEditBusy} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
+            {buEditBusy ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={!!editingCc} onClose={() => setEditingCc(null)} title="Edit Cost Center">
+        <form onSubmit={handleSaveCc} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Name</span>
+            <input value={ccEditForm.name} onChange={e => setCcEditForm(f => ({ ...f, name: e.target.value }))} maxLength={200} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" autoFocus />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Code (optional)</span>
+            <input value={ccEditForm.code} onChange={e => setCcEditForm(f => ({ ...f, code: e.target.value }))} maxLength={50} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-slate-600 dark:text-slate-300">Business unit (optional)</span>
+            <select value={ccEditForm.businessUnitId} onChange={e => setCcEditForm(f => ({ ...f, businessUnitId: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+              <option value="">None</option>
+              {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+            </select>
+          </label>
+          {ccEditError && <p className="text-sm text-red-500">{ccEditError}</p>}
+          <button type="submit" disabled={ccEditBusy} className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
+            {ccEditBusy ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }
