@@ -164,7 +164,7 @@ export function CloudAccounts() {
     return () => { cancelled = true; };
   }, [refreshToken, toast]);
 
-  async function toggleFavorite(connectionId: string, name: string) {
+  async function toggleFavorite(connectionId: string, name: string, provider: 'aws' | 'gcp' | 'azure') {
     const path = `/cloud-accounts/${connectionId}`;
     const existing = favorites.find(f => f.path === path);
 
@@ -174,7 +174,7 @@ export function CloudAccounts() {
         setFavorites(prev => prev.filter(f => f.id !== existing.id));
         toast(`Removed "${name}" from Favorites`, 'success');
       } else {
-        const { favorite } = await api.addFavorite({ type: 'aws-account', label: name, path });
+        const { favorite } = await api.addFavorite({ type: `${provider}-account`, label: name, path });
         setFavorites(prev => [...prev, favorite]);
         toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
       }
@@ -641,7 +641,7 @@ export function CloudAccounts() {
           isFavorited={favorites.some(f => f.path === `/cloud-accounts/${r.id}`)}
           onValidate={() => void runValidation(r.id)}
           onSync={() => syncNow(r)}
-          onToggleFavorite={() => void toggleFavorite(r.id, r.name)}
+          onToggleFavorite={() => void toggleFavorite(r.id, r.name, r.provider)}
           onUpdateCredentials={
             (r.provider === 'aws' && r.connectionMethod === 'access_key') ||
             (r.provider === 'gcp' && r.connectionMethod === 'service_account_key') ||
@@ -766,8 +766,6 @@ export function CloudAccounts() {
                 <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Discovery</h3>
                 <dl className="text-sm flex flex-col gap-2">
                   <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Last Discovery</dt><dd className="text-slate-800 dark:text-slate-100">{dashboard.lastDiscovery ? new Date(dashboard.lastDiscovery).toLocaleString() : 'Never'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Next Scheduled</dt><dd className="text-slate-400">On-demand</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Success Rate</dt><dd className="text-slate-400">—</dd></div>
                 </dl>
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -1341,11 +1339,9 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
               Open AWS Console ↗
             </button>
           )}
-          {row.provider === 'aws' && (
-            <button role="menuitem" onClick={() => { setOpen(false); onToggleFavorite(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Pin this account to the Overview page for quick access">
-              {isFavorited ? 'Remove from Favorites' : 'Add to Favorites'}
-            </button>
-          )}
+          <button role="menuitem" onClick={() => { setOpen(false); onToggleFavorite(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Pin this account to the Overview page for quick access">
+            {isFavorited ? 'Remove from Favorites' : 'Add to Favorites'}
+          </button>
           <button role="menuitem" onClick={() => void copyId()} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Copy {row.provider === 'gcp' ? 'Project' : 'Account'} ID</button>
           {onUpdateCredentials && (
             <button role="menuitem" onClick={() => { setOpen(false); onUpdateCredentials(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Update Credentials</button>

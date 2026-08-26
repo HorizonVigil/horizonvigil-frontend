@@ -30,15 +30,29 @@ export function Incidents() {
   const navigate = useNavigate();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'All Incidents');
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  // Org-wide, independent of the active tab's status filter -- the stat
+  // cards below read from this, not from `incidents`, so switching to the
+  // Resolved tab doesn't make Open/Critical/Investigating read 0.
+  const [allIncidents, setAllIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const status = TAB_STATUS[tab];
-      const { items } = await api.getIncidents({ status, limit: 200 });
+      const [{ items }, all] = await Promise.all([
+        api.getIncidents({ status, limit: 200 }),
+        status ? api.getIncidents({ limit: 200 }) : Promise.resolve(null),
+      ]);
       setIncidents(items);
+      setAllIncidents(all ? all.items : items);
+    } catch (err) {
+      setIncidents([]);
+      setAllIncidents([]);
+      setLoadError(err instanceof Error ? err.message : 'Could not load incidents.');
     } finally {
       setLoading(false);
     }
@@ -57,9 +71,9 @@ export function Incidents() {
     { key: 'created', header: 'Created', render: i => new Date(i.created_at).toLocaleString(), sortValue: i => i.created_at },
   ];
 
-  const openCount = incidents.filter(i => i.status === 'open').length;
-  const criticalCount = incidents.filter(i => i.status !== 'resolved' && i.status !== 'closed' && i.severity === 'critical').length;
-  const investigatingCount = incidents.filter(i => i.status === 'investigating' || i.status === 'acknowledged').length;
+  const openCount = allIncidents.filter(i => i.status === 'open').length;
+  const criticalCount = allIncidents.filter(i => i.status !== 'resolved' && i.status !== 'closed' && i.severity === 'critical').length;
+  const investigatingCount = allIncidents.filter(i => i.status === 'investigating' || i.status === 'acknowledged').length;
 
   return (
     <div>
@@ -82,9 +96,16 @@ export function Incidents() {
         <StatCard label="Investigating" value={String(investigatingCount)} />
       </div>
 
+      {loadError && (
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => void load()} className="text-xs underline shrink-0">Retry</button>
+        </div>
+      )}
+
       {loading ? (
         <p className="text-xs text-slate-400">Loading…</p>
-      ) : incidents.length === 0 ? (
+      ) : loadError ? null : incidents.length === 0 ? (
         <EmptyState
           icon="incidents"
           title={tab === 'All Incidents' ? 'No incidents yet' : `No ${tab.toLowerCase()} incidents`}

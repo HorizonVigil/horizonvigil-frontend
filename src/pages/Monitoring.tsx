@@ -73,36 +73,22 @@ export function Monitoring() {
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const dashboardRequestRef = useRef(0);
   const metricsRequestRef = useRef(0);
+  const hasLoadedOnce = useRef(false);
 
   const load = useCallback(async () => {
     const requestId = ++dashboardRequestRef.current;
-    const hasExistingData = Boolean(dashboard);
 
     setLoadError(null);
-    setLoading(!hasExistingData);
-    setRefreshing(hasExistingData);
+    setLoading(!hasLoadedOnce.current);
+    setRefreshing(hasLoadedOnce.current);
 
     try {
       const connectionId = account === 'all' ? undefined : account;
 
-      const [
-        dashboardRes,
-        alarmsRes,
-        healthRes,
-        logs,
-        traces,
-        serviceMap,
-        performance,
-        dashboards,
-      ] = await Promise.all([
+      const [dashboardRes, alarmsRes, healthRes] = await Promise.all([
         api.getMonitoringDashboard(),
         api.getAlarms({ connectionId, limit: 200 }),
         api.getMonitoringHealth(),
-        api.getLogs(),
-        api.getTraces(),
-        api.getServiceMap(),
-        api.getPerformance(),
-        api.getCloudWatchDashboards(),
       ]);
 
       if (requestId !== dashboardRequestRef.current) return;
@@ -110,25 +96,7 @@ export function Monitoring() {
       setDashboard(dashboardRes);
       setAlarms(alarmsRes.items);
       setHealthByConnection(healthRes.connections);
-      setNotIntegrated({
-        Logs: { key: 'logs', label: 'Logs', reason: logs.reason },
-        Traces: { key: 'traces', label: 'Traces', reason: traces.reason },
-        'Service Map': {
-          key: 'serviceMap',
-          label: 'Service Map',
-          reason: serviceMap.reason,
-        },
-        Performance: {
-          key: 'performance',
-          label: 'Performance / APM',
-          reason: performance.reason,
-        },
-        Dashboards: {
-          key: 'dashboards',
-          label: 'CloudWatch Dashboards',
-          reason: dashboards.reason,
-        },
-      });
+      hasLoadedOnce.current = true;
     } catch (err) {
       if (requestId !== dashboardRequestRef.current) return;
 
@@ -143,12 +111,53 @@ export function Monitoring() {
         setRefreshing(false);
       }
     }
-  }, [account, dashboard]);
+  }, [account]);
 
   useEffect(() => {
     void load();
   }, [load, refreshToken]);
-  useEffect(() => { void load(); }, [load, refreshToken]);
+
+  // These five capabilities each return a fixed "not yet integrated" reason
+  // string, not live data -- fetched once rather than on every load/refresh
+  // like the dashboard data above.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [logs, traces, serviceMap, performance, dashboards] = await Promise.all([
+          api.getLogs(),
+          api.getTraces(),
+          api.getServiceMap(),
+          api.getPerformance(),
+          api.getCloudWatchDashboards(),
+        ]);
+        if (cancelled) return;
+        setNotIntegrated({
+          Logs: { key: 'logs', label: 'Logs', reason: logs.reason },
+          Traces: { key: 'traces', label: 'Traces', reason: traces.reason },
+          'Service Map': {
+            key: 'serviceMap',
+            label: 'Service Map',
+            reason: serviceMap.reason,
+          },
+          Performance: {
+            key: 'performance',
+            label: 'Performance / APM',
+            reason: performance.reason,
+          },
+          Dashboards: {
+            key: 'dashboards',
+            label: 'CloudWatch Dashboards',
+            reason: dashboards.reason,
+          },
+        });
+      } catch {
+        // Static roadmap copy -- NotIntegratedPanel already has a fallback
+        // description when a section's reason is unavailable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Metrics fetch is split out from the rest of the dashboard load so paging
   // through it doesn't re-fetch alarms/health/etc. on every click.

@@ -362,7 +362,14 @@ export function CustomDashboards() {
       ) : (
         <div id={`custom-dashboard-panel-${tab}`} role="tabpanel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {rows.map(d => (
-            <button type="button" key={d.id} onClick={() => setDetail(d)} className="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-300 dark:hover:border-brand-700">
+            <div
+              key={d.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetail(d)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetail(d); } }}
+              className="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-300 dark:hover:border-brand-700 cursor-pointer"
+            >
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{d.name}</span>
                 {d.is_shared && <span className="text-[10px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">Shared</span>}
@@ -370,9 +377,9 @@ export function CustomDashboards() {
               <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{d.description || 'No description.'}</p>
               <span className="text-[10px] text-slate-400 mt-2 block">{Array.isArray(d.widgets) ? d.widgets.length : 0} widget{Array.isArray(d.widgets) && d.widgets.length === 1 ? '' : 's'}</span>
               {tab === 'templates' && (
-                <span onClick={e => { e.stopPropagation(); void handleUseTemplate(d.id); }} className="inline-block mt-2 text-xs text-brand-600 dark:text-brand-400 hover:underline">Use this template →</span>
+                <button type="button" onClick={e => { e.stopPropagation(); void handleUseTemplate(d.id); }} className="inline-block mt-2 text-xs text-brand-600 dark:text-brand-400 hover:underline">Use this template →</button>
               )}
-            </button>
+            </div>
           ))}
           {rows.length === 0 && (
             <div className="col-span-full">

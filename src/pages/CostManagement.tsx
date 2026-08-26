@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
+import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { Badge } from '../components/Badge';
@@ -233,6 +234,7 @@ export function CostManagement() {
   const [tagKey, setTagKey] = useState('CostCenter');
   const [allocation, setAllocation] = useState<CostAllocation | null>(null);
   const [allocationLoading, setAllocationLoading] = useState(false);
+  const [allocationRetryToken, setAllocationRetryToken] = useState(0);
   const onAllocationTab = tab === 'Cost Allocation' || tab === 'Chargeback' || tab === 'Showback';
 
   useEffect(() => {
@@ -278,7 +280,7 @@ export function CostManagement() {
           setAllocationLoading(false);
         }
       });
-  }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken]);
+  }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken, allocationRetryToken]);
 
 
   const load = useCallback(async () => {
@@ -288,14 +290,20 @@ export function CostManagement() {
 
     try {
       const connectionId = account === 'all' ? undefined : account;
+      const regionParam = region === 'all' ? undefined : region;
       const { from, to } = rangeToFromTo(dateRange);
 
       const [analyticsRes, forecastRes, explorerRes] = await Promise.all([
-        api.getCostAnalytics({ from, to }),
-        api.getCostForecast(),
+        api.getCostAnalytics({
+          from,
+          to,
+          region: regionParam,
+          connectionIds: connectionId ? [connectionId] : undefined,
+        }),
+        api.getCostForecast({ region: regionParam }),
         api.getCostExplorer({
           connectionId,
-          region: region === 'all' ? undefined : region,
+          region: regionParam,
           from,
           to,
           limit: 200,
@@ -367,6 +375,16 @@ export function CostManagement() {
   const avgDailyCost = daily.length > 0 ? daily.reduce((sum, d) => sum + d.cost, 0) / daily.length : 0;
   const allocationTotal = allocation?.totalCost ?? 0;
 
+  if (loading && !analytics && !forecast) {
+    return (
+      <div className="flex flex-col gap-5">
+        <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
+      </div>
+    );
+  }
+
   if (loadError && !analytics && !forecast) {
     return (
       <div className="flex flex-col gap-4">
@@ -392,6 +410,8 @@ export function CostManagement() {
   return (
     <div>
       <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
+
+      {loading && <p className="text-xs text-slate-400 mb-2">Refreshing…</p>}
 
       {loadError && (
         <div
@@ -599,7 +619,7 @@ export function CostManagement() {
           {allocationError && (
             <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
               <span>{allocationError}</span>
-              <button type="button" onClick={() => setTagKey(key => key.trim())} className="text-xs underline shrink-0">Retry</button>
+              <button type="button" onClick={() => setAllocationRetryToken(t => t + 1)} className="text-xs underline shrink-0">Retry</button>
             </div>
           )}
 
@@ -645,8 +665,6 @@ export function CostManagement() {
           <p className="text-xs text-slate-400 mt-4">For PDF/scheduled cost reports, see Reports → Cost Reports.</p>
         </div>
       )}
-
-      {loading && <p className="text-xs text-slate-400 mt-3">Loading…</p>}
 
       <Modal open={budgetModalOpen} onClose={() => setBudgetModalOpen(false)} title={editingBudget ? 'Edit Budget' : 'New Budget'}>
         <form onSubmit={submitBudget} className="flex flex-col gap-3">

@@ -63,7 +63,7 @@ export function EksConsole() {
   const [eksDeployments, setEksDeployments] = useState<CloudResource[]>([]);
   const [eksPods, setEksPods] = useState<CloudResource[]>([]);
   const [eksNamespaces, setEksNamespaces] = useState<CloudResource[]>([]);
-  const [helmReleaseReason, setHelmReleaseReason] = useState('Not built in this pass.');
+  const [helmReleaseReason, setHelmReleaseReason] = useState('Loading…');
   const [eksAccessEntries, setEksAccessEntries] = useState<CloudResource[]>([]);
   const [eksAuthMappings, setEksAuthMappings] = useState<CloudResource[]>([]);
   // IRSA readiness isn't its own resource -- it's whether the cluster's own

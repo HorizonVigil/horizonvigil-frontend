@@ -5,7 +5,7 @@ import { useOrg } from './orgContext';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from './unifiedAccounts';
 import { fetchAllPages } from './fetchAllPages';
 
-export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd' | 'custom';
+export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd';
 
 export interface GlobalFilters {
   region: string; // 'all' or a specific AWS region
@@ -97,6 +97,5 @@ export function dateRangeToDays(range: DateRangePreset): number {
     case '7d': return 7;
     case '30d': return 30;
     case 'mtd': return new Date().getDate();
-    default: return 30;
   }
 }

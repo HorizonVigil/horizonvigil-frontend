@@ -195,10 +195,14 @@ export function Resources() {
   const [providerFilter, setProviderFilter] = useState<'all' | 'aws' | 'gcp' | 'azure'>('all');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   // Tags Explorer — now its own tab, fetched when opened.
   const [tagKeys, setTagKeys] = useState<{ key: string; resourceCount: number; sampleValues: string[] }[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
+  const [tagsError, setTagsError] = useState<string | null>(null);
+  const [tagsRetryToken, setTagsRetryToken] = useState(0);
 
   // Dependency Graph (opened from the resource Drawer)
   const [graph, setGraph] = useState<{ nodes: { id: string; resourceId: string; label: string | null; resourceTypeKey: string; category: string }[]; edges: { from: string; to: string; relation: string }[]; hops: number } | null>(null);
@@ -237,6 +241,7 @@ export function Resources() {
   const [timelineFrom, setTimelineFrom] = useState('');
   const [timelineTo, setTimelineTo] = useState('');
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
 
   // ?account=<id>/?region=<r> (e.g. "View all resources for this account" on
   // the account detail page, or arriving from ResourcesOverview/Category with
@@ -290,6 +295,7 @@ export function Resources() {
   const load = useCallback(async () => {
     const thisRequest = ++requestId.current;
     setLoading(true);
+    setLoadError(null);
 
     try {
       const filters = {
@@ -310,10 +316,11 @@ export function Resources() {
 
       setResources(inventory.items ?? []);
       setFilteredTotal(Math.max(0, inventory.pagination?.total ?? 0));
-    } catch {
+    } catch (err) {
       if (thisRequest !== requestId.current) return;
       setResources([]);
       setFilteredTotal(0);
+      setLoadError(err instanceof Error ? err.message : 'Could not load resources.');
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
     }
@@ -327,6 +334,7 @@ export function Resources() {
     const thisRequest = ++globalRequestId.current;
     const connectionId = account === 'all' ? undefined : account;
     const scopedRegion = region === 'all' ? undefined : region;
+    setDashboardError(null);
 
     try {
       const [dash, explorer] = await Promise.all([
@@ -346,10 +354,11 @@ export function Resources() {
       }
 
       setExplorerServices(svc);
-    } catch {
+    } catch (err) {
       if (thisRequest !== globalRequestId.current) return;
       setDashboard(null);
       setExplorerServices({});
+      setDashboardError(err instanceof Error ? err.message : 'Could not load resource summary.');
     }
   }, [region, account]);
   useEffect(() => { void loadGlobal(); }, [loadGlobal, refreshToken]);
@@ -404,6 +413,7 @@ export function Resources() {
 
     const thisRequest = ++tagsRequestId.current;
     setTagsLoading(true);
+    setTagsError(null);
 
     void api.getResourceTags(account === 'all' ? undefined : account)
       .then(r => {
@@ -411,13 +421,16 @@ export function Resources() {
           setTagKeys(r.keys ?? []);
         }
       })
-      .catch(() => {
-        if (thisRequest === tagsRequestId.current) setTagKeys([]);
+      .catch(err => {
+        if (thisRequest === tagsRequestId.current) {
+          setTagKeys([]);
+          setTagsError(err instanceof Error ? err.message : 'Could not load tags.');
+        }
       })
       .finally(() => {
         if (thisRequest === tagsRequestId.current) setTagsLoading(false);
       });
-  }, [tab, refreshToken, account]);
+  }, [tab, refreshToken, account, tagsRetryToken]);
 
   // Resource Timeline tab — real filters, loaded on open and whenever they change.
   const timelineRequestId = useRef(0);
@@ -427,6 +440,7 @@ export function Resources() {
 
     const thisRequest = ++timelineRequestId.current;
     setTimelineLoading(true);
+    setTimelineError(null);
 
     try {
       const res = await api.getResourceTimeline({
@@ -439,9 +453,10 @@ export function Resources() {
 
       if (thisRequest !== timelineRequestId.current) return;
       setTimelineEvents(res.items ?? []);
-    } catch {
+    } catch (err) {
       if (thisRequest !== timelineRequestId.current) return;
       setTimelineEvents([]);
+      setTimelineError(err instanceof Error ? err.message : 'Could not load resource timeline.');
     } finally {
       if (thisRequest === timelineRequestId.current) setTimelineLoading(false);
     }
@@ -856,6 +871,22 @@ export function Resources() {
     <div>
       <FilterBar title={isWorkspaceView ? serviceLabel(presetService, presetCategory) : 'Resources'} breadcrumb={workspaceCrumb} showDateFilter={false} />
 
+      {(loadError || dashboardError) && (
+        <div
+          className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3"
+          role="alert"
+        >
+          <span>{loadError ?? dashboardError} This may be an outage, not an empty account — try Retry before assuming nothing is connected.</span>
+          <button
+            type="button"
+            onClick={() => { void load(); void loadGlobal(); }}
+            className="text-xs underline shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div
         className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto"
         role="tablist"
@@ -1075,6 +1106,12 @@ export function Resources() {
       {tab === 'Tags Explorer' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Tags Explorer</h3>
+          {tagsError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{tagsError}</span>
+              <button type="button" onClick={() => setTagsRetryToken(t => t + 1)} className="text-xs underline shrink-0">Retry</button>
+            </div>
+          )}
           {tagsLoading ? <p className="text-sm text-slate-400">Loading…</p> : (
             <div className="flex flex-col gap-2">
               {providerTagKeys.map(t => (
@@ -1084,7 +1121,7 @@ export function Resources() {
                   <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">{t.resourceCount} resource{t.resourceCount === 1 ? '' : 's'}</span>
                 </div>
               ))}
-              {providerTagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
+              {!tagsError && providerTagKeys.length === 0 && <p className="text-sm text-slate-400">No tags found across discovered resources yet.</p>}
             </div>
           )}
         </div>
@@ -1093,6 +1130,12 @@ export function Resources() {
       {tab === 'Resource Timeline' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Resource Timeline</h3>
+          {timelineError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{timelineError}</span>
+              <button type="button" onClick={() => void loadTimeline()} className="text-xs underline shrink-0">Retry</button>
+            </div>
+          )}
           <div className="flex flex-wrap items-end gap-3 mb-3">
             <label className="flex flex-col gap-1">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Event Type</span>

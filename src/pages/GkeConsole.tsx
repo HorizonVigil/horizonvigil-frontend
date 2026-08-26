@@ -47,7 +47,7 @@ export function GkeConsole() {
   const [cloudRun, setCloudRun] = useState<CloudResource[]>([]);
   const [artifactRepos, setArtifactRepos] = useState<CloudResource[]>([]);
   const [artifactImages, setArtifactImages] = useState<CloudResource[]>([]);
-  const [helmReleaseReason, setHelmReleaseReason] = useState('Helm release scanning is available in the Enterprise plan.');
+  const [helmReleaseReason, setHelmReleaseReason] = useState('Loading…');
   const [selected, setSelected] = useState<CloudResource | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<CloudResource | null>(null);
 

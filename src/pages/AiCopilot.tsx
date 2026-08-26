@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { EmptyState } from '../components/EmptyState';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useToast } from '../lib/toast';
 import { api, friendlyErrorMessage, type ConversationSummary, type ChatMessage, type ChatSource } from '../lib/api';
 import { renderMarkdownLite } from '../lib/chatMarkdown';
@@ -21,6 +22,7 @@ function SourceTags({ sources }: { sources: ChatSource[] }) {
 
 export function AiCopilot() {
   const { toast } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -78,17 +80,26 @@ export function AiCopilot() {
     }
   }
 
-  async function handleDelete(id: string, e: React.MouseEvent) {
+  async function handleDelete(id: string, title: string, e: React.MouseEvent) {
     e.stopPropagation();
-    await api.deleteConversation(id);
-    if (activeId === id) setActiveId(null);
-    await loadConversations();
+    if (!(await confirm(`Delete conversation "${title}"? This is irreversible.`))) return;
+    try {
+      await api.deleteConversation(id);
+      if (activeId === id) setActiveId(null);
+      await loadConversations();
+    } catch (err) {
+      toast(friendlyErrorMessage(err, 'Failed to delete conversation.'), 'error');
+    }
   }
 
   async function handlePin(id: string, pinned: boolean, e: React.MouseEvent) {
     e.stopPropagation();
-    await api.pinConversation(id, !pinned);
-    await loadConversations();
+    try {
+      await api.pinConversation(id, !pinned);
+      await loadConversations();
+    } catch (err) {
+      toast(friendlyErrorMessage(err, 'Failed to update pin.'), 'error');
+    }
   }
 
   async function handleRenameSubmit(id: string) {
@@ -132,18 +143,21 @@ export function AiCopilot() {
                   className="w-full rounded-md px-2 py-2 mb-1 text-sm border border-brand-400 dark:border-brand-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />
               ) : (
-                <button
+                <div
                   key={c.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setActiveId(c.id)}
-                  className={`w-full text-left rounded-md px-2 py-2 mb-1 text-sm group flex items-center justify-between gap-1 ${activeId === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveId(c.id); } }}
+                  className={`w-full text-left rounded-md px-2 py-2 mb-1 text-sm group flex items-center justify-between gap-1 cursor-pointer ${activeId === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                 >
                   <span className="truncate flex-1">{c.pinned ? '📌 ' : ''}{c.title}</span>
-                  <span className="hidden group-hover:flex items-center gap-1 shrink-0">
-                    <span onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameValue(c.title); }} className="text-slate-300 hover:text-brand-500 text-xs" title="Rename">✎</span>
-                    <span onClick={(e) => void handlePin(c.id, c.pinned, e)} className="text-slate-300 hover:text-brand-500 text-xs" title={c.pinned ? 'Unpin' : 'Pin'}>📌</span>
-                    <span onClick={(e) => void handleDelete(c.id, e)} className="text-slate-300 hover:text-red-500 text-xs" title="Delete">✕</span>
+                  <span className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameValue(c.title); }} className="text-slate-300 hover:text-brand-500 focus-visible:text-brand-500 text-xs" aria-label="Rename conversation" title="Rename">✎</button>
+                    <button type="button" onClick={(e) => void handlePin(c.id, c.pinned, e)} className="text-slate-300 hover:text-brand-500 focus-visible:text-brand-500 text-xs" aria-label={c.pinned ? 'Unpin conversation' : 'Pin conversation'} title={c.pinned ? 'Unpin' : 'Pin'}>📌</button>
+                    <button type="button" onClick={(e) => void handleDelete(c.id, c.title, e)} className="text-slate-300 hover:text-red-500 focus-visible:text-red-500 text-xs" aria-label="Delete conversation" title="Delete">✕</button>
                   </span>
-                </button>
+                </div>
               )
             ))}
           </div>
@@ -193,6 +207,7 @@ export function AiCopilot() {
           </div>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

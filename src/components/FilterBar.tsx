@@ -13,7 +13,7 @@ const REGIONS = [
 ];
 
 const RANGE_LABELS: Record<DateRangePreset, string> = {
-  '1h': 'Last 1 Hour', '7d': 'Last 7 Days', '30d': 'Last 30 Days', mtd: 'Month to Date', custom: 'Custom',
+  '1h': 'Last 1 Hour', '7d': 'Last 7 Days', '30d': 'Last 30 Days', mtd: 'Month to Date',
 };
 
 /**
@@ -69,7 +69,7 @@ export function FilterBar({ title, subtitle, breadcrumb, showAccountFilter = tru
           <label className="flex flex-col gap-1">
             <span className="text-[11px] uppercase tracking-wide text-slate-400">Date Range</span>
             <select value={dateRange} onChange={e => setDateRange(e.target.value as DateRangePreset)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5">
-              {(Object.keys(RANGE_LABELS) as DateRangePreset[]).filter(k => k !== 'custom').map(k => <option key={k} value={k}>{RANGE_LABELS[k]}</option>)}
+              {(Object.keys(RANGE_LABELS) as DateRangePreset[]).map(k => <option key={k} value={k}>{RANGE_LABELS[k]}</option>)}
             </select>
           </label>
         )}
