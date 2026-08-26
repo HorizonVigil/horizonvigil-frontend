@@ -104,7 +104,6 @@ export function MarketingHome() {
       <ProductPreview />
       <PricingTeaser />
       <CustomerBenefits />
-      <Testimonials />
       <FAQ />
       <FinalCTA />
       <MarketingFooter />
@@ -114,23 +113,25 @@ export function MarketingHome() {
 
 function Hero() {
   return (
-    <Section className="pt-20 pb-16 text-center">
-      <div className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 mb-6">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Now supporting AWS and Google Cloud
-      </div>
-      <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-slate-900 dark:text-white text-balance max-w-3xl mx-auto">
-        One control plane for every AWS and GCP account you run.
-      </h1>
-      <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl mx-auto text-balance">
-        Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
-      </p>
-      <div className="flex items-center justify-center gap-3 mt-8 flex-wrap">
-        <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
-          Start free — no credit card
-        </Link>
-        <a href={BOOK_DEMO_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">
-          Book a demo
-        </a>
+    <Section className="pt-20 pb-16">
+      <div className="max-w-3xl">
+        <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4">
+          AWS + Google Cloud, one login
+        </p>
+        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
+          One control plane for every AWS and GCP account you run.
+        </h1>
+        <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl text-balance">
+          Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
+        </p>
+        <div className="flex items-center gap-3 mt-8 flex-wrap">
+          <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
+            Start free — no credit card
+          </Link>
+          <a href={BOOK_DEMO_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">
+            Book a demo
+          </a>
+        </div>
       </div>
     </Section>
   );
@@ -150,20 +151,22 @@ function TrustBar() {
 function ProductOverview() {
   return (
     <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
-        <Eyebrow>Product overview</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Everything your cloud ops team checks daily, in one place.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">
-          HorizonVigil connects directly to your AWS accounts and GCP projects, builds a live inventory, and layers cost, security, and automation on top — so the answer to "what's running, what does it cost, and is it safe" is always one login away.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        {BENEFITS.map(b => (
-          <div key={b.label} className="text-center">
-            <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-2">{b.stat}</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300">{b.label}</div>
-          </div>
-        ))}
+      <div className="grid lg:grid-cols-[minmax(0,22rem)_1fr] gap-10 items-start">
+        <div>
+          <Eyebrow>Product overview</Eyebrow>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Everything your cloud ops team checks daily, in one place.</h2>
+          <p className="text-slate-600 dark:text-slate-300 mt-4">
+            HorizonVigil connects directly to your AWS accounts and GCP projects, builds a live inventory, and layers cost, security, and automation on top — so the answer to "what's running, what does it cost, and is it safe" is always one login away.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-6 content-start">
+          {BENEFITS.map(b => (
+            <div key={b.label}>
+              <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-2">{b.stat}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-300">{b.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </Section>
   );
@@ -225,7 +228,7 @@ function ArchitectureOverview() {
   return (
     <Section className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
       <div className="max-w-6xl mx-auto px-5">
-        <div className="text-center max-w-2xl mx-auto mb-14">
+        <div className="max-w-2xl mb-14">
           <Eyebrow>Architecture overview</Eyebrow>
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white">How data gets from your accounts to your screen.</h2>
         </div>
@@ -387,7 +390,7 @@ function CustomerBenefits() {
   ];
   return (
     <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
+      <div className="max-w-2xl mb-14">
         <Eyebrow>Why teams switch</Eyebrow>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Fewer tools, faster answers.</h2>
       </div>
@@ -401,36 +404,6 @@ function CustomerBenefits() {
             </div>
           </div>
         ))}
-      </div>
-    </Section>
-  );
-}
-
-function Testimonials() {
-  const quotes = [
-    { quote: 'We connected our AWS and GCP accounts in an afternoon and had a real cost picture by the next morning — no consultant required.', name: 'Priya M.', role: 'VP Engineering, mid-market e-commerce platform' },
-    { quote: 'The audit log alone justified switching. Every remediation is traceable to a person and a timestamp, which our compliance review actually asked for by name.', name: 'Daniel K.', role: 'Head of Platform, fintech infrastructure team' },
-    { quote: 'Vulnerability findings used to be a spreadsheet three people maintained. Now it\'s a view everyone just checks.', name: 'Sara L.', role: 'Security Lead, healthcare SaaS' },
-  ];
-  return (
-    <Section className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
-      <div className="max-w-6xl mx-auto px-5">
-        <div className="text-center max-w-2xl mx-auto mb-14">
-          <Eyebrow>What early customers say</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Representative feedback</h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-2">Illustrative quotes from design-partner conversations.</p>
-        </div>
-        <div className="grid md:grid-cols-3 gap-6">
-          {quotes.map(t => (
-            <div key={t.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 flex flex-col">
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed flex-grow">"{t.quote}"</p>
-              <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">{t.name}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">{t.role}</div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </Section>
   );
