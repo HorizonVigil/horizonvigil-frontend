@@ -40,6 +40,7 @@ export function IncidentDetail() {
   const [members, setMembers] = useState<Member[]>([]);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  const [filingJira, setFilingJira] = useState(false);
   const [verifyUrl, setVerifyUrl] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [latestRun, setLatestRun] = useState<VerificationRun | null>(null);
@@ -155,6 +156,25 @@ export function IncidentDetail() {
     const m = members.find(x => x.userId === userId);
     return m?.fullName ?? m?.email ?? userId;
   };
+
+  async function fileJiraIssue() {
+    if (!incident || filingJira) return;
+    setFilingJira(true);
+    try {
+      const res = await api.createJiraIssue({
+        summary: `[${incident.severity.toUpperCase()}] ${incident.incident_number} — ${incident.title}`,
+        description: [
+          incident.description,
+          connection ? `Account: ${connection.provider.toUpperCase()} — ${connection.name}` : null,
+        ].filter(Boolean).join('\n\n'),
+      });
+      toast(`Filed as ${res.key}`, 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Failed to file Jira issue.', 'error');
+    } finally {
+      setFilingJira(false);
+    }
+  }
 
   async function changeStatus(status: IncidentStatus) {
     if (!id || busy || status === incident?.status) return;
@@ -282,6 +302,9 @@ export function IncidentDetail() {
         {refreshing && <span className="text-xs text-slate-400" aria-live="polite">Refreshing…</span>}
         <button type="button" onClick={() => void load()} disabled={refreshing || busy} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           Refresh
+        </button>
+        <button type="button" onClick={() => void fileJiraIssue()} disabled={filingJira} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+          {filingJira ? 'Filing…' : 'File Jira Issue'}
         </button>
         <select aria-label="Incident status" disabled={busy} value={incident.status} onChange={e => void changeStatus(e.target.value as IncidentStatus)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200 disabled:opacity-50">
           {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}

@@ -8,7 +8,8 @@ import { EmptyState } from '../components/EmptyState';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
-import { api, type BillingPlan, type BillingSubscription, type BillingInvoice, type BillingUsageMetric, type BillingReferral } from '../lib/api';
+import { api, type BillingPlan, type BillingSubscription, type BillingInvoice, type BillingUsageMetric, type BillingReferral, type BillingAddon, type BillingCoupon } from '../lib/api';
+import { CONTACT_SALES_HREF } from '../lib/marketingContent';
 
 const TABS = ['Plans', 'Usage', 'Invoices', 'Referrals'] as const;
 type Tab = typeof TABS[number];
@@ -63,6 +64,11 @@ export function Subscription() {
   const [referralCreditCents, setReferralCreditCents] = useState(0);
   const [redeemCode, setRedeemCode] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+  const [addons, setAddons] = useState<BillingAddon[]>([]);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponChecking, setCouponChecking] = useState(false);
+  const [couponRedeeming, setCouponRedeeming] = useState(false);
+  const [checkedCoupon, setCheckedCoupon] = useState<BillingCoupon | null>(null);
   const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
   const [subscribing, setSubscribing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,11 +89,12 @@ export function Subscription() {
       api.getBillingInvoices({ limit: 50 }),
       api.getReferrals(),
       api.getPaymentProviderStatus(),
+      api.getBillingAddons(),
     ]);
 
     if (requestId !== loadRequestId.current) return;
 
-    const [plansRes, subRes, usageRes, invoicesRes, referralsRes, providerRes] = results;
+    const [plansRes, subRes, usageRes, invoicesRes, referralsRes, providerRes, addonsRes] = results;
 
     if (plansRes.status === 'fulfilled') {
       setPlans(plansRes.value.items ?? []);
@@ -125,6 +132,10 @@ export function Subscription() {
       setProviderStatus(providerRes.value);
     }
 
+    if (addonsRes.status === 'fulfilled') {
+      setAddons(addonsRes.value.items ?? []);
+    }
+
     // Plans and current subscription are the essential page state.
     const criticalFailures = [plansRes, subRes].filter(
       result => result.status === 'rejected',
@@ -146,12 +157,6 @@ export function Subscription() {
 
     if (!plan.key) {
       toast('This plan is not available for subscription.', 'error');
-      return;
-    }
-
-    // Enterprise plans generally require a sales flow rather than checkout.
-    if (plan.key === 'enterprise') {
-      toast('Enterprise plans require a sales-assisted setup.', 'error');
       return;
     }
 
@@ -178,6 +183,45 @@ export function Subscription() {
       );
     } finally {
       setSubscribing(null);
+    }
+  }
+
+  async function handleCheckCoupon(e: React.FormEvent) {
+    e.preventDefault();
+    const code = couponCode.trim().toUpperCase();
+    if (!code || couponChecking) return;
+
+    setCouponChecking(true);
+    setCheckedCoupon(null);
+    try {
+      const result = await api.validateCoupon(code, currentPlan?.key);
+      setCheckedCoupon(result.coupon);
+      toast(
+        `Valid — ${result.coupon.discount_type === 'percent' ? `${result.coupon.discount_value}% off` : `${formatCents(result.coupon.discount_value, 'USD')} off`}.`,
+        'success',
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Invalid or expired coupon code.', 'error');
+    } finally {
+      setCouponChecking(false);
+    }
+  }
+
+  async function handleRedeemCoupon() {
+    const code = couponCode.trim().toUpperCase();
+    if (!code || couponRedeeming) return;
+
+    setCouponRedeeming(true);
+    try {
+      await api.redeemCoupon(code, currentPlan?.key);
+      toast('Coupon applied to your subscription.', 'success');
+      setCouponCode('');
+      setCheckedCoupon(null);
+      await load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to apply coupon.', 'error');
+    } finally {
+      setCouponRedeeming(false);
     }
   }
 
@@ -437,24 +481,81 @@ export function Subscription() {
                     <li>{plan.included_automations === -1 ? 'Unlimited' : plan.included_automations} automations/mo</li>
                     <li>{plan.data_retention_days === -1 ? 'Unlimited' : `${plan.data_retention_days}-day`} retention</li>
                   </ul>
-                  <button type="button"
-                    disabled={isCurrent || subscribing === plan.key || !!subscription}
-                    onClick={() => handleSubscribe(plan)}
-                    className={`text-xs font-semibold py-2 rounded-md text-center ${isCurrent ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-default' : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50'}`}
-                  >
-                    {isCurrent
-                      ? 'Current plan'
-                      : subscribing === plan.key
-                        ? 'Starting…'
-                        : plan.key === 'enterprise'
-                          ? 'Talk to sales'
+                  {plan.key === 'enterprise' && !isCurrent ? (
+                    <a
+                      href={CONTACT_SALES_HREF}
+                      className="text-xs font-semibold py-2 rounded-md text-center bg-brand-600 text-white hover:bg-brand-700"
+                    >
+                      Talk to sales
+                    </a>
+                  ) : (
+                    <button type="button"
+                      disabled={isCurrent || subscribing === plan.key || !!subscription}
+                      onClick={() => handleSubscribe(plan)}
+                      className={`text-xs font-semibold py-2 rounded-md text-center ${isCurrent ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-default' : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50'}`}
+                    >
+                      {isCurrent
+                        ? 'Current plan'
+                        : subscribing === plan.key
+                          ? 'Starting…'
                           : subscription
                             ? 'Use "Manage billing" to switch'
                             : 'Subscribe'}
-                  </button>
+                    </button>
+                  )}
                 </div>
               );
             })}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+            <form onSubmit={handleCheckCoupon} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Have a coupon code?</div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Check a code, then apply it to your current subscription.</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={couponCode}
+                  onChange={e => { setCouponCode(e.target.value); setCheckedCoupon(null); }}
+                  maxLength={64}
+                  placeholder="COUPON CODE"
+                  aria-label="Coupon code"
+                  className="flex-1 min-w-[10rem] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white uppercase"
+                />
+                <button type="submit" disabled={couponChecking || !couponCode.trim()} className="text-xs font-medium px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+                  {couponChecking ? 'Checking…' : 'Check code'}
+                </button>
+              </div>
+              {checkedCoupon && (
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                  <span>
+                    {checkedCoupon.code}: {checkedCoupon.discount_type === 'percent' ? `${checkedCoupon.discount_value}% off` : `${formatCents(checkedCoupon.discount_value, 'USD')} off`}
+                  </span>
+                  <button type="button" disabled={couponRedeeming} onClick={() => void handleRedeemCoupon()} className="font-medium underline disabled:opacity-50">
+                    {couponRedeeming ? 'Applying…' : 'Apply'}
+                  </button>
+                </div>
+              )}
+            </form>
+
+            {addons.length > 0 && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Add-ons</div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Not yet self-serve — contact sales to add one of these to your subscription.</p>
+                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+                  {addons.filter(a => a.is_active).map(addon => (
+                    <li key={addon.id} className="py-2 flex items-center justify-between gap-3 text-sm">
+                      <div>
+                        <div className="text-slate-800 dark:text-slate-100 font-medium">{addon.name}</div>
+                        {addon.description && <div className="text-xs text-slate-400">{addon.description}</div>}
+                      </div>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
+                        {formatCents(addon.price_cents, 'USD')}/{addon.unit_label ?? addon.billing_unit}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </>
       )}
