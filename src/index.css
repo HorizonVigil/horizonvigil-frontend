@@ -4,16 +4,24 @@
 
 @layer base {
   :root {
-    --brand-50: #eef4ff;
-    --brand-100: #dce7fd;
-    --brand-200: #c0d4fa;
-    --brand-300: #94b8f6;
-    --brand-400: #6294f0;
-    --brand-500: #3d73e8;
-    --brand-600: #2a58d4;
-    --brand-700: #2347b3;
-    --brand-800: #213d91;
-    --brand-900: #1f3773;
+    /* Kept in sync with tailwind.config.js's `brand` palette by hand --
+       this is the only place outside Tailwind utility classes (bg-brand-*,
+       text-brand-*, etc.) that needs the raw values, since :focus-visible
+       and ::selection below are plain CSS, not @apply. These previously
+       drifted out of sync with the Tailwind config's actual brand-600
+       (#1d63f5 vs. this file's old #2a58d4), so the keyboard focus ring
+       and text-selection color were a visibly different blue from every
+       button, badge, and link on the page. */
+    --brand-50: #eef6ff;
+    --brand-100: #d9ebff;
+    --brand-200: #bcdcff;
+    --brand-300: #8ec5ff;
+    --brand-400: #59a4ff;
+    --brand-500: #3382ff;
+    --brand-600: #1d63f5;
+    --brand-700: #164ce0;
+    --brand-800: #193fb5;
+    --brand-900: #1a398f;
     --brand-950: #162347;
 
     --surface-light: #f8fafc;
