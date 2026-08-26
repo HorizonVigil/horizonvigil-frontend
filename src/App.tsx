@@ -43,7 +43,7 @@ import { Subscription } from './pages/Subscription';
 import { BillingSuccess } from './pages/BillingSuccess';
 import { BillingCanceled } from './pages/BillingCanceled';
 import { MockCheckout } from './pages/MockCheckout';
-import { isBillingEnabled } from './lib/featureFlags';
+import { isBillingEnabled, isMockCheckoutEnabled } from './lib/featureFlags';
 import { MarketingHome } from './pages/marketing/Home';
 import { Pricing } from './pages/marketing/Pricing';
 import { PrivacyPolicy } from './pages/marketing/PrivacyPolicy';
@@ -68,6 +68,11 @@ function RedirectToAccountDetail() {
 /** Nav hides billing when VITE_BILLING_API_URL is unset (prod), but a direct URL visit would still hit the route -- this closes that gap rather than rendering a page whose API calls have nowhere to go. */
 function RequireBilling({ children }: { children: ReactNode }) {
   return isBillingEnabled() ? <>{children}</> : <Navigate to="/overview" replace />;
+}
+
+
+function RequireMockCheckout({ children }: { children: ReactNode }) {
+  return isMockCheckoutEnabled() ? <>{children}</> : <Navigate to="/subscription" replace />;
 }
 
 /** An already-signed-in user landing on /login, /signup, or /forgot-password (a stale bookmark, browser back button) goes straight into the app instead of being shown a form for a session they already have. */
@@ -151,7 +156,7 @@ export default function App() {
                           <Route path="/subscription" element={<RequireBilling><ProtectedRoute module="Subscription"><Subscription /></ProtectedRoute></RequireBilling>} />
                           <Route path="/billing/success" element={<RequireBilling><BillingSuccess /></RequireBilling>} />
                           <Route path="/billing/canceled" element={<RequireBilling><BillingCanceled /></RequireBilling>} />
-                          <Route path="/billing/mock-checkout" element={<RequireBilling><MockCheckout /></RequireBilling>} />
+                          <Route path="/billing/mock-checkout" element={<RequireBilling><RequireMockCheckout><MockCheckout /></RequireMockCheckout></RequireBilling>} />
                         </Route>
                       </Route>
                     </Route>

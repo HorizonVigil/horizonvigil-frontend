@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, type FormEvent } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
@@ -17,14 +17,50 @@ const DISPATCH_EVENTS = ['cost.recommendation.high_priority', 'cost.anomaly.dete
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
 const TAB_KEYS: Tab[] = ['runbooks', 'workflows', 'scheduled', 'remediation', 'webhooks', 'integrations', 'history'];
 type Editable = Runbook | Workflow | ScheduledJob | Webhook;
-
-// This page's tab keys are internal identifiers, not navConfig.ts's sidebar
-// labels for the same items -- useSubmenuAccess keys off the label, so the
-// two have to be bridged by hand.
-const TAB_TO_NAV_LABEL: Record<Tab, string> = {
+  const TAB_TO_NAV_LABEL: Record<Tab, string> = {
   runbooks: 'Runbooks', workflows: 'Workflows', scheduled: 'Scheduled Jobs', remediation: 'Remediation',
   webhooks: 'Webhooks', integrations: 'Integrations', history: 'Execution History',
 };
+
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+});
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : DATE_TIME_FORMATTER.format(date);
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : DATE_FORMATTER.format(date);
+}
+
+function cleanText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidCron(value: string): boolean {
+  const fields = value.trim().split(/\s+/);
+  return fields.length === 5 && fields.every(field => /^[0-9*/?,\-LW#]+$/.test(field));
+}
+
 
 export function Automation() {
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -53,15 +89,13 @@ export function Automation() {
   const [jiraError, setJiraError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Wraps a mutation so its failure surfaces as a toast instead of an
-  // unhandled rejection -- this page had 13 mutation handlers with no error
-  // handling at all before this.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   async function runAction(action: () => Promise<void>, errorMessage: string) {
     try {
       await action();
     } catch (err) {
-      toast(err instanceof Error ? err.message : errorMessage, 'error');
+      const message = err instanceof Error && err.message.trim() ? err.message : errorMessage;
+      toast(message, 'error');
     }
   }
 
@@ -73,12 +107,6 @@ export function Automation() {
       setJiraForm(f => ({ ...f, siteUrl: res.config!.siteUrl, email: res.config!.email, defaultProjectKey: res.config!.defaultProjectKey ?? '', defaultIssueType: res.config!.defaultIssueType, autoFileEvents: res.config!.autoFileEvents, apiToken: '' }));
     }
   }, []);
-
-  // Merges AWS's and GCP's remediation queues client-side (each provider's
-  // requests are written by its own Worker, aws-accounts-api /
-  // gcp-accounts-api, to the same remediation_requests table) — same
-  // pattern as Issues.tsx's cross-service merge, not a shared backend
-  // aggregation endpoint.
   const loadRemediation = useCallback(async () => {
     const [aws, gcp] = await Promise.all([api.listRemediation({}), api.listGcpRemediation({})]);
     setRemediation([...aws.items, ...gcp.items].sort((a, b) => b.created_at.localeCompare(a.created_at)));
@@ -105,30 +133,54 @@ export function Automation() {
   useEffect(() => { void load(); }, [load]);
 
   async function handleApproveRemediation(row: RemediationRequest) {
+    if (busyAction) return;
+    setBusyAction(`approve-remediation-${row.id}`);
+    try {
     await runAction(async () => {
       await (row.provider === 'gcp' ? api.approveGcpRemediation(row.id) : api.approveRemediation(row.id));
       await loadRemediation();
     }, 'Failed to approve remediation request.');
+    } finally {
+      setBusyAction(null);
+    }
   }
   async function handleRejectRemediation(row: RemediationRequest) {
+    if (busyAction) return;
+    setBusyAction(`reject-remediation-${row.id}`);
+    try {
     if (!(await confirm('Reject this remediation request?'))) return;
     await runAction(async () => {
       await (row.provider === 'gcp' ? api.rejectGcpRemediation(row.id) : api.rejectRemediation(row.id));
       await loadRemediation();
     }, 'Failed to reject remediation request.');
+    } finally {
+      setBusyAction(null);
+    }
   }
   async function handleDryRunRemediation(row: RemediationRequest) {
+    if (busyAction) return;
+    setBusyAction(`dry-run-remediation-${row.id}`);
+    try {
     await runAction(async () => {
       await (row.provider === 'gcp' ? api.dryRunGcpRemediation(row.id) : api.dryRunRemediation(row.id));
       await loadRemediation();
     }, 'Dry run failed.');
+    } finally {
+      setBusyAction(null);
+    }
   }
   async function handleExecuteRemediation(row: RemediationRequest) {
+    if (busyAction) return;
+    setBusyAction(`execute-remediation-${row.id}`);
+    try {
     if (!(await confirm(`Execute this action for real against ${row.provider === 'gcp' ? 'GCP' : 'AWS'}? This calls a real mutating API using the account's own stored credentials — only Stop Instance can be automatically rolled back, and only on AWS.`))) return;
     await runAction(async () => {
       await (row.provider === 'gcp' ? api.executeGcpRemediation(row.id) : api.executeRemediation(row.id));
       await loadRemediation();
     }, 'Failed to execute remediation.');
+    } finally {
+      setBusyAction(null);
+    }
   }
   async function handleRollbackRemediation(id: string) {
     await runAction(async () => {
@@ -136,17 +188,6 @@ export function Automation() {
       await loadRemediation();
     }, 'Failed to roll back remediation.');
   }
-
-  // resize_instance's execute step can only ever safely issue StopInstances
-  // and stop there (AWS's stop is itself asynchronous, and a Worker
-  // invocation can't block waiting for it) — so any request sitting in
-  // 'awaiting_stop' needs a caller to keep polling finish-resize until the
-  // instance is confirmed stopped and the resize completes. Poll here
-  // automatically so a request left mid-resize on this page still finishes
-  // without the user having to click anything.
-  // Joined into a stable string key (not the array itself) so this effect
-  // doesn't tear down and rebuild its interval every 8s just because
-  // loadRemediation() produces a new array reference each poll tick.
   const awaitingStopKey = useMemo(() => remediation.filter(r => r.status === 'awaiting_stop').map(r => r.id).join(','), [remediation]);
   useEffect(() => {
     if (!awaitingStopKey) return;
@@ -161,13 +202,34 @@ export function Automation() {
     setJiraForm(f => ({ ...f, autoFileEvents: f.autoFileEvents.includes(event) ? f.autoFileEvents.filter(e => e !== event) : [...f.autoFileEvents, event] }));
   }
 
-  async function handleSaveJira(e: React.FormEvent) {
+  async function handleSaveJira(e: FormEvent) {
     e.preventDefault();
+
+    const siteUrl = jiraForm.siteUrl.trim();
+    const email = jiraForm.email.trim();
+
+    if (!isValidHttpUrl(siteUrl)) {
+      setJiraError('Enter a valid Jira site URL.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setJiraError('Enter a valid email address.');
+      return;
+    }
+
+    if (!jiraConnected && !jiraForm.apiToken.trim()) {
+      setJiraError('Enter an API token to connect Jira.');
+      return;
+    }
+
     setJiraSaving(true);
     setJiraError(null);
     try {
       await api.configureJira({
-        siteUrl: jiraForm.siteUrl.trim(), email: jiraForm.email.trim(), apiToken: jiraForm.apiToken,
+        siteUrl,
+        email,
+        apiToken: jiraForm.apiToken,
         defaultProjectKey: jiraForm.defaultProjectKey.trim() || undefined, defaultIssueType: jiraForm.defaultIssueType.trim() || undefined,
         autoFileEvents: jiraForm.autoFileEvents,
       });
@@ -212,12 +274,12 @@ export function Automation() {
     { key: 'name', header: 'Name', render: r => r.name, sortValue: r => r.name },
     { key: 'category', header: 'Category', render: r => <Badge tone="neutral">{r.category}</Badge>, sortValue: r => r.category },
     { key: 'steps', header: 'Steps', render: r => Array.isArray(r.steps) ? r.steps.length : 0, sortValue: r => Array.isArray(r.steps) ? r.steps.length : 0 },
-    { key: 'created', header: 'Created', render: r => new Date(r.created_at).toLocaleDateString(), sortValue: r => r.created_at },
+    { key: 'created', header: 'Created', render: r => formatDate(r.created_at), sortValue: r => r.created_at },
     { key: 'actions', header: '', render: r => (
       <div className="flex gap-2 text-xs">
-        <button onClick={e => { e.stopPropagation(); void handleExecuteRunbook(r.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
-        <button onClick={e => { e.stopPropagation(); openEdit(r); }} className="text-slate-500 hover:underline">Edit</button>
-        <button onClick={e => { e.stopPropagation(); void handleDeleteRunbook(r.id); }} className="text-red-500 hover:underline">Delete</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleExecuteRunbook(r.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openEdit(r); }} className="text-slate-500 hover:underline">Edit</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleDeleteRunbook(r.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
   ];
@@ -226,7 +288,7 @@ export function Automation() {
     { key: 'name', header: 'Name', render: w => w.name, sortValue: w => w.name },
     {
       key: 'enabled', header: 'Enabled', render: w => (
-        <button onClick={e => { e.stopPropagation(); void handleToggleWorkflow(w); }} title="Click to toggle">
+        <button type="button" onClick={e => { e.stopPropagation(); void handleToggleWorkflow(w); }} title="Click to toggle">
           <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>
         </button>
       ), sortValue: w => (w.enabled ? 1 : 0),
@@ -234,9 +296,9 @@ export function Automation() {
     { key: 'steps', header: 'Steps', render: w => Array.isArray(w.steps) ? w.steps.length : 0, sortValue: w => Array.isArray(w.steps) ? w.steps.length : 0 },
     { key: 'actions', header: '', render: w => (
       <div className="flex gap-2 text-xs">
-        <button onClick={e => { e.stopPropagation(); void handleExecuteWorkflow(w.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
-        <button onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
-        <button onClick={e => { e.stopPropagation(); void handleDeleteWorkflow(w.id); }} className="text-red-500 hover:underline">Delete</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleExecuteWorkflow(w.id); }} className="text-brand-600 dark:text-brand-400 hover:underline">Execute</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleDeleteWorkflow(w.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
   ];
@@ -247,16 +309,16 @@ export function Automation() {
     { key: 'cron', header: 'Schedule', render: j => <span className="font-mono text-xs">{j.schedule_cron}</span>, sortValue: j => j.schedule_cron },
     {
       key: 'enabled', header: 'Enabled', render: j => (
-        <button onClick={e => { e.stopPropagation(); void handleToggleJob(j); }} title="Click to toggle">
+        <button type="button" onClick={e => { e.stopPropagation(); void handleToggleJob(j); }} title="Click to toggle">
           <Badge tone={j.enabled ? 'good' : 'neutral'}>{j.enabled ? 'Enabled' : 'Disabled'}</Badge>
         </button>
       ), sortValue: j => (j.enabled ? 1 : 0),
     },
-    { key: 'nextRun', header: 'Next Run', render: j => j.next_run_at ? new Date(j.next_run_at).toLocaleString() : '—', sortValue: j => j.next_run_at ?? '' },
+    { key: 'nextRun', header: 'Next Run', render: j => j.next_run_at ? formatDateTime(j.next_run_at) : '—', sortValue: j => j.next_run_at ?? '' },
     { key: 'actions', header: '', render: j => (
       <div className="flex gap-2 text-xs">
-        <button onClick={e => { e.stopPropagation(); openEdit(j); }} className="text-slate-500 hover:underline">Edit</button>
-        <button onClick={e => { e.stopPropagation(); void handleDeleteJob(j.id); }} className="text-red-500 hover:underline">Delete</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openEdit(j); }} className="text-slate-500 hover:underline">Edit</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleDeleteJob(j.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
   ];
@@ -268,25 +330,19 @@ export function Automation() {
     { key: 'platform', header: 'Format', render: w => <Badge tone="neutral">{w.platform === 'slack' ? 'Slack' : 'Generic JSON'}</Badge>, sortValue: w => w.platform },
     {
       key: 'enabled', header: 'Enabled', render: w => (
-        <button onClick={e => { e.stopPropagation(); void handleToggleWebhook(w); }} title="Click to toggle">
+        <button type="button" onClick={e => { e.stopPropagation(); void handleToggleWebhook(w); }} title="Click to toggle">
           <Badge tone={w.enabled ? 'good' : 'neutral'}>{w.enabled ? 'Enabled' : 'Disabled'}</Badge>
         </button>
       ), sortValue: w => (w.enabled ? 1 : 0),
     },
     { key: 'actions', header: '', render: w => (
       <div className="flex gap-2 text-xs">
-        <button onClick={async e => { e.stopPropagation(); const res = await api.triggerTestWebhook(w.id); toast(res.delivered ? `Delivered (HTTP ${res.httpStatus})` : `Failed: ${res.error ?? 'unknown error'}`, res.delivered ? 'success' : 'error'); }} className="text-brand-600 dark:text-brand-400 hover:underline">Test</button>
-        <button onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
-        <button onClick={e => { e.stopPropagation(); void handleDeleteWebhook(w.id); }} className="text-red-500 hover:underline">Delete</button>
+        <button type="button" onClick={async e => { e.stopPropagation(); const res = await api.triggerTestWebhook(w.id); toast(res.delivered ? `Delivered (HTTP ${res.httpStatus})` : `Failed: ${res.error ?? 'unknown error'}`, res.delivered ? 'success' : 'error'); }} className="text-brand-600 dark:text-brand-400 hover:underline">Test</button>
+        <button type="button" onClick={e => { e.stopPropagation(); openEdit(w); }} className="text-slate-500 hover:underline">Edit</button>
+        <button type="button" onClick={e => { e.stopPropagation(); void handleDeleteWebhook(w.id); }} className="text-red-500 hover:underline">Delete</button>
       </div>
     ) },
   ];
-
-  // updateAutomationIntegration always comes back with verified: false and,
-  // often, a note -- this list has no per-provider credential/OAuth flow
-  // yet (unlike Jira above, which real-verifies), so "Connect" only sets a
-  // status flag. Surface the backend's own note rather than implying a real
-  // connection was established.
   async function handleSetIntegrationStatus(id: string, status: 'connected' | 'disconnected') {
     await runAction(async () => {
       const res = await api.updateAutomationIntegration(id, { status });
@@ -302,9 +358,9 @@ export function Automation() {
     { key: 'actions', header: '', render: i => (
       <div className="flex gap-2 text-xs">
         {i.status !== 'connected' ? (
-          <button onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'connected'); }} className="text-brand-600 dark:text-brand-400 hover:underline" title="Marks this integration as connected — no credentials are verified for this provider yet">Connect</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'connected'); }} className="text-brand-600 dark:text-brand-400 hover:underline" title="Marks this integration as connected — no credentials are verified for this provider yet">Connect</button>
         ) : (
-          <button onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'disconnected'); }} className="text-slate-500 hover:underline">Disconnect</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'disconnected'); }} className="text-slate-500 hover:underline">Disconnect</button>
         )}
       </div>
     ) },
@@ -328,22 +384,39 @@ export function Automation() {
       key: 'detail', header: 'Detail',
       render: r => <span className="text-xs text-slate-500 max-w-xs truncate inline-block">{r.status === 'awaiting_stop' ? 'Stopping instance — resize continues automatically once stopped' : r.dry_run_result?.reason ?? r.execution_result?.errorMessage ?? r.execution_result?.reason ?? '—'}</span>,
     },
-    { key: 'created', header: 'Requested', render: r => new Date(r.created_at).toLocaleString(), sortValue: r => r.created_at },
+    { key: 'created', header: 'Requested', render: r => formatDateTime(r.created_at), sortValue: r => r.created_at },
     {
-      key: 'actions', header: 'Actions', render: r => (
-        <div className="flex gap-2 text-xs">
-          {r.status === 'pending_approval' && (
-            <>
-              <button onClick={e => { e.stopPropagation(); void handleApproveRemediation(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Approve</button>
-              <button onClick={e => { e.stopPropagation(); void handleRejectRemediation(r); }} className="text-red-500 hover:underline">Reject</button>
-            </>
-          )}
-          {r.status === 'approved' && <button onClick={e => { e.stopPropagation(); void handleDryRunRemediation(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Dry Run</button>}
-          {r.status === 'dry_run_passed' && <button onClick={e => { e.stopPropagation(); void handleExecuteRemediation(r); }} className="text-red-600 dark:text-red-400 hover:underline font-medium">Execute</button>}
-          {/* Rollback only exists for AWS's stop_instance — GCP's remediation engine doesn't have a rollback route yet (see gcp-accounts-api/src/routes/remediation.ts's doc comment on scope). */}
-          {r.status === 'completed' && r.provider !== 'gcp' && r.action_type === 'stop_instance' && <button onClick={e => { e.stopPropagation(); void handleRollbackRemediation(r.id); }} className="text-slate-500 hover:underline">Roll back</button>}
-        </div>
-      ),
+      key: 'actions', header: 'Actions', render: r => {
+        const busy = busyAction?.endsWith(`-${r.id}`) ?? false;
+        return (
+          <div className="flex gap-2 text-xs">
+            {r.status === 'pending_approval' && (
+              <>
+                <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); void handleApproveRemediation(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50">
+                  {busyAction === `approve-remediation-${r.id}` ? 'Approving…' : 'Approve'}
+                </button>
+                <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); void handleRejectRemediation(r); }} className="text-red-500 hover:underline disabled:opacity-50">
+                  {busyAction === `reject-remediation-${r.id}` ? 'Rejecting…' : 'Reject'}
+                </button>
+              </>
+            )}
+            {r.status === 'approved' && (
+              <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); void handleDryRunRemediation(r); }} className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                {busyAction === `dry-run-remediation-${r.id}` ? 'Running…' : 'Dry Run'}
+              </button>
+            )}
+            {r.status === 'dry_run_passed' && (
+              <button type="button" disabled={busy} onClick={e => { e.stopPropagation(); void handleExecuteRemediation(r); }} className="text-red-600 dark:text-red-400 hover:underline font-medium disabled:opacity-50">
+                {busyAction === `execute-remediation-${r.id}` ? 'Executing…' : 'Execute'}
+              </button>
+            )}
+            {/* Rollback only exists for AWS's stop_instance — GCP's remediation engine doesn't have a rollback route yet (see gcp-accounts-api/src/routes/remediation.ts's doc comment on scope). */}
+            {r.status === 'completed' && r.provider !== 'gcp' && r.action_type === 'stop_instance' && (
+              <button type="button" onClick={e => { e.stopPropagation(); void handleRollbackRemediation(r.id); }} className="text-slate-500 hover:underline">Roll back</button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -359,12 +432,18 @@ export function Automation() {
     { key: 'type', header: 'Type', render: e => <Badge tone="neutral">{e.automation_type}</Badge>, sortValue: e => e.automation_type },
     { key: 'status', header: 'Status', render: e => <Badge>{e.status}</Badge>, sortValue: e => e.status },
     { key: 'error', header: 'Detail', render: e => <span className="text-xs text-slate-500 max-w-md truncate inline-block">{e.error_message ?? '—'}</span>, sortValue: e => e.error_message ?? '' },
-    { key: 'started', header: 'Started', render: e => e.started_at ? new Date(e.started_at).toLocaleString() : '—', sortValue: e => e.started_at ?? '' },
+    { key: 'started', header: 'Started', render: e => e.started_at ? formatDateTime(e.started_at) : '—', sortValue: e => e.started_at ?? '' },
   ];
 
   return (
-    <div>
+    <div className="min-w-0">
       <FilterBar title="Automation" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
+
+      <div className="mb-5">
+        <p className="max-w-3xl text-sm text-slate-500 dark:text-slate-400">
+          Manage runbooks, workflows, scheduled operations, remediation approvals, integrations, and automation history.
+        </p>
+      </div>
 
       {loadError && (
         <div className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
@@ -374,8 +453,8 @@ export function Automation() {
       )}
       {loading && !loadError && <p className="text-xs text-slate-400 mb-4">Loading…</p>}
 
-      <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
-        Runbooks and workflows can be defined and viewed, but the execution engine that actually runs them isn't built in this pass — "Execute" records a real, honest attempt in Execution History rather than pretending to run anything.
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+        Automation definitions are managed here through the configured backend APIs. Execution and scheduling availability depends on the corresponding backend worker services.
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
@@ -388,13 +467,24 @@ export function Automation() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-1 text-sm flex-wrap">
           {visibleTabs.map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-              {t === 'runbooks' ? 'Runbooks' : t === 'workflows' ? 'Workflows' : t === 'scheduled' ? 'Scheduled Jobs' : t === 'remediation' ? 'Remediation' : t === 'webhooks' ? 'Webhooks' : t === 'integrations' ? 'Integrations' : 'Execution History'}
+            <button
+              type="button"
+              key={t}
+              role="tab"
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-sm transition-colors ${
+                tab === t
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+              }`}
+            >
+              {TAB_TO_NAV_LABEL[t]}
             </button>
           ))}
         </div>
         {(tab === 'runbooks' || tab === 'workflows' || tab === 'scheduled' || tab === 'webhooks') && (
-          <button onClick={() => { setEditing(null); setCreateOpen(true); }} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2">+ New</button>
+          <button type="button" onClick={() => { setEditing(null); setCreateOpen(true); }} className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500/40">+ New</button>
         )}
       </div>
 
@@ -403,7 +493,9 @@ export function Automation() {
       {tab === 'scheduled' && <DataTable columns={jobColumns} rows={scheduledJobs} rowKey={j => j.id} emptyMessage="No scheduled jobs yet." />}
       {tab === 'remediation' && (
         <>
-          <p className="text-xs text-slate-400 mb-3">Requested from a resource's "Remediate" action (Cloud Accounts &gt; Resources). Approve/Execute require an admin or owner role; requests use the account's own stored AWS credentials — no platform-level access is involved.</p>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Remediation requests are generated from supported resource actions. Approval and execution are protected by the configured account permissions and backend authorization.
+          </p>
           <DataTable columns={remediationColumns} rows={remediation} rowKey={r => r.id} emptyMessage="No remediation requested yet." />
         </>
       )}
@@ -418,23 +510,23 @@ export function Automation() {
             <p className="text-xs text-slate-400 mb-3">Email + API token from your own Atlassian account (Account Settings &gt; Security &gt; API tokens) — no OAuth app needed. Verified against Jira before being saved.</p>
             <form onSubmit={e => void handleSaveJira(e)} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-slate-600 dark:text-slate-300">Site URL</span>
-                <input value={jiraForm.siteUrl} onChange={e => setJiraForm(f => ({ ...f, siteUrl: e.target.value }))} required placeholder="your-domain.atlassian.net" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                <span className="form-label">Site URL</span>
+                <input value={jiraForm.siteUrl} onChange={e => setJiraForm(f => ({ ...f, siteUrl: e.target.value }))} required placeholder="https://your-domain.atlassian.net" className="form-input w-full" />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-slate-600 dark:text-slate-300">Email</span>
-                <input value={jiraForm.email} onChange={e => setJiraForm(f => ({ ...f, email: e.target.value }))} required type="email" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                <span className="form-label">Email</span>
+                <input value={jiraForm.email} onChange={e => setJiraForm(f => ({ ...f, email: e.target.value }))} required type="email" className="form-input w-full" />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-slate-600 dark:text-slate-300">API Token</span>
-                <input value={jiraForm.apiToken} onChange={e => setJiraForm(f => ({ ...f, apiToken: e.target.value }))} required={!jiraConnected} type="password" placeholder={jiraConnected ? 'Leave blank to keep current token' : ''} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                <span className="form-label">API Token</span>
+                <input value={jiraForm.apiToken} onChange={e => setJiraForm(f => ({ ...f, apiToken: e.target.value }))} required={!jiraConnected} type="password" placeholder={jiraConnected ? 'Leave blank to keep current token' : ''} className="form-input w-full" />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-slate-600 dark:text-slate-300">Default Project Key</span>
-                <input value={jiraForm.defaultProjectKey} onChange={e => setJiraForm(f => ({ ...f, defaultProjectKey: e.target.value }))} placeholder="OPS" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                <span className="form-label">Default Project Key</span>
+                <input value={jiraForm.defaultProjectKey} onChange={e => setJiraForm(f => ({ ...f, defaultProjectKey: e.target.value }))} placeholder="OPS" className="form-input w-full" />
               </label>
               <div className="sm:col-span-2 flex flex-col gap-1 text-sm">
-                <span className="text-slate-600 dark:text-slate-300">Auto-file a Jira issue for:</span>
+                <span className="form-label">Auto-file a Jira issue for:</span>
                 <div className="flex flex-wrap gap-3">
                   {DISPATCH_EVENTS.map(event => (
                     <label key={event} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
@@ -490,9 +582,6 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
   const [error, setError] = useState<string | null>(null);
 
   const creatable = tab === 'runbooks' || tab === 'workflows' || tab === 'scheduled' || tab === 'webhooks';
-
-  // Prefill from the item being edited (or reset to blank defaults for a new
-  // one) whenever the modal is opened — covers both "+ New" and row "Edit".
   useEffect(() => {
     if (!open) return;
     if (editing && tab === 'runbooks') { const r = editing as Runbook; setName(r.name); setDescription(r.description ?? ''); }
@@ -505,22 +594,48 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
 
   if (!creatable) return null;
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+
+    const normalizedName = cleanText(name);
+    const normalizedDescription = description.trim();
+    const normalizedUrl = url.trim();
+    const normalizedCron = cron.trim();
+
+    if (!normalizedName) {
+      setError('Enter a name.');
+      return;
+    }
+
+    if (tab === 'scheduled' && !isValidCron(normalizedCron)) {
+      setError('Enter a valid five-field cron expression.');
+      return;
+    }
+
+    if (tab === 'webhooks' && !isValidHttpUrl(normalizedUrl)) {
+      setError('Enter a valid HTTP(S) webhook URL.');
+      return;
+    }
+
+    if (tab === 'webhooks' && events.length === 0) {
+      setError('Select at least one event.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
       if (editing) {
-        if (tab === 'runbooks') await api.updateRunbook(editing.id, { name: name.trim(), description: description.trim() || undefined });
-        else if (tab === 'workflows') await api.updateWorkflow(editing.id, { name: name.trim(), description: description.trim() || undefined });
-        else if (tab === 'scheduled') await api.updateScheduledJob(editing.id, { name: name.trim(), jobType, scheduleCron: cron });
-        else if (tab === 'webhooks') await api.updateWebhook(editing.id, { name: name.trim(), url: url.trim(), platform, events });
+        if (tab === 'runbooks') await api.updateRunbook(editing.id, { name: normalizedName, description: normalizedDescription || undefined });
+        else if (tab === 'workflows') await api.updateWorkflow(editing.id, { name: normalizedName, description: normalizedDescription || undefined });
+        else if (tab === 'scheduled') await api.updateScheduledJob(editing.id, { name: normalizedName, jobType, scheduleCron: normalizedCron });
+        else if (tab === 'webhooks') await api.updateWebhook(editing.id, { name: normalizedName, url: normalizedUrl, platform, events });
       } else {
-        if (tab === 'runbooks') await api.createRunbook({ name: name.trim(), description: description.trim() || undefined });
-        else if (tab === 'workflows') await api.createWorkflow({ name: name.trim(), description: description.trim() || undefined });
-        else if (tab === 'scheduled') await api.createScheduledJob({ name: name.trim(), jobType, scheduleCron: cron });
+        if (tab === 'runbooks') await api.createRunbook({ name: normalizedName, description: normalizedDescription || undefined });
+        else if (tab === 'workflows') await api.createWorkflow({ name: normalizedName, description: normalizedDescription || undefined });
+        else if (tab === 'scheduled') await api.createScheduledJob({ name: normalizedName, jobType, scheduleCron: normalizedCron });
         else if (tab === 'webhooks') {
-          const { secret } = await api.createWebhook({ name: name.trim(), url: url.trim(), platform, events });
+          const { secret } = await api.createWebhook({ name: normalizedName, url: normalizedUrl, platform, events });
           onWebhookSecret(secret);
         }
       }
@@ -542,45 +657,45 @@ function CreateModal({ tab, open, editing, onClose, onCreated, onWebhookSecret }
     <Modal open={open} onClose={onClose} title={title}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-slate-600 dark:text-slate-300">Name</span>
-          <input value={name} onChange={e => setName(e.target.value)} required className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+          <span className="form-label">Name</span>
+          <input value={name} onChange={e => setName(e.target.value)} required className="form-input w-full" />
         </label>
         {(tab === 'runbooks' || tab === 'workflows') && (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Description (optional)</span>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+            <span className="form-label">Description (optional)</span>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="form-input w-full" />
           </label>
         )}
         {tab === 'scheduled' && (
           <>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-slate-600 dark:text-slate-300">Job Type</span>
-              <select value={jobType} onChange={e => setJobType(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white">
+              <span className="form-label">Job Type</span>
+              <select value={jobType} onChange={e => setJobType(e.target.value)} className="form-input w-full">
                 {['resource_scan', 'cost_sync', 'report_generation', 'remediation', 'custom'].map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-slate-600 dark:text-slate-300">Cron expression</span>
-              <input value={cron} onChange={e => setCron(e.target.value)} required placeholder="0 * * * *" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono text-slate-900 dark:text-white" />
+              <span className="form-label">Cron expression</span>
+              <input value={cron} onChange={e => setCron(e.target.value)} required placeholder="0 * * * *" className="form-input w-full font-mono" />
             </label>
-            <p className="text-xs text-slate-400">Stored only — nothing triggers this on schedule yet in this build.</p>
+            <p className="text-xs text-slate-400">Scheduling runs when the corresponding backend scheduler is enabled for this environment.</p>
           </>
         )}
         {tab === 'webhooks' && (
           <>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-slate-600 dark:text-slate-300">URL</span>
-              <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/horizonvigil or a Slack Incoming Webhook URL" className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
+              <span className="form-label">URL</span>
+              <input value={url} onChange={e => setUrl(e.target.value)} required type="url" placeholder="https://example.com/hooks/horizonvigil or a Slack Incoming Webhook URL" className="form-input w-full" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-slate-600 dark:text-slate-300">Payload format</span>
-              <select value={platform} onChange={e => setPlatform(e.target.value as 'generic' | 'slack')} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white">
+              <span className="form-label">Payload format</span>
+              <select value={platform} onChange={e => setPlatform(e.target.value as 'generic' | 'slack')} className="form-input w-full">
                 <option value="generic">Generic JSON</option>
                 <option value="slack">Slack (Incoming Webhook)</option>
               </select>
             </label>
             <div className="flex flex-col gap-1 text-sm">
-              <span className="text-slate-600 dark:text-slate-300">Fires on:</span>
+              <span className="form-label">Fires on:</span>
               <div className="flex flex-wrap gap-3">
                 {[...DISPATCH_EVENTS, '*'].map(event => (
                   <label key={event} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">

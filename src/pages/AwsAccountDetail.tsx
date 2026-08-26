@@ -58,10 +58,15 @@ type AccountCredentials = {
   rotationDueInDays: number | null; roleArn: string | null; externalId: string | null;
 };
 
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
 function formatDate(value: string | null | undefined, fallback = 'Never'): string {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Invalid date' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? fallback : DATE_TIME_FORMATTER.format(date);
 }
 
 export function AwsAccountDetail() {
@@ -76,8 +81,6 @@ export function AwsAccountDetail() {
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [costSnapshots, setCostSnapshots] = useState<CostSnapshot[]>([]);
   const [credentials, setCredentials] = useState<AccountCredentials | null>(null);
-
-  // Tab-specific data
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
   const [curSyncing, setCurSyncing] = useState(false);
@@ -92,8 +95,8 @@ export function AwsAccountDetail() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [favorite, setFavorite] = useState<Favorite | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-
-  // Request generations prevent a slower response for a previous account/tab
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [validationBusy, setValidationBusy] = useState(false);
   // from overwriting state after navigation or a retry.
   const loadRequestRef = useRef(0);
   const tabRequestRef = useRef(0);
@@ -129,9 +132,10 @@ export function AwsAccountDetail() {
 
   async function toggleFavorite() {
     const accountId = id?.trim();
-    if (!accountId || !connection) return;
+    if (!accountId || !connection || favoriteBusy) return;
 
     const name = connection.connection_name ?? connection.aws_account_id;
+    setFavoriteBusy(true);
 
     try {
       if (favorite) {
@@ -145,13 +149,15 @@ export function AwsAccountDetail() {
           path: `/cloud-accounts/${accountId}`,
         });
         setFavorite(created);
-        toast(`Added "${name}" to Favorites — see it on Overview`, 'success');
+        toast(`Added "${name}" to Favorites`, 'success');
       }
     } catch (err) {
       toast(
         err instanceof ApiError ? err.message : 'Failed to update Favorites.',
         'error',
       );
+    } finally {
+      setFavoriteBusy(false);
     }
   }
 
@@ -212,9 +218,7 @@ export function AwsAccountDetail() {
     setActivity([]);
     void load();
   }, [load, retryToken]);
-  // Test-connection state keeps running in the background (see syncContext.tsx)
   // even if you navigate away mid-request — this refreshes once it finishes,
-  // whether that happens while you're sitting on this page or you come back later.
   useSyncCompletion(id ? [id] : [], load);
 
   const loadPermissions = useCallback(async () => {
@@ -228,9 +232,6 @@ export function AwsAccountDetail() {
     setPermissionRun(res.run);
     setPermissionChecks(res.checks);
   }, [id]);
-
-
-  // Each secondary tab's data is only fetched once you actually open it.
   useEffect(() => {
     const accountId = id?.trim();
     if (!accountId) return;
@@ -346,6 +347,8 @@ export function AwsAccountDetail() {
       `Request "${ACTION_LABEL[actionType]}" for ${r.resource_name ?? r.resource_id}? This goes through an approval + dry-run before anything actually runs against AWS — nothing happens immediately.`,
     );
     if (!ok) return;
+    if (remediating) return;
+
     setRemediating(r.id);
     try {
       await api.requestRemediation({ connectionId: id, resourceId: r.id, actionType });
@@ -356,12 +359,8 @@ export function AwsAccountDetail() {
       setRemediating(null);
     }
   }
-
-  // Must run unconditionally on every render, before the `!connection` early
   // return below -- calling this only after that guard meant its internal
-  // useMemo/useState ran zero times while loading and four times once
   // `connection` populated, violating React's Rules of Hooks and crashing
-  // the whole render tree (a blank/black page on every account detail
   // visit, prod included).
   const resourceFilters = useResourceFilters(resources);
   const filteredResources = resourceFilters.filtered;
@@ -416,15 +415,15 @@ export function AwsAccountDetail() {
   const topServices = Object.entries(costByService).sort(([, a], [, b]) => b - a).slice(0, 5);
 
   return (
-    <div>
+    <div className="min-w-0">
       <FilterBar title={connection.connection_name ?? connection.aws_account_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge>{connection.status}</Badge>
         <Badge tone="neutral">{connection.environment}</Badge>
-        <span className="text-xs text-slate-400 font-mono">{connection.aws_account_id}</span>
+        <span className="max-w-full truncate text-xs font-mono text-slate-400" title={connection.aws_account_id}>{connection.aws_account_id}</span>
         <div className="flex-1" />
-        <button type="button" onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-amber-400 hover:text-amber-500 px-1">
+        <button type="button" disabled={favoriteBusy} onClick={() => void toggleFavorite()} aria-label={favorite ? 'Remove from Favorites' : 'Add to Favorites'} title={favorite ? 'Remove from Favorites' : 'Add to Favorites'} className="rounded-md px-1 text-amber-400 transition hover:text-amber-500 disabled:opacity-50">
           <Icon name={favorite ? 'star-filled' : 'star'} size={18} />
         </button>
         <button type="button" onClick={() => setEditOpen(true)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
@@ -469,7 +468,18 @@ export function AwsAccountDetail() {
 
       <div className="flex gap-1 text-sm flex-wrap mb-5">
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+          <button
+            type="button"
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1.5 whitespace-nowrap text-sm transition-colors ${
+              tab === t
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+            }`}
+          >
             {t}
           </button>
         ))}
@@ -481,7 +491,7 @@ export function AwsAccountDetail() {
             <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
             <StatCard label="IAM Users / Roles / Policies" value={`${iamCounts.users} / ${iamCounts.roles} / ${iamCounts.policies}`} />
             <StatCard label="Last Sync" value={connection.last_sync_at ? formatDate(connection.last_sync_at, 'Never').split(',')[0] : 'Never'} />
-            <StatCard label="Cost (Explorer, loaded range)" value={money(totalCost)} />
+            <StatCard label="Cost Explorer total" value={money(totalCost)} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -528,7 +538,7 @@ export function AwsAccountDetail() {
                   <p className="text-xs text-slate-400">Service/region-level cost from Cost Explorer, not per-resource.</p>
                 </div>
               ) : (
-                <p className="text-xs text-slate-400">No cost data yet for this account.</p>
+                <p className="text-xs text-slate-400">No cost data is available for this account yet.</p>
               )}
             </div>
           </div>
@@ -539,8 +549,8 @@ export function AwsAccountDetail() {
         <div className="flex flex-col gap-3">
           <ResourceFilterBar filters={resourceFilters} totalCount={resources.length} />
 
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+            <table className="min-w-[760px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                   <th className="px-3 py-2">Name</th>
@@ -565,7 +575,7 @@ export function AwsAccountDetail() {
                       <td className="px-3 py-2 cursor-pointer" onClick={() => navigate(`/resources/all?resource=${r.id}`)}><Badge>{r.status}</Badge></td>
                       <td className="px-3 py-2 text-xs">
                         {action && (
-                          <button type="button" onClick={e => { e.stopPropagation(); void requestRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against AWS — nothing happens until an admin approves and executes it." className="text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50">
+                          <button type="button" onClick={e => { e.stopPropagation(); void requestRemediation(r, action); }} disabled={remediating === r.id} title="Requests approval to run this action for real against AWS — nothing happens until an admin approves and executes it." className="rounded px-1 text-brand-600 transition hover:underline disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400">
                             {remediating === r.id ? 'Requesting…' : ACTION_LABEL[action]}
                           </button>
                         )}
@@ -574,13 +584,13 @@ export function AwsAccountDetail() {
                   );
                 })}
                 {filteredResources.length === 0 && (
-                  <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">{resources.length === 0 ? 'No resources discovered for this account yet.' : 'No resources match these filters.'}</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-400">{resources.length === 0 ? 'No resources have been discovered for this account yet.' : 'No resources match these filters.'}</td></tr>
                 )}
               </tbody>
             </table>
             {resources.length >= 200 && (
               <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
-                <button onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
+                <button type="button" onClick={() => navigate(`/resources/all?account=${connection.id}`)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">View all resources for this account →</button>
               </div>
             )}
           </div>
@@ -591,10 +601,10 @@ export function AwsAccountDetail() {
         <div className="flex flex-col gap-3">
           <div className="flex justify-end items-center gap-2">
             {curProgress && <span className="text-xs text-slate-400">{curProgress}</span>}
-            <button onClick={() => void syncCur()} disabled={curSyncing} title="Discovers your AWS Cost & Usage Report (with resource IDs) and ingests it — real per-resource cost, powers Cost Allocation/Chargeback/Showback on the Cost Management page. Requires a CUR report set up in AWS Billing Console with 'Include resource IDs' checked." className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+            <button type="button" onClick={() => void syncCur()} disabled={curSyncing} title="Discovers your AWS Cost & Usage Report (with resource IDs) and ingests it — real per-resource cost, powers Cost Allocation/Chargeback/Showback on the Cost Management page. Requires a CUR report set up in AWS Billing Console with 'Include resource IDs' checked." className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
               {curSyncing ? 'Syncing…' : 'Sync Cost & Usage Report'}
             </button>
-            <button onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from AWS Cost Explorer (ce:GetCostAndUsage) using this account's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
+            <button type="button" onClick={() => void syncCost()} disabled={syncingCost} title="Pulls real month-to-date cost from AWS Cost Explorer (ce:GetCostAndUsage) using this account's own credentials" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5">
               {syncingCost ? 'Syncing…' : 'Sync Cost from AWS'}
             </button>
           </div>
@@ -641,7 +651,7 @@ export function AwsAccountDetail() {
               <div key={check.service} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 flex items-center gap-2 text-sm" title={check.detail}>
                 <span className={`h-2 w-2 rounded-full ${check.status === 'granted' ? 'bg-emerald-500' : check.status === 'not_applicable' ? 'bg-slate-400' : check.status === 'denied' ? 'bg-amber-500' : 'bg-red-500'}`} />
                 <span className="text-slate-700 dark:text-slate-200">{check.label}</span>
-                {!check.verified && <span className="text-slate-400 text-xs" title="This check's exact AWS API shape hasn't been confirmed against a live account yet">unverified</span>}
+                {!check.verified && <span className="text-slate-400 text-xs" title="This permission check is reported by the account validation service">unverified</span>}
               </div>
             ))}
             {permissionChecks.length === 0 && <p className="text-sm text-slate-400">No permission checks recorded yet.</p>}
@@ -650,8 +660,8 @@ export function AwsAccountDetail() {
       )}
 
       {tab === 'Regions' && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <table className="min-w-[640px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <th className="px-3 py-2">Region</th>
@@ -669,7 +679,7 @@ export function AwsAccountDetail() {
                   <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{r.lastScan ? formatDate(r.lastScan, 'Never') : 'Never'}</td>
                 </tr>
               ))}
-              {regions.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400">No regions enabled for this account.</td></tr>}
+              {regions.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400">No enabled regions are reported for this account.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -696,8 +706,8 @@ export function AwsAccountDetail() {
               </ul>
             </div>
           )}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <table className="min-w-[900px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <th className="px-3 py-2">Type</th>

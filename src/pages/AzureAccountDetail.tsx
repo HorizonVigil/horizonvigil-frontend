@@ -19,25 +19,15 @@ import { useResourceFilters } from '../lib/useResourceFilters';
 const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Sync History', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
-/**
- * Six tabs — Recommendations is still the one AwsAccountDetail.tsx tab with
- * no Azure equivalent (no recommendations engine exists for this provider
- * yet). Sync History and Activity are now real: both reuse
- * connection_validation_runs/audit_log, the same tables AWS already wrote
- * to, just via routes discovery.ts and permissions.ts didn't call yet.
- * Permissions is real (routes/permissions.ts — ARM Get Subscription
- * identity check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role
- * Assignments read probes), mirroring GcpProjectDetail.tsx's tab exactly
- * except for AzureIdentitySummary's subscription id+name shape. No
- * remediation actions either: connector-azure has no remediation routes
- * built. The Cost tab is real — Azure Cost Management gives per-service
- * granularity directly, no CUR-equivalent ingestion step needed the way
- * AWS's does.
- */
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
 function formatDate(value: string | null | undefined, fallback = 'Never'): string {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Invalid date' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? fallback : DATE_TIME_FORMATTER.format(date);
 }
 
 export function AzureAccountDetail() {
@@ -60,8 +50,6 @@ export function AzureAccountDetail() {
   const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
 
-  // Request generations prevent stale responses from an older account/tab
-  // from overwriting the current UI after navigation or retry.
   const loadRequestRef = useRef(0);
   const tabRequestRef = useRef(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -253,9 +241,6 @@ export function AzureAccountDetail() {
       toast(message, 'success');
       setAccountCost(await api.getAzureAccountCost(id));
     } catch (err) {
-      // A toast alone auto-dismisses and is easy to miss -- this also
-      // pins a persistent banner in the Cost tab, matching the Overview
-      // tab's sync-error banner pattern below.
       const message = err instanceof ApiError ? err.message : 'Cost sync failed';
       setCostSyncError(message);
       toast(message, 'error');
@@ -301,13 +286,18 @@ export function AzureAccountDetail() {
   const syncing = sync?.status === 'running';
 
   return (
-    <div>
+    <div className="min-w-0">
       <FilterBar title={connection.connection_name ?? connection.azure_subscription_id} breadcrumb={<Link to="/cloud-accounts" className="text-xs text-slate-400 hover:underline">← Cloud Accounts</Link>} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge>{connection.status}</Badge>
         <Badge tone="neutral">{connection.environment}</Badge>
-        <span className="text-xs text-slate-400 font-mono">{connection.azure_subscription_id}</span>
+        <span
+          className="max-w-full truncate text-xs font-mono text-slate-400"
+          title={connection.azure_subscription_id}
+        >
+          {connection.azure_subscription_id}
+        </span>
         <div className="flex-1" />
         <button type="button" onClick={() => setEditOpen(true)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
           Edit
@@ -351,10 +341,14 @@ export function AzureAccountDetail() {
           <button
             type="button"
             key={t}
-            onClick={() => setTab(t)}
             role="tab"
             aria-selected={tab === t}
-            className={`px-3 py-1.5 rounded-md whitespace-nowrap ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+            onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1.5 whitespace-nowrap text-sm transition-colors ${
+              tab === t
+                ? 'bg-brand-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+            }`}
           >
             {t}
           </button>
@@ -521,8 +515,8 @@ export function AzureAccountDetail() {
               </ul>
             </div>
           )}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <table className="min-w-[900px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
                 <th className="px-3 py-2">Type</th>

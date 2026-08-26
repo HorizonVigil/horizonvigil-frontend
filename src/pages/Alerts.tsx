@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useState, useCallback, useMemo, type FormEvent } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -25,11 +25,44 @@ const CHANNEL_TARGET_LABEL: Record<string, string> = {
   email: 'Email address', slack: 'Slack webhook URL', webhook: 'Webhook URL', sms: 'Phone number', pagerduty: 'PagerDuty integration key',
 };
 
-// One tab per navConfig submenu item under Alerts — Active Alerts and Alert
-// History used to be a single "Alerts" tab with a buried view toggle, which
-// meant the "Alert History" submenu item landed on the same default (Active)
-// view as "Active Alerts" with no visible differentiation. Splitting them
-// into their own top-level tabs makes each submenu item's promise real.
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+});
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : DATE_TIME_FORMATTER.format(date);
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : DATE_FORMATTER.format(date);
+}
+
+function cleanText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function isValidUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 type Tab = 'active' | 'rules' | 'channels' | 'escalations' | 'history' | 'maintenance';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'active', label: 'Active Alerts' },
@@ -78,9 +111,11 @@ export function Alerts() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [everLoadedOk, setEverLoadedOk] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoadError(null);
+    setLoading(true);
     try {
       const connectionId = account === 'all' ? undefined : account;
       const [activeRes, historyRes, rulesRes, channelsRes, escalationsRes, maintenanceRes] = await Promise.all([
@@ -101,14 +136,13 @@ export function Alerts() {
     } catch (err) {
       const message = friendlyErrorMessage(err, 'Failed to load alerts.');
       setLoadError(message);
-      toast(message, 'error');
+      if (everLoadedOk) toast(message, 'error');
+    } finally {
+      setLoading(false);
     }
-  }, [account, toast]);
+  }, [account, everLoadedOk, toast]);
 
   useEffect(() => { void load(); }, [load, refreshToken]);
-
-  // Wraps a mutation so its failure surfaces as a toast instead of an
-  // unhandled rejection.
   async function runAction(action: () => Promise<void>, errorMessage: string) {
     try {
       await action();
@@ -138,12 +172,6 @@ export function Alerts() {
       return next;
     });
   }
-
-  // No dedicated bulk-status endpoint exists yet — this drives the same
-  // single-alert PATCH the per-row buttons use, once per selected id. Real
-  // requests, real results; just not a single round trip. allSettled (not
-  // all) so one failing update doesn't hide the outcome of every other
-  // selected alert -- each gets its own real result, reported honestly.
   async function bulkUpdateStatus(status: AlertRow['status']) {
     setBulkBusy(true);
     try {
@@ -173,8 +201,8 @@ export function Alerts() {
     { key: 'severity', header: 'Severity', render: a => <Badge>{a.severity}</Badge>, sortValue: a => a.severity },
     { key: 'name', header: 'Alert', render: a => a.alert_name, sortValue: a => a.alert_name },
     { key: 'status', header: 'Status', render: a => <Badge>{a.status}</Badge>, sortValue: a => a.status },
-    { key: 'triggered', header: 'Triggered At', render: a => new Date(a.triggered_at).toLocaleString(), sortValue: a => a.triggered_at },
-    { key: 'resolved', header: 'Resolved At', render: a => a.resolved_at ? new Date(a.resolved_at).toLocaleString() : '—', sortValue: a => a.resolved_at ?? '' },
+    { key: 'triggered', header: 'Triggered At', render: a => formatDateTime(a.triggered_at), sortValue: a => a.triggered_at },
+    { key: 'resolved', header: 'Resolved At', render: a => formatDateTime(a.resolved_at), sortValue: a => a.resolved_at ?? '' },
     {
       key: 'actions', header: 'Actions', render: a => {
         const busy = busyId === a.id;
@@ -188,12 +216,17 @@ export function Alerts() {
     },
   ];
 
-  const bySeverity: Record<string, number> = {};
-  const byStatus: Record<string, number> = {};
-  for (const a of activeAlerts) {
-    bySeverity[a.severity] = (bySeverity[a.severity] ?? 0) + 1;
-    byStatus[a.status] = (byStatus[a.status] ?? 0) + 1;
-  }
+  const { bySeverity, byStatus } = useMemo(() => {
+    const severity: Record<string, number> = {};
+    const status: Record<string, number> = {};
+
+    for (const alert of activeAlerts) {
+      severity[alert.severity] = (severity[alert.severity] ?? 0) + 1;
+      status[alert.status] = (status[alert.status] ?? 0) + 1;
+    }
+
+    return { bySeverity: severity, byStatus: status };
+  }, [activeAlerts]);
 
   // ── Alert Rules ─────────────────────────────────────────────────────────
 
@@ -224,12 +257,25 @@ export function Alerts() {
 
   async function createRule(e: FormEvent) {
     e.preventDefault();
+    const name = cleanText(ruleName);
+
+    if (!name) {
+      setRuleError('Enter a name for this alert rule.');
+      return;
+    }
+
     let condition: unknown;
     if (ruleConditionText.trim()) {
       try { condition = JSON.parse(ruleConditionText); } catch { setRuleError('Condition must be valid JSON.'); return; }
     }
     await runAction(async () => {
-      await api.createAlertRule({ name: ruleName, severity: ruleSeverity, enabled: ruleEnabled, notificationChannels: ruleChannelIds, condition });
+      await api.createAlertRule({
+        name,
+        severity: ruleSeverity,
+        enabled: ruleEnabled,
+        notificationChannels: ruleChannelIds,
+        condition,
+      });
       setRuleModalOpen(false);
       resetRuleForm();
       await load();
@@ -256,12 +302,12 @@ export function Alerts() {
     { key: 'severity', header: 'Severity', render: r => <Badge>{r.severity}</Badge>, sortValue: r => r.severity },
     { key: 'enabled', header: 'Enabled', render: r => <Badge tone={r.enabled ? 'good' : 'neutral'}>{r.enabled ? 'enabled' : 'disabled'}</Badge>, sortValue: r => (r.enabled ? 1 : 0) },
     { key: 'channels', header: 'Channels', render: r => String(Array.isArray(r.notification_channels) ? r.notification_channels.length : 0), sortValue: r => (Array.isArray(r.notification_channels) ? r.notification_channels.length : 0) },
-    { key: 'created', header: 'Created', render: r => new Date(r.created_at).toLocaleDateString(), sortValue: r => r.created_at },
+    { key: 'created', header: 'Created', render: r => formatDate(r.created_at), sortValue: r => r.created_at },
     {
       key: 'actions', header: 'Actions', render: r => (
         <div className="flex gap-2 text-xs">
-          <button onClick={e => { e.stopPropagation(); void toggleRule(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">{r.enabled ? 'Disable' : 'Enable'}</button>
-          <button onClick={e => { e.stopPropagation(); void deleteRule(r.id); }} className="text-red-500 hover:underline">Delete</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void toggleRule(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">{r.enabled ? 'Disable' : 'Enable'}</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void deleteRule(r.id); }} className="text-red-500 hover:underline">Delete</button>
         </div>
       ),
     },
@@ -281,8 +327,32 @@ export function Alerts() {
 
   async function createChannel(e: FormEvent) {
     e.preventDefault();
+
+    const name = cleanText(channelName);
+    const target = channelTarget.trim();
+
+    if (!name || !target) {
+      toast('Enter a channel name and destination.', 'error');
+      return;
+    }
+
+    if (channelType === 'email' && !isValidEmail(target)) {
+      toast('Enter a valid email address.', 'error');
+      return;
+    }
+
+    if ((channelType === 'slack' || channelType === 'webhook') && !isValidUrl(target)) {
+      toast('Enter a valid HTTP(S) webhook URL.', 'error');
+      return;
+    }
+
     await runAction(async () => {
-      await api.createNotificationChannel({ name: channelName, channelType, config: buildChannelConfig(channelType, channelTarget), enabled: channelEnabled });
+      await api.createNotificationChannel({
+        name,
+        channelType,
+        config: buildChannelConfig(channelType, target),
+        enabled: channelEnabled,
+      });
       setChannelModalOpen(false);
       resetChannelForm();
       await load();
@@ -308,12 +378,12 @@ export function Alerts() {
     { key: 'name', header: 'Name', render: c => c.name, sortValue: c => c.name },
     { key: 'type', header: 'Type', render: c => CHANNEL_TYPE_LABELS[c.channel_type] ?? c.channel_type, sortValue: c => c.channel_type },
     { key: 'enabled', header: 'Enabled', render: c => <Badge tone={c.enabled ? 'good' : 'neutral'}>{c.enabled ? 'enabled' : 'disabled'}</Badge>, sortValue: c => (c.enabled ? 1 : 0) },
-    { key: 'created', header: 'Created', render: c => new Date(c.created_at).toLocaleDateString(), sortValue: c => c.created_at },
+    { key: 'created', header: 'Created', render: c => formatDate(c.created_at), sortValue: c => c.created_at },
     {
       key: 'actions', header: 'Actions', render: c => (
         <div className="flex gap-2 text-xs">
-          <button onClick={e => { e.stopPropagation(); void toggleChannel(c); }} className="text-brand-600 dark:text-brand-400 hover:underline">{c.enabled ? 'Disable' : 'Enable'}</button>
-          <button onClick={e => { e.stopPropagation(); void deleteChannel(c.id); }} className="text-red-500 hover:underline">Delete</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void toggleChannel(c); }} className="text-brand-600 dark:text-brand-400 hover:underline">{c.enabled ? 'Disable' : 'Enable'}</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void deleteChannel(c.id); }} className="text-red-500 hover:underline">Delete</button>
         </div>
       ),
     },
@@ -341,8 +411,27 @@ export function Alerts() {
 
   async function createEscalation(e: FormEvent) {
     e.preventDefault();
+
+    const name = cleanText(escalationName);
+    const steps = escalationSteps.filter(s => s.channelId);
+
+    if (!name) {
+      toast('Enter a policy name.', 'error');
+      return;
+    }
+
+    if (steps.length === 0) {
+      toast('Add at least one notification channel to the escalation policy.', 'error');
+      return;
+    }
+
+    if (steps.some(step => !Number.isFinite(step.afterMinutes) || step.afterMinutes < 0)) {
+      toast('Escalation delays must be zero or greater.', 'error');
+      return;
+    }
+
     await runAction(async () => {
-      await api.createEscalationPolicy({ name: escalationName, steps: escalationSteps.filter(s => s.channelId) });
+      await api.createEscalationPolicy({ name, steps });
       setEscalationModalOpen(false);
       resetEscalationForm();
       await load();
@@ -360,11 +449,11 @@ export function Alerts() {
   const escalationColumns: Column<EscalationPolicy>[] = [
     { key: 'name', header: 'Name', render: e => e.name, sortValue: e => e.name },
     { key: 'steps', header: 'Steps', render: e => String(Array.isArray(e.steps) ? e.steps.length : 0), sortValue: e => (Array.isArray(e.steps) ? e.steps.length : 0) },
-    { key: 'created', header: 'Created', render: e => new Date(e.created_at).toLocaleDateString(), sortValue: e => e.created_at },
+    { key: 'created', header: 'Created', render: e => formatDate(e.created_at), sortValue: e => e.created_at },
     {
       key: 'actions', header: 'Actions', render: e => (
         <div className="flex gap-2 text-xs">
-          <button onClick={ev => { ev.stopPropagation(); void deleteEscalation(e.id); }} className="text-red-500 hover:underline">Delete</button>
+          <button type="button" onClick={ev => { ev.stopPropagation(); void deleteEscalation(e.id); }} className="text-red-500 hover:underline">Delete</button>
         </div>
       ),
     },
@@ -384,10 +473,29 @@ export function Alerts() {
 
   async function createMaintenanceWindow(e: FormEvent) {
     e.preventDefault();
-    if (!maintenanceStart || !maintenanceEnd) return;
+
+    const name = cleanText(maintenanceName);
+    if (!name || !maintenanceStart || !maintenanceEnd) {
+      toast('Enter a name, start time, and end time.', 'error');
+      return;
+    }
+
+    const start = new Date(maintenanceStart);
+    const end = new Date(maintenanceEnd);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      toast('Enter valid maintenance window dates.', 'error');
+      return;
+    }
+
+    if (end <= start) {
+      toast('The end time must be after the start time.', 'error');
+      return;
+    }
+
     await runAction(async () => {
       await api.createMaintenanceWindow({
-        name: maintenanceName,
+        name,
         connectionId: maintenanceConnectionId || undefined,
         startsAt: new Date(maintenanceStart).toISOString(),
         endsAt: new Date(maintenanceEnd).toISOString(),
@@ -414,12 +522,12 @@ export function Alerts() {
   const maintenanceColumns: Column<MaintenanceWindow>[] = [
     { key: 'name', header: 'Name', render: w => w.name, sortValue: w => w.name },
     { key: 'connection', header: 'Scope', render: w => connectionName(w.connection_id), sortValue: w => connectionName(w.connection_id) },
-    { key: 'starts', header: 'Starts', render: w => new Date(w.starts_at).toLocaleString(), sortValue: w => w.starts_at },
-    { key: 'ends', header: 'Ends', render: w => new Date(w.ends_at).toLocaleString(), sortValue: w => w.ends_at },
+    { key: 'starts', header: 'Starts', render: w => formatDateTime(w.starts_at), sortValue: w => w.starts_at },
+    { key: 'ends', header: 'Ends', render: w => formatDateTime(w.ends_at), sortValue: w => w.ends_at },
     {
       key: 'actions', header: 'Actions', render: w => (
         <div className="flex gap-2 text-xs">
-          <button onClick={e => { e.stopPropagation(); void deleteMaintenanceWindow(w.id); }} className="text-red-500 hover:underline">Delete</button>
+          <button type="button" onClick={e => { e.stopPropagation(); void deleteMaintenanceWindow(w.id); }} className="text-red-500 hover:underline">Delete</button>
         </div>
       ),
     },
@@ -442,31 +550,56 @@ export function Alerts() {
   }
 
   return (
-    <div>
+    <div className="min-w-0">
       <FilterBar title="Alerts" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
 
+      <div className="mb-5">
+        <p className="max-w-3xl text-sm text-slate-500 dark:text-slate-400">
+          Monitor active incidents, define alerting rules, manage notification delivery, and control maintenance windows from one place.
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Active Alerts" value={String(activeAlerts.length)} />
-        {SEVERITIES.slice(0, 3).map(s => <StatCard key={s} label={s[0].toUpperCase() + s.slice(1)} value={String(bySeverity[s] ?? 0)} />)}
+        <StatCard label="Active alerts" value={String(activeAlerts.length)} />
+        {SEVERITIES.slice(0, 3).map((severity) => (
+          <StatCard
+            key={severity}
+            label={`${severity.charAt(0).toUpperCase()}${severity.slice(1)}`}
+            value={String(bySeverity[severity] ?? 0)}
+          />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Active Alerts by Severity</h3>
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Alerts by severity</h2>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">Current active alerts grouped by severity.</p>
+          </div>
           <Donut data={SEVERITIES.map(s => ({ label: s, value: bySeverity[s] ?? 0 })).filter(d => d.value > 0)} />
-        </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Active Alerts by Status</h3>
+        </section>
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Alerts by status</h2>
+            <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">Current lifecycle state of active alerts.</p>
+          </div>
           <Donut data={STATUSES.map(s => ({ label: s, value: byStatus[s] ?? 0 })).filter(d => d.value > 0)} />
-        </div>
+        </section>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex flex-wrap gap-1 mb-4 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
         {visibleTabs.map(t => (
           <button
             key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`text-sm px-3 py-2 border-b-2 -mb-px ${activeTab === t.key ? 'border-brand-600 text-brand-600 dark:text-brand-400 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+            className={`shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
+              activeTab === t.key
+                ? 'border-brand-600 text-brand-600 dark:text-brand-400 font-medium'
+                : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+            }`}
           >
             {t.label}
           </button>
@@ -493,12 +626,19 @@ export function Alerts() {
               {bulkMode ? 'Exit Bulk Operations' : 'Bulk Operations'}
             </button>
           </div>
-          <DataTable
-            columns={alertColumns}
-            rows={activeAlerts}
+          {loading ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-12 text-center">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Loading alerts…</p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">Fetching the latest alert state.</p>
+            </div>
+          ) : (
+            <DataTable
+              columns={alertColumns}
+              rows={activeAlerts}
             rowKey={a => a.id}
-            emptyMessage="No active alerts right now."
-          />
+              emptyMessage="No active alerts right now."
+            />
+          )}
         </div>
       )}
 
@@ -556,21 +696,21 @@ export function Alerts() {
       <Modal open={ruleModalOpen} onClose={() => setRuleModalOpen(false)} title="Create Alert Rule">
         <form onSubmit={createRule} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Rule name</span>
-            <input required value={ruleName} onChange={e => setRuleName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Rule name</span>
+            <input required value={ruleName} onChange={e => setRuleName(e.target.value)} className="form-input w-full" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Severity</span>
-            <select value={ruleSeverity} onChange={e => setRuleSeverity(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+            <span className="form-label">Severity</span>
+            <select value={ruleSeverity} onChange={e => setRuleSeverity(e.target.value)} className="form-input w-full">
               {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={ruleEnabled} onChange={e => setRuleEnabled(e.target.checked)} />
-            <span className="text-slate-600 dark:text-slate-300">Enabled</span>
+            <span className="form-label">Enabled</span>
           </label>
           <div className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Notification channels</span>
+            <span className="form-label">Notification channels</span>
             {channels.length === 0 && <span className="text-xs text-slate-400">No channels yet — add one under the Notification Channels tab first.</span>}
             <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
               {channels.map(c => (
@@ -586,51 +726,51 @@ export function Alerts() {
             </div>
           </div>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Condition (JSON, optional)</span>
+            <span className="form-label">Condition (JSON, optional)</span>
             <p className="text-[11px] text-slate-400 leading-snug">
               Two real, evaluated shapes — anything else saves fine but never fires:{' '}
               <code className="font-mono">{'{"type":"cloudwatch_alarm_state","state":"ALARM"}'}</code> (matches any CloudWatch alarm in this state; optionally add <code className="font-mono">namespace</code> or <code className="font-mono">alarmNameContains</code>), or{' '}
               <code className="font-mono">{'{"type":"resource_state","status":"stopped"}'}</code> (matches cloud_resources; combine with <code className="font-mono">resourceTypeKey</code>/<code className="font-mono">category</code>/<code className="font-mono">state</code> to narrow it — at least one field is required).
             </p>
-            <textarea rows={3} value={ruleConditionText} onChange={e => { setRuleConditionText(e.target.value); setRuleError(''); }} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs" />
+            <textarea rows={3} value={ruleConditionText} onChange={e => { setRuleConditionText(e.target.value); setRuleError(''); }} className="form-input w-full min-h-24 font-mono text-xs" />
             {ruleError && <span className="text-xs text-red-500">{ruleError}</span>}
           </label>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save Rule</button>
+          <button type="submit" className="btn-primary w-full justify-center mt-1">Save Rule</button>
         </form>
       </Modal>
 
       <Modal open={channelModalOpen} onClose={() => setChannelModalOpen(false)} title="Add Notification Channel">
         <form onSubmit={createChannel} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Channel name</span>
-            <input required value={channelName} onChange={e => setChannelName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Channel name</span>
+            <input required value={channelName} onChange={e => setChannelName(e.target.value)} className="form-input w-full" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Type</span>
-            <select value={channelType} onChange={e => setChannelType(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+            <span className="form-label">Type</span>
+            <select value={channelType} onChange={e => setChannelType(e.target.value)} className="form-input w-full">
               {CHANNEL_TYPES.map(t => <option key={t} value={t}>{CHANNEL_TYPE_LABELS[t]}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">{CHANNEL_TARGET_LABEL[channelType]}</span>
-            <input required value={channelTarget} onChange={e => setChannelTarget(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">{CHANNEL_TARGET_LABEL[channelType]}</span>
+            <input required value={channelTarget} onChange={e => setChannelTarget(e.target.value)} className="form-input w-full" />
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={channelEnabled} onChange={e => setChannelEnabled(e.target.checked)} />
-            <span className="text-slate-600 dark:text-slate-300">Enabled</span>
+            <span className="form-label">Enabled</span>
           </label>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save Channel</button>
+          <button type="submit" className="btn-primary w-full justify-center mt-1">Save Channel</button>
         </form>
       </Modal>
 
       <Modal open={escalationModalOpen} onClose={() => setEscalationModalOpen(false)} title="Create Escalation Policy">
         <form onSubmit={createEscalation} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Policy name</span>
-            <input required value={escalationName} onChange={e => setEscalationName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Policy name</span>
+            <input required value={escalationName} onChange={e => setEscalationName(e.target.value)} className="form-input w-full" />
           </label>
           <div className="flex flex-col gap-2 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Steps</span>
+            <span className="form-label">Steps</span>
             {channels.length === 0 && <span className="text-xs text-slate-400">No channels yet — add one under the Notification Channels tab first.</span>}
             {escalationSteps.map((step, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -644,7 +784,7 @@ export function Alerts() {
                 <select
                   value={step.channelId}
                   onChange={e => updateEscalationStep(i, { channelId: e.target.value })}
-                  className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-slate-900 dark:text-white text-xs"
+                  className="form-select flex-1 text-xs"
                 >
                   <option value="">Select channel…</option>
                   {channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -656,32 +796,32 @@ export function Alerts() {
             ))}
             <button type="button" onClick={addEscalationStep} className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-start">+ Add step</button>
           </div>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save Escalation Policy</button>
+          <button type="submit" className="btn-primary w-full justify-center mt-1">Save Escalation Policy</button>
         </form>
       </Modal>
 
       <Modal open={maintenanceModalOpen} onClose={() => setMaintenanceModalOpen(false)} title="Schedule Maintenance Window">
         <form onSubmit={createMaintenanceWindow} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Name</span>
-            <input required value={maintenanceName} onChange={e => setMaintenanceName(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Name</span>
+            <input required value={maintenanceName} onChange={e => setMaintenanceName(e.target.value)} className="form-input w-full" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Scope</span>
-            <select value={maintenanceConnectionId} onChange={e => setMaintenanceConnectionId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
+            <span className="form-label">Scope</span>
+            <select value={maintenanceConnectionId} onChange={e => setMaintenanceConnectionId(e.target.value)} className="form-input w-full">
               <option value="">All accounts</option>
               {connections.map(c => <option key={c.id} value={c.id}>{c.provider === 'gcp' ? 'GCP' : c.provider === 'azure' ? 'Azure' : 'AWS'} — {c.name}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Starts at</span>
-            <input required type="datetime-local" value={maintenanceStart} onChange={e => setMaintenanceStart(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Starts at</span>
+            <input required type="datetime-local" value={maintenanceStart} onChange={e => setMaintenanceStart(e.target.value)} className="form-input w-full" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-slate-600 dark:text-slate-300">Ends at</span>
-            <input required type="datetime-local" value={maintenanceEnd} onChange={e => setMaintenanceEnd(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            <span className="form-label">Ends at</span>
+            <input required type="datetime-local" value={maintenanceEnd} onChange={e => setMaintenanceEnd(e.target.value)} className="form-input w-full" />
           </label>
-          <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save Maintenance Window</button>
+          <button type="submit" className="btn-primary w-full justify-center mt-1">Save Maintenance Window</button>
         </form>
       </Modal>
 
