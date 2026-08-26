@@ -208,12 +208,13 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'AWS Config', to: tabLink(VULN, 'AWS Config'), real: true },
       { label: 'Container Images', to: tabLink(VULN, 'Container Images'), real: true },
       { label: 'Security Findings', to: tabLink(VULN, 'Security Findings'), real: true },
-      // real: false until confirmed live against real positive data (see
-      // this session's attack-path-engine plan) -- the tab and its backend
-      // route both exist and work, but the only two connected AWS test
-      // accounts have no GuardDuty/Security Hub/Access Analyzer findings to
-      // correlate, so "renders correctly" hasn't yet been distinguished
-      // from "actually surfaces a real attack path" against live data.
+      // real: false until confirmed live against a real positive END-TO-END
+      // match (see this session's attack-path-engine plan) -- the tab and
+      // its backend route both work, and the exposure leg now has a real
+      // hit in the test accounts (an internet-facing ELB), but that
+      // resource has no ASSUMES edge to an IAM role (load balancers don't
+      // carry one) and no matching critical/high finding on it either, so
+      // no row has ever actually rendered here yet. Flip once one does.
       { label: 'Attack Paths', to: tabLink(VULN, 'Attack Paths'), real: false },
       { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true },
       { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
