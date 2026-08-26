@@ -107,13 +107,25 @@ export function Alerts() {
 
   useEffect(() => { void load(); }, [load, refreshToken]);
 
+  // Wraps a mutation so its failure surfaces as a toast instead of an
+  // unhandled rejection.
+  async function runAction(action: () => Promise<void>, errorMessage: string) {
+    try {
+      await action();
+    } catch (err) {
+      toast(friendlyErrorMessage(err, errorMessage), 'error');
+    }
+  }
+
   // ── Alerts ──────────────────────────────────────────────────────────────
 
   async function updateStatus(id: string, status: AlertRow['status']) {
     setBusyId(id);
     try {
-      await api.updateAlertStatus(id, status);
-      await load();
+      await runAction(async () => {
+        await api.updateAlertStatus(id, status);
+        await load();
+      }, 'Failed to update alert status.');
     } finally {
       setBusyId(null);
     }
@@ -216,21 +228,27 @@ export function Alerts() {
     if (ruleConditionText.trim()) {
       try { condition = JSON.parse(ruleConditionText); } catch { setRuleError('Condition must be valid JSON.'); return; }
     }
-    await api.createAlertRule({ name: ruleName, severity: ruleSeverity, enabled: ruleEnabled, notificationChannels: ruleChannelIds, condition });
-    setRuleModalOpen(false);
-    resetRuleForm();
-    await load();
+    await runAction(async () => {
+      await api.createAlertRule({ name: ruleName, severity: ruleSeverity, enabled: ruleEnabled, notificationChannels: ruleChannelIds, condition });
+      setRuleModalOpen(false);
+      resetRuleForm();
+      await load();
+    }, 'Failed to create alert rule.');
   }
 
   async function toggleRule(rule: AlertRule) {
-    await api.updateAlertRule(rule.id, { enabled: !rule.enabled });
-    await load();
+    await runAction(async () => {
+      await api.updateAlertRule(rule.id, { enabled: !rule.enabled });
+      await load();
+    }, 'Failed to update alert rule.');
   }
 
   async function deleteRule(id: string) {
     if (!(await confirm('Delete this alert rule?'))) return;
-    await api.deleteAlertRule(id);
-    await load();
+    await runAction(async () => {
+      await api.deleteAlertRule(id);
+      await load();
+    }, 'Failed to delete alert rule.');
   }
 
   const ruleColumns: Column<AlertRule>[] = [
@@ -263,21 +281,27 @@ export function Alerts() {
 
   async function createChannel(e: FormEvent) {
     e.preventDefault();
-    await api.createNotificationChannel({ name: channelName, channelType, config: buildChannelConfig(channelType, channelTarget), enabled: channelEnabled });
-    setChannelModalOpen(false);
-    resetChannelForm();
-    await load();
+    await runAction(async () => {
+      await api.createNotificationChannel({ name: channelName, channelType, config: buildChannelConfig(channelType, channelTarget), enabled: channelEnabled });
+      setChannelModalOpen(false);
+      resetChannelForm();
+      await load();
+    }, 'Failed to create notification channel.');
   }
 
   async function toggleChannel(channel: NotificationChannel) {
-    await api.updateNotificationChannel(channel.id, { enabled: !channel.enabled });
-    await load();
+    await runAction(async () => {
+      await api.updateNotificationChannel(channel.id, { enabled: !channel.enabled });
+      await load();
+    }, 'Failed to update notification channel.');
   }
 
   async function deleteChannel(id: string) {
     if (!(await confirm('Delete this notification channel? Alert rules or escalation policies referencing it will no longer be able to notify through it.'))) return;
-    await api.deleteNotificationChannel(id);
-    await load();
+    await runAction(async () => {
+      await api.deleteNotificationChannel(id);
+      await load();
+    }, 'Failed to delete notification channel.');
   }
 
   const channelColumns: Column<NotificationChannel>[] = [
@@ -317,16 +341,20 @@ export function Alerts() {
 
   async function createEscalation(e: FormEvent) {
     e.preventDefault();
-    await api.createEscalationPolicy({ name: escalationName, steps: escalationSteps.filter(s => s.channelId) });
-    setEscalationModalOpen(false);
-    resetEscalationForm();
-    await load();
+    await runAction(async () => {
+      await api.createEscalationPolicy({ name: escalationName, steps: escalationSteps.filter(s => s.channelId) });
+      setEscalationModalOpen(false);
+      resetEscalationForm();
+      await load();
+    }, 'Failed to create escalation policy.');
   }
 
   async function deleteEscalation(id: string) {
     if (!(await confirm('Delete this escalation policy?'))) return;
-    await api.deleteEscalationPolicy(id);
-    await load();
+    await runAction(async () => {
+      await api.deleteEscalationPolicy(id);
+      await load();
+    }, 'Failed to delete escalation policy.');
   }
 
   const escalationColumns: Column<EscalationPolicy>[] = [
@@ -357,21 +385,25 @@ export function Alerts() {
   async function createMaintenanceWindow(e: FormEvent) {
     e.preventDefault();
     if (!maintenanceStart || !maintenanceEnd) return;
-    await api.createMaintenanceWindow({
-      name: maintenanceName,
-      connectionId: maintenanceConnectionId || undefined,
-      startsAt: new Date(maintenanceStart).toISOString(),
-      endsAt: new Date(maintenanceEnd).toISOString(),
-    });
-    setMaintenanceModalOpen(false);
-    resetMaintenanceForm();
-    await load();
+    await runAction(async () => {
+      await api.createMaintenanceWindow({
+        name: maintenanceName,
+        connectionId: maintenanceConnectionId || undefined,
+        startsAt: new Date(maintenanceStart).toISOString(),
+        endsAt: new Date(maintenanceEnd).toISOString(),
+      });
+      setMaintenanceModalOpen(false);
+      resetMaintenanceForm();
+      await load();
+    }, 'Failed to create maintenance window.');
   }
 
   async function deleteMaintenanceWindow(id: string) {
     if (!(await confirm('Delete this maintenance window?'))) return;
-    await api.deleteMaintenanceWindow(id);
-    await load();
+    await runAction(async () => {
+      await api.deleteMaintenanceWindow(id);
+      await load();
+    }, 'Failed to delete maintenance window.');
   }
 
   function connectionName(id: string | null): string {

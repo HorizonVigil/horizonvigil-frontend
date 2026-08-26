@@ -51,6 +51,19 @@ export function Automation() {
   const [jiraForm, setJiraForm] = useState({ siteUrl: '', email: '', apiToken: '', defaultProjectKey: '', defaultIssueType: 'Task', autoFileEvents: [] as string[] });
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraError, setJiraError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Wraps a mutation so its failure surfaces as a toast instead of an
+  // unhandled rejection -- this page had 13 mutation handlers with no error
+  // handling at all before this.
+  async function runAction(action: () => Promise<void>, errorMessage: string) {
+    try {
+      await action();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : errorMessage, 'error');
+    }
+  }
 
   const loadJira = useCallback(async () => {
     const res = await api.getJiraIntegration();
@@ -72,30 +85,57 @@ export function Automation() {
   }, []);
 
   const load = useCallback(async () => {
-    const [r, w, s, h, i, e] = await Promise.all([
-      api.getRunbooks({ limit: 100 }), api.getWorkflows({ limit: 100 }), api.getScheduledJobs({ limit: 100 }),
-      api.getWebhooks({ limit: 100 }), api.getAutomationIntegrations({ limit: 100 }), api.getExecutionHistory({ limit: 100 }),
-    ]);
-    setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items);
-    setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
-    await Promise.all([loadRemediation(), loadJira()]);
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [r, w, s, h, i, e] = await Promise.all([
+        api.getRunbooks({ limit: 100 }), api.getWorkflows({ limit: 100 }), api.getScheduledJobs({ limit: 100 }),
+        api.getWebhooks({ limit: 100 }), api.getAutomationIntegrations({ limit: 100 }), api.getExecutionHistory({ limit: 100 }),
+      ]);
+      setRunbooks(r.items); setWorkflows(w.items); setScheduledJobs(s.items);
+      setWebhooks(h.items); setIntegrations(i.items); setHistory(e.items);
+      await Promise.all([loadRemediation(), loadJira()]);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load automation data.');
+    } finally {
+      setLoading(false);
+    }
   }, [loadRemediation, loadJira]);
 
   useEffect(() => { void load(); }, [load]);
 
-  async function handleApproveRemediation(row: RemediationRequest) { await (row.provider === 'gcp' ? api.approveGcpRemediation(row.id) : api.approveRemediation(row.id)); await loadRemediation(); }
+  async function handleApproveRemediation(row: RemediationRequest) {
+    await runAction(async () => {
+      await (row.provider === 'gcp' ? api.approveGcpRemediation(row.id) : api.approveRemediation(row.id));
+      await loadRemediation();
+    }, 'Failed to approve remediation request.');
+  }
   async function handleRejectRemediation(row: RemediationRequest) {
     if (!(await confirm('Reject this remediation request?'))) return;
-    await (row.provider === 'gcp' ? api.rejectGcpRemediation(row.id) : api.rejectRemediation(row.id));
-    await loadRemediation();
+    await runAction(async () => {
+      await (row.provider === 'gcp' ? api.rejectGcpRemediation(row.id) : api.rejectRemediation(row.id));
+      await loadRemediation();
+    }, 'Failed to reject remediation request.');
   }
-  async function handleDryRunRemediation(row: RemediationRequest) { await (row.provider === 'gcp' ? api.dryRunGcpRemediation(row.id) : api.dryRunRemediation(row.id)); await loadRemediation(); }
+  async function handleDryRunRemediation(row: RemediationRequest) {
+    await runAction(async () => {
+      await (row.provider === 'gcp' ? api.dryRunGcpRemediation(row.id) : api.dryRunRemediation(row.id));
+      await loadRemediation();
+    }, 'Dry run failed.');
+  }
   async function handleExecuteRemediation(row: RemediationRequest) {
     if (!(await confirm(`Execute this action for real against ${row.provider === 'gcp' ? 'GCP' : 'AWS'}? This calls a real mutating API using the account's own stored credentials — only Stop Instance can be automatically rolled back, and only on AWS.`))) return;
-    await (row.provider === 'gcp' ? api.executeGcpRemediation(row.id) : api.executeRemediation(row.id));
-    await loadRemediation();
+    await runAction(async () => {
+      await (row.provider === 'gcp' ? api.executeGcpRemediation(row.id) : api.executeRemediation(row.id));
+      await loadRemediation();
+    }, 'Failed to execute remediation.');
   }
-  async function handleRollbackRemediation(id: string) { await api.rollbackRemediation(id); await loadRemediation(); }
+  async function handleRollbackRemediation(id: string) {
+    await runAction(async () => {
+      await api.rollbackRemediation(id);
+      await loadRemediation();
+    }, 'Failed to roll back remediation.');
+  }
 
   // resize_instance's execute step can only ever safely issue StopInstances
   // and stop there (AWS's stop is itself asynchronous, and a Worker
@@ -153,17 +193,17 @@ export function Automation() {
     }
   }
 
-  async function handleDeleteRunbook(id: string) { if (!(await confirm('Delete this runbook?'))) return; await api.deleteRunbook(id); await load(); }
-  async function handleDeleteWorkflow(id: string) { if (!(await confirm('Delete this workflow?'))) return; await api.deleteWorkflow(id); await load(); }
-  async function handleDeleteJob(id: string) { if (!(await confirm('Delete this scheduled job?'))) return; await api.deleteScheduledJob(id); await load(); }
-  async function handleDeleteWebhook(id: string) { if (!(await confirm('Delete this webhook?'))) return; await api.deleteWebhook(id); await load(); }
+  async function handleDeleteRunbook(id: string) { if (!(await confirm('Delete this runbook?'))) return; await runAction(async () => { await api.deleteRunbook(id); await load(); }, 'Failed to delete runbook.'); }
+  async function handleDeleteWorkflow(id: string) { if (!(await confirm('Delete this workflow?'))) return; await runAction(async () => { await api.deleteWorkflow(id); await load(); }, 'Failed to delete workflow.'); }
+  async function handleDeleteJob(id: string) { if (!(await confirm('Delete this scheduled job?'))) return; await runAction(async () => { await api.deleteScheduledJob(id); await load(); }, 'Failed to delete scheduled job.'); }
+  async function handleDeleteWebhook(id: string) { if (!(await confirm('Delete this webhook?'))) return; await runAction(async () => { await api.deleteWebhook(id); await load(); }, 'Failed to delete webhook.'); }
 
-  async function handleExecuteRunbook(id: string) { await api.executeRunbook(id); await load(); setTab('history'); }
-  async function handleExecuteWorkflow(id: string) { await api.executeWorkflow(id); await load(); setTab('history'); }
+  async function handleExecuteRunbook(id: string) { await runAction(async () => { await api.executeRunbook(id); await load(); setTab('history'); }, 'Failed to execute runbook.'); }
+  async function handleExecuteWorkflow(id: string) { await runAction(async () => { await api.executeWorkflow(id); await load(); setTab('history'); }, 'Failed to execute workflow.'); }
 
-  async function handleToggleWorkflow(w: Workflow) { await api.updateWorkflow(w.id, { enabled: !w.enabled }); await load(); }
-  async function handleToggleJob(j: ScheduledJob) { await api.updateScheduledJob(j.id, { enabled: !j.enabled }); await load(); }
-  async function handleToggleWebhook(w: Webhook) { await api.updateWebhook(w.id, { enabled: !w.enabled }); await load(); }
+  async function handleToggleWorkflow(w: Workflow) { await runAction(async () => { await api.updateWorkflow(w.id, { enabled: !w.enabled }); await load(); }, 'Failed to update workflow.'); }
+  async function handleToggleJob(j: ScheduledJob) { await runAction(async () => { await api.updateScheduledJob(j.id, { enabled: !j.enabled }); await load(); }, 'Failed to update scheduled job.'); }
+  async function handleToggleWebhook(w: Webhook) { await runAction(async () => { await api.updateWebhook(w.id, { enabled: !w.enabled }); await load(); }, 'Failed to update webhook.'); }
 
   function openEdit(item: Editable) { setEditing(item); setCreateOpen(true); }
   function closeModal() { setCreateOpen(false); setEditing(null); }
@@ -242,6 +282,19 @@ export function Automation() {
     ) },
   ];
 
+  // updateAutomationIntegration always comes back with verified: false and,
+  // often, a note -- this list has no per-provider credential/OAuth flow
+  // yet (unlike Jira above, which real-verifies), so "Connect" only sets a
+  // status flag. Surface the backend's own note rather than implying a real
+  // connection was established.
+  async function handleSetIntegrationStatus(id: string, status: 'connected' | 'disconnected') {
+    await runAction(async () => {
+      const res = await api.updateAutomationIntegration(id, { status });
+      await load();
+      if (res.note) toast(res.note, 'info');
+    }, 'Failed to update integration status.');
+  }
+
   const integrationColumns: Column<Integration>[] = [
     { key: 'provider', header: 'Provider', render: i => i.provider_name, sortValue: i => i.provider_name },
     { key: 'category', header: 'Category', render: i => <Badge tone="neutral">{i.category}</Badge>, sortValue: i => i.category },
@@ -249,9 +302,9 @@ export function Automation() {
     { key: 'actions', header: '', render: i => (
       <div className="flex gap-2 text-xs">
         {i.status !== 'connected' ? (
-          <button onClick={async e => { e.stopPropagation(); await api.updateAutomationIntegration(i.id, { status: 'connected' }); await load(); }} className="text-brand-600 dark:text-brand-400 hover:underline">Connect</button>
+          <button onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'connected'); }} className="text-brand-600 dark:text-brand-400 hover:underline" title="Marks this integration as connected — no credentials are verified for this provider yet">Connect</button>
         ) : (
-          <button onClick={async e => { e.stopPropagation(); await api.updateAutomationIntegration(i.id, { status: 'disconnected' }); await load(); }} className="text-slate-500 hover:underline">Disconnect</button>
+          <button onClick={e => { e.stopPropagation(); void handleSetIntegrationStatus(i.id, 'disconnected'); }} className="text-slate-500 hover:underline">Disconnect</button>
         )}
       </div>
     ) },
@@ -312,6 +365,14 @@ export function Automation() {
   return (
     <div>
       <FilterBar title="Automation" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
+
+      {loadError && (
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => void load()} className="text-xs underline shrink-0">Retry</button>
+        </div>
+      )}
+      {loading && !loadError && <p className="text-xs text-slate-400 mb-4">Loading…</p>}
 
       <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 mb-4 text-xs text-amber-700 dark:text-amber-300">
         Runbooks and workflows can be defined and viewed, but the execution engine that actually runs them isn't built in this pass — "Execute" records a real, honest attempt in Execution History rather than pretending to run anything.

@@ -84,6 +84,7 @@ export function Settings() {
   const [timezone, setTimezone] = useState('UTC');
   const [dateFormat, setDateFormat] = useState('YYYY-MM-DD');
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -120,7 +121,10 @@ export function Settings() {
     e.preventDefault();
     if (!user) return;
 
+    setProfileError(null);
+
     if (!TIMEZONES.includes(timezone) || !DATE_FORMATS.includes(dateFormat)) {
+      setProfileError('Invalid timezone or date format.');
       return;
     }
 
@@ -133,7 +137,10 @@ export function Settings() {
       })
       .eq('id', user.id);
 
-    if (error) return;
+    if (error) {
+      setProfileError(error.message);
+      return;
+    }
 
     setProfileSaved(true);
     window.setTimeout(() => setProfileSaved(false), 2000);
@@ -181,12 +188,18 @@ export function Settings() {
   const [roleDefinitions, setRoleDefinitions] = useState<{ role: Role; description: string }[]>([]);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaError, setMfaError] = useState<string | null>(null);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const planLimits = license?.planLimits ?? null;
 
   const loadRequestId = useRef(0);
 
   const load = useCallback(async () => {
     const thisRequest = ++loadRequestId.current;
+
+    const SECTION_LABELS = [
+      'Notification Settings', 'System Settings', 'Recommendation Rules',
+      'Git Integration', 'Branding', 'AWS Integrations', 'License', 'Credentials', 'Roles & Permissions',
+    ];
 
     const results = await Promise.allSettled([
       api.getNotificationSettings(),
@@ -201,6 +214,12 @@ export function Settings() {
     ]);
 
     if (thisRequest !== loadRequestId.current) return;
+
+    setLoadErrors(
+      results
+        .map((r, i) => (r.status === 'rejected' ? `${SECTION_LABELS[i]}: ${r.reason instanceof Error ? r.reason.message : 'Could not load.'}` : null))
+        .filter((m): m is string => m !== null),
+    );
 
     const [
       notif,
@@ -564,6 +583,18 @@ export function Settings() {
     <div>
       <FilterBar title="Settings" showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
+      {loadErrors.length > 0 && (
+        <div className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300" role="alert">
+          <div className="flex items-center justify-between gap-3">
+            <span>Some settings sections failed to load — the fields below may be showing defaults, not your actual saved values.</span>
+            <button type="button" onClick={() => void load()} className="text-xs underline shrink-0">Retry</button>
+          </div>
+          <ul className="mt-1 list-disc list-inside text-xs">
+            {loadErrors.map(m => <li key={m}>{m}</li>)}
+          </ul>
+        </div>
+      )}
+
       <div
         className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto"
         role="tablist"
@@ -609,6 +640,7 @@ export function Settings() {
             </label>
             <button type="submit" className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 mt-1">Save</button>
             {profileSaved && <p className="text-xs text-emerald-500">Saved.</p>}
+            {profileError && <p className="text-xs text-red-500">{profileError}</p>}
           </form>
 
           <div className="flex flex-col gap-4">
