@@ -5,6 +5,7 @@ import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
+import { EditAccountModal } from '../components/EditAccountModal';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
@@ -90,6 +91,7 @@ export function AwsAccountDetail() {
   const [recommendations, setRecommendations] = useState<CostRecommendation[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [favorite, setFavorite] = useState<Favorite | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   // Request generations prevent a slower response for a previous account/tab
   // from overwriting state after navigation or a retry.
@@ -425,6 +427,9 @@ export function AwsAccountDetail() {
         <button type="button" onClick={() => void toggleFavorite()} title={favorite ? 'Remove from Favorites' : 'Add to Favorites — pins this account on the Overview page'} className="text-amber-400 hover:text-amber-500 px-1">
           <Icon name={favorite ? 'star-filled' : 'star'} size={18} />
         </button>
+        <button type="button" onClick={() => setEditOpen(true)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+          Edit
+        </button>
         <button type="button" onClick={() => id && startSync(id)} disabled={syncing} title="Confirms stored credentials are present and well-formed — not a live AWS check" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Test Connection'}
         </button>
@@ -755,6 +760,29 @@ export function AwsAccountDetail() {
         </div>
       )}
       {confirmDialog}
+      {connection && (
+        <EditAccountModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          connectionName={connection.connection_name ?? connection.aws_account_id}
+          environment={connection.environment}
+          defaultRegion={connection.default_region}
+          supportPlan={connection.support_plan}
+          showRegion
+          showSupportPlan
+          onSave={async fields => {
+            if (!id) return;
+            await api.updateAccount(id, {
+              connectionName: fields.connectionName,
+              environment: fields.environment,
+              defaultRegion: fields.defaultRegion,
+              supportPlan: fields.supportPlan,
+            });
+            await load();
+            toast('Account updated.', 'success');
+          }}
+        />
+      )}
     </div>
   );
 }

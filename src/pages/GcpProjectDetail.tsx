@@ -5,6 +5,7 @@ import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
+import { EditAccountModal } from '../components/EditAccountModal';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
@@ -52,6 +53,7 @@ export function GcpProjectDetail() {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<GcpConnection | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [remediating, setRemediating] = useState<string | null>(null);
   const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
@@ -281,6 +283,9 @@ export function GcpProjectDetail() {
         <button type="button" onClick={() => void runValidation()} disabled={validating} title="Runs a real oauth2 identity check plus Compute Engine/Cloud SQL/GKE/Cloud Functions/Pub/Sub/IAM/Resource Manager read probes" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2.5 py-1.5 disabled:opacity-50">
           {validating ? 'Validating…' : 'Validate Permissions'}
         </button>
+        <button type="button" onClick={() => setEditOpen(true)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+          Edit
+        </button>
       </div>
       {sync?.status === 'running' && sync.total > 1 && (
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 -mt-2">Scanning… step {sync.done + 1} of {sync.total} ({sync.stepId})</p>
@@ -508,6 +513,27 @@ export function GcpProjectDetail() {
         </div>
       )}
       {confirmDialog}
+      {connection && (
+        <EditAccountModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          connectionName={connection.connection_name ?? connection.gcp_project_id}
+          environment={connection.environment}
+          defaultRegion={connection.default_region}
+          showRegion
+          showSupportPlan={false}
+          onSave={async fields => {
+            if (!id) return;
+            await api.updateGcpAccount(id, {
+              connectionName: fields.connectionName,
+              environment: fields.environment,
+              defaultRegion: fields.defaultRegion,
+            });
+            await load();
+            toast('Project updated.', 'success');
+          }}
+        />
+      )}
     </div>
   );
 }

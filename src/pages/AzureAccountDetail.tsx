@@ -5,6 +5,7 @@ import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
+import { EditAccountModal } from '../components/EditAccountModal';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
@@ -46,6 +47,7 @@ export function AzureAccountDetail() {
   const { toast } = useToast();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<AzureConnection | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
@@ -307,6 +309,9 @@ export function AzureAccountDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.azure_subscription_id}</span>
         <div className="flex-1" />
+        <button type="button" onClick={() => setEditOpen(true)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+          Edit
+        </button>
         <button type="button" onClick={() => id && startDiscovery(id, 'azureAccounts')} disabled={syncing} title="Scans this subscription for VMs, storage accounts, SQL/Cosmos DBs, AKS clusters, networking, Key Vault, and more" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>
@@ -560,6 +565,25 @@ export function AzureAccountDetail() {
             {activity.length === 0 && <li className="px-3 py-8 text-center text-slate-400 text-sm">No activity recorded for this subscription yet.</li>}
           </ul>
         </div>
+      )}
+      {connection && (
+        <EditAccountModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          connectionName={connection.connection_name ?? connection.azure_subscription_id}
+          environment={connection.environment}
+          showRegion={false}
+          showSupportPlan={false}
+          onSave={async fields => {
+            if (!id) return;
+            await api.updateAzureAccount(id, {
+              connectionName: fields.connectionName,
+              environment: fields.environment,
+            });
+            await load();
+            toast('Account updated.', 'success');
+          }}
+        />
       )}
     </div>
   );
