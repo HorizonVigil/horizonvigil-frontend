@@ -26,6 +26,8 @@ import { CostManagement } from './pages/CostManagement';
 import { CostOptimization } from './pages/CostOptimization';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
 import { VulnerabilityDetail } from './pages/VulnerabilityDetail';
+import { SourceInventoryCategory } from './pages/SourceInventoryCategory';
+import { SourceAssetDetail } from './pages/SourceAssetDetail';
 import { SecurityScanningCenter } from './pages/SecurityScanningCenter';
 import { CloudSecurity } from './pages/CloudSecurity';
 import { ApplicationSecurity } from './pages/ApplicationSecurity';
@@ -147,6 +149,8 @@ export default function App() {
                           <Route path="/cost-optimization" element={<ProtectedRoute module="Cost Optimization"><CostOptimization /></ProtectedRoute>} />
                           <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
                           <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
+                          <Route path="/source-inventory/:category" element={<ProtectedRoute module="Vulnerability Management"><SourceInventoryCategory /></ProtectedRoute>} />
+                          <Route path="/source-inventory/:category/:assetId" element={<ProtectedRoute module="Vulnerability Management"><SourceAssetDetail /></ProtectedRoute>} />
                           <Route path="/security-scanning" element={<ProtectedRoute module="Security Scanning Center"><SecurityScanningCenter /></ProtectedRoute>} />
                           <Route path="/cloud-security" element={<ProtectedRoute module="Cloud Security"><CloudSecurity /></ProtectedRoute>} />
                           <Route path="/application-security" element={<ProtectedRoute module="Application & API Security"><ApplicationSecurity /></ProtectedRoute>} />

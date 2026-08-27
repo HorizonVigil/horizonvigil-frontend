@@ -1,4 +1,5 @@
 import type { VulnerabilityFinding } from '../api';
+import { rngFor, pick, weightedPick, daysAgoISO } from './random';
 
 /**
  * Deterministic synthetic data for demonstrating the Vulnerability
@@ -16,42 +17,6 @@ import type { VulnerabilityFinding } from '../api';
  * `generateFindingsPage` synthesizes exactly one page's rows on demand,
  * seeded by (page, index) so a given page always shows the same rows.
  */
-
-// ─── mulberry32: a small, fast, deterministic PRNG (no new dependency) ────
-function mulberry32(seed: number): () => number {
-  let s = seed | 0;
-  return function () {
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const BASE_SEED = 0x484f5256; // 'HORV', fixed so demo data is stable across sessions/builds
-
-function rngFor(slot: number): () => number {
-  return mulberry32((BASE_SEED ^ (slot * 2654435761)) >>> 0);
-}
-
-function pick<T>(rng: () => number, items: readonly T[]): T {
-  return items[Math.floor(rng() * items.length)];
-}
-
-function weightedPick<T>(rng: () => number, weighted: readonly [T, number][]): T {
-  const total = weighted.reduce((s, [, w]) => s + w, 0);
-  let r = rng() * total;
-  for (const [value, weight] of weighted) {
-    r -= weight;
-    if (r <= 0) return value;
-  }
-  return weighted[weighted.length - 1][0];
-}
-
-function daysAgoISO(rng: () => number, maxDays: number): string {
-  const days = Math.floor(rng() * maxDays);
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-}
 
 // ─── Fixed, realistic totals ────────────────────────────────────────────
 // Not randomly generated -- these are the headline "enterprise scale"

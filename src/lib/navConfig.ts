@@ -126,6 +126,7 @@ const RESOURCES = '/resources';
 const COST = '/cost-management';
 const OPT = '/cost-optimization';
 const VULN = '/vulnerability-management';
+const SOURCE_INV = '/source-inventory';
 const SCANNING = '/security-scanning';
 const CLOUD_SEC = '/cloud-security';
 const APP_SEC = '/application-security';
@@ -268,6 +269,23 @@ export const NAV_MODULES: NavModule[] = [
       // ownership reason as "Cloud Assets" above; reachable via Asset
       // Inventory's own Databases shortcut.
       { label: 'Databases', real: false, group: 'Assets' },
+
+      // ── Source Inventory ─────────────────────────────────────────────
+      // Multi-scanner-aggregation asset inventory (Phase 3) -- distinct
+      // from the "Assets" group above, which is raw resource inventory.
+      // Each entry is a real, distinct destination (SourceInventoryCategory.tsx
+      // reading its category from useParams), backed entirely by
+      // lib/demoData/sourceInventory.ts -- no scanner backend integration
+      // exists for any of these six categories yet, so every page here
+      // renders an always-on (non-toggleable) simulated-data banner rather
+      // than reusing the Vulnerability Overview's demo-mode toggle, which
+      // implies a real counterpart exists to toggle away from.
+      { label: 'Clouds', to: `${SOURCE_INV}/cloud`, real: true, group: 'Source Inventory' },
+      { label: 'Repositories', to: `${SOURCE_INV}/repository`, real: true, group: 'Source Inventory' },
+      { label: 'Artifactories', to: `${SOURCE_INV}/artifactory`, real: true, group: 'Source Inventory' },
+      { label: 'Registries', to: `${SOURCE_INV}/registry`, real: true, group: 'Source Inventory' },
+      { label: 'Clusters', to: `${SOURCE_INV}/cluster`, real: true, group: 'Source Inventory' },
+      { label: 'Servers', to: `${SOURCE_INV}/server`, real: true, group: 'Source Inventory' },
 
       // ── Security Scanning ────────────────────────────────────────────
       // Command-center for every scan category -- the unified entry point
