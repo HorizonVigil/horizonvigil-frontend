@@ -8,6 +8,7 @@ import { Donut } from '../components/charts/Donut';
 import { LineChart } from '../components/charts/LineChart';
 import { BarChart } from '../components/charts/BarChart';
 import { Icon } from '../components/icons';
+import { SecurityPostureSummary, type SecurityPostureDashboard } from '../components/SecurityPostureSummary';
 import { useOrg } from '../lib/orgContext';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
 import { useToast } from '../lib/toast';
@@ -66,10 +67,11 @@ export function Overview() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [securityDashboard, setSecurityDashboard] = useState<SecurityPostureDashboard | null>(null);
   // Per-widget failure flags so a degraded widget can say so instead of
   // silently rendering an EmptyState that reads as "genuinely no data".
   const [widgetErrors, setWidgetErrors] = useState<{
-    trend?: boolean; cost?: boolean; activity?: boolean; quickActions?: boolean; favorites?: boolean;
+    trend?: boolean; cost?: boolean; activity?: boolean; quickActions?: boolean; favorites?: boolean; security?: boolean;
   }>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // re-fetch on top of already-visible data
@@ -105,13 +107,14 @@ export function Overview() {
       // behind one generic error. The primary dashboard call is still treated
       // as required -- there's no meaningful page without it -- but every
       // other widget is independent and should degrade on its own.
-      const [dashRes, resourcesRes, costRes, activityRes, quickActionsRes, favoritesRes] = await Promise.allSettled([
+      const [dashRes, resourcesRes, costRes, activityRes, quickActionsRes, favoritesRes, securityRes] = await Promise.allSettled([
         api.getOverviewDashboard({ region }),
         api.getResourcesDashboard({ region, days }),
         api.getCostAnalytics({ region, from }),
         api.getRecentActivity(1, 8, from),
         api.getQuickActions(),
         api.getFavorites(),
+        api.getVulnerabilityDashboard(),
       ]);
 
       if (dashRes.status === 'rejected') throw dashRes.reason;
@@ -130,6 +133,7 @@ export function Overview() {
         activity: activityRes.status !== 'fulfilled',
         quickActions: quickActionsRes.status !== 'fulfilled',
         favorites: favoritesRes.status !== 'fulfilled',
+        security: securityRes.status !== 'fulfilled',
       });
 
       if (resourcesRes.status === 'fulfilled') {
@@ -151,6 +155,9 @@ export function Overview() {
 
       if (favoritesRes.status === 'fulfilled') setFavorites(favoritesRes.value.favorites ?? []);
       else { setFavorites([]); console.error('Favorites widget failed to load:', favoritesRes.reason); }
+
+      if (securityRes.status === 'fulfilled') setSecurityDashboard(securityRes.value);
+      else { setSecurityDashboard(null); console.error('Security posture widget failed to load:', securityRes.reason); }
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
 
@@ -386,6 +393,21 @@ export function Overview() {
               : (() => { const t = healthTier(healthScore); return <span className={t.className}>{t.label}</span>; })()}
           </span>
         </button>
+      </div>
+
+      {/* Security Posture */}
+      <div id="security-posture" className="mb-5 scroll-mt-4">
+        <h3 className="section-title mb-2 flex items-center gap-1.5">
+          <Icon name="shield-check-2" size={14} className="text-slate-400" />
+          Security Posture
+        </h3>
+        {widgetErrors.security ? (
+          <WidgetError message="Security posture couldn't be loaded right now." />
+        ) : securityDashboard ? (
+          <SecurityPostureSummary dashboard={securityDashboard} variant="compact" detailHref="/cloud-security" />
+        ) : (
+          <EmptyState icon="shield-check-2" title="No security data yet" description="Connect a cloud account to start seeing your security posture here." />
+        )}
       </div>
 
       {/* Quick Actions */}

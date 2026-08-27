@@ -5,6 +5,19 @@ function mod(overrides: Partial<NavModule> & { children: NavChild[] }): NavModul
   return { label: 'Test', icon: '•', ...overrides };
 }
 
+describe('NAV_MODULES sections', () => {
+  it('every module carries a section for AppRail\'s grouping', () => {
+    for (const m of NAV_MODULES) {
+      expect(m.section, `module "${m.label}" is missing a section`).toBeTruthy();
+    }
+  });
+
+  it('every module has a unique icon (RBAC menu_key)', () => {
+    const icons = NAV_MODULES.map(m => m.icon);
+    expect(new Set(icons).size).toBe(icons.length);
+  });
+});
+
 describe('moduleMatchesPath', () => {
   it('matches the module\'s own landing page', () => {
     const m = mod({ to: '/widgets', children: [] });
@@ -38,6 +51,19 @@ describe('findActiveModule', () => {
 
   it('resolves /overview to the Overview module', () => {
     expect(findActiveModule('/overview').label).toBe('Overview');
+  });
+
+  it('resolves /resources to the relabeled Asset Inventory module', () => {
+    expect(findActiveModule('/resources').label).toBe('Asset Inventory');
+  });
+
+  it('resolves each new security module to itself', () => {
+    expect(findActiveModule('/security-scanning').label).toBe('Security Scanning Center');
+    expect(findActiveModule('/cloud-security').label).toBe('Cloud Security');
+    expect(findActiveModule('/application-security').label).toBe('Application & API Security');
+    expect(findActiveModule('/code-security').label).toBe('Code & Repository Security');
+    expect(findActiveModule('/container-security').label).toBe('Container & Kubernetes Security');
+    expect(findActiveModule('/infrastructure-security').label).toBe('Infrastructure Security');
   });
 
   it('falls back to the first module for a path nothing claims', () => {

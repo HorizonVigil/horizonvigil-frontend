@@ -1,6 +1,15 @@
 /**
- * Full information architecture (16 modules — Issues added as a
- * cross-cutting triage view alongside the original 15). Every module and sub-item below
+ * Full information architecture (24 top-level modules). Six of these —
+ * Security Scanning Center, Cloud Security, Application & API Security,
+ * Code & Repository Security, Container & Kubernetes Security, and
+ * Infrastructure Security — are the unified-security-platform pillars added
+ * in the Phase 1 IA redesign; they sit alongside (not replacing) the
+ * existing cloud-ops modules, cross-linking into real data (Trivy container
+ * findings, AWS-native findings, git installations, identities) wherever it
+ * already exists rather than duplicating it. See the `section` field below
+ * for the purely-cosmetic AppRail grouping this produces.
+ *
+ * Every module and sub-item below
  * is real product scope, not aspiration copy — but not everything listed has
  * a feature behind it yet. `to` present + `real: true` means the item
  * genuinely opens the thing it describes (often a section of a bigger page,
@@ -86,6 +95,11 @@ export interface NavModule {
   minRole?: Role;
   /** Explicit list of roles allowed to see this module. */
   roles?: Role[];
+  /** Purely cosmetic grouping for AppRail's section dividers (Get Started /
+   * Cloud Operations / Security / Platform) — never affects visibility,
+   * routing, or RBAC. Modules are bucketed by this at render time; array
+   * order within NAV_MODULES is otherwise unaffected. */
+  section?: string;
 }
 
 const OVERVIEW = '/overview';
@@ -94,6 +108,12 @@ const RESOURCES = '/resources';
 const COST = '/cost-management';
 const OPT = '/cost-optimization';
 const VULN = '/vulnerability-management';
+const SCANNING = '/security-scanning';
+const CLOUD_SEC = '/cloud-security';
+const APP_SEC = '/application-security';
+const CODE_SEC = '/code-security';
+const CONTAINER_SEC = '/container-security';
+const INFRA_SEC = '/infrastructure-security';
 const EKS_CONSOLE = '/clusters/aws';
 const GKE_CONSOLE = '/clusters/gcp';
 const AKS_CONSOLE = '/clusters/azure';
@@ -118,9 +138,11 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Overview',
     icon: 'overview',
+    section: 'Get Started',
     to: OVERVIEW,
     children: [
       { label: 'Executive Dashboard', to: `${OVERVIEW}#executive-dashboard`, real: true },
+      { label: 'Security Posture', to: `${OVERVIEW}#security-posture`, real: true },
       { label: 'Activity Timeline', to: `${OVERVIEW}#activity-timeline`, real: true },
       { label: 'Quick Actions', to: `${OVERVIEW}#quick-actions`, real: true },
       { label: 'Favorites', to: `${OVERVIEW}#favorites`, real: true },
@@ -129,6 +151,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Cloud Accounts',
     icon: 'cloud',
+    section: 'Cloud Operations',
     to: ACCOUNTS,
     children: [
       { label: 'Dashboard', to: ACCOUNTS, real: true },
@@ -143,62 +166,9 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: 'Resources',
-    icon: 'resources',
-    to: RESOURCES,
-    children: [
-      { label: 'Resource Inventory', to: RESOURCES, real: true },
-      { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
-      { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
-      { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
-      { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
-      { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
-      { label: 'Bulk Operations', to: `${RESOURCES}/all?bulk=1`, real: true, minRole: 'editor' },
-    ],
-  },
-  {
-    label: 'Custom Dashboards',
-    icon: 'dashboard',
-    to: DASHBOARDS,
-    children: [
-      { label: 'My Dashboards', to: DASHBOARDS, real: true },
-      { label: 'Shared Dashboards', to: tabLink(DASHBOARDS, 'shared'), real: true },
-      { label: 'Dashboard Templates', to: tabLink(DASHBOARDS, 'templates'), real: true },
-      { label: 'Widget Library', to: tabLink(DASHBOARDS, 'widgets'), real: true },
-    ],
-  },
-  {
-    label: 'Cost Management',
-    icon: 'cost',
-    to: COST,
-    children: [
-      { label: 'Cost Explorer', to: COST, real: true },
-      { label: 'Cost Analytics', to: tabLink(COST, 'Cost Analytics'), real: true },
-      { label: 'Forecast', to: tabLink(COST, 'Forecast'), real: true },
-      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true, minRole: 'editor' },
-      { label: 'Cost Allocation', to: tabLink(COST, 'Cost Allocation'), real: true },
-      { label: 'Chargeback', to: tabLink(COST, 'Chargeback'), real: true },
-      { label: 'Showback', to: tabLink(COST, 'Showback'), real: true },
-      { label: 'Cost Reports', to: tabLink(COST, 'Cost Reports'), real: true },
-    ],
-  },
-  {
-    label: 'Cost Optimization',
-    icon: 'optimization',
-    to: OPT,
-    children: [
-      { label: 'Savings Opportunities', to: tabLink(OPT, 'Recommendations'), real: true },
-      { label: 'Rightsizing', to: tabLink(OPT, 'Rightsizing'), real: true },
-      { label: 'Idle Resources', to: tabLink(OPT, 'Idle Resources'), real: true },
-      { label: 'Reserved Instances', to: tabLink(OPT, 'Reserved Instances'), real: true },
-      { label: 'Savings Plans', to: tabLink(OPT, 'Savings Plans'), real: true },
-      { label: 'Cost Anomalies', to: tabLink(OPT, 'Cost Anomalies'), real: true },
-      { label: 'Optimization History', to: tabLink(OPT, 'History'), real: true },
-    ],
-  },
-  {
     label: 'Vulnerability Management',
     icon: 'security',
+    section: 'Security',
     to: VULN,
     children: [
       { label: 'Security Hub', to: VULN, real: true },
@@ -222,8 +192,230 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
+    // Command-center for every scan category (SAST/DAST/SCA/container/IaC/
+    // secrets/API/web/pentest/cloud/infra) -- the unified entry point the
+    // "don't build a pile of separate scanner pages" requirement calls for.
+    // Cross-links into the Scanners tab above (session-ephemeral results,
+    // see api.ts's getScanStatus/getScanResults -- no list-all-scans
+    // endpoint exists yet) rather than duplicating it.
+    label: 'Security Scanning Center',
+    icon: 'scanning-center',
+    section: 'Security',
+    to: SCANNING,
+    children: [
+      { label: 'Overview', to: SCANNING, real: true },
+      { label: 'SAST', to: tabLink(SCANNING, 'SAST'), real: false },
+      { label: 'DAST', to: tabLink(SCANNING, 'DAST'), real: false },
+      { label: 'SCA', to: tabLink(SCANNING, 'SCA'), real: false },
+      // Real -- deep-links to Container & Kubernetes Security's canonical
+      // Docker & Container Images tab (real Trivy findings) rather than
+      // rendering a second copy of the same table.
+      { label: 'Container Scanning', to: tabLink(SCANNING, 'Container Scanning'), real: true },
+      { label: 'IaC Scanning', to: tabLink(SCANNING, 'IaC Scanning'), real: false },
+      { label: 'Secrets Detection', to: tabLink(SCANNING, 'Secrets Detection'), real: false },
+      { label: 'API Security Testing', to: tabLink(SCANNING, 'API Security Testing'), real: false },
+      { label: 'Web Security Testing', to: tabLink(SCANNING, 'Web Security Testing'), real: false },
+      { label: 'Pentest', to: tabLink(SCANNING, 'Pentest'), real: false },
+      // Real -- reuses SecurityPostureSummary fed by the same vulnerability
+      // dashboard endpoint Cloud Security's own Posture tab uses.
+      { label: 'Cloud Posture', to: tabLink(SCANNING, 'Cloud Posture'), real: true },
+    ],
+  },
+  {
+    // Multi-cloud security posture pillar -- distinct from Cloud Accounts
+    // (connection management/ops) and from Vulnerability Management's raw
+    // AWS-native tool tabs, which this module re-presents through a
+    // posture/risk lens rather than duplicating.
+    label: 'Cloud Security',
+    icon: 'cloud-security',
+    section: 'Security',
+    to: CLOUD_SEC,
+    children: [
+      { label: 'Posture', to: CLOUD_SEC, real: true },
+      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true },
+      { label: 'Identity & Access Risk', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true },
+      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true },
+      // Deep-link only -- to Vulnerability Management's own Security
+      // Findings tab (same real getFindings() data), not a second table.
+      { label: 'Cloud Vulnerabilities', to: tabLink(CLOUD_SEC, 'Cloud Vulnerabilities'), real: true },
+      { label: 'Compliance', to: tabLink(CLOUD_SEC, 'Compliance'), real: true },
+      // No Azure/OCI posture connector exists yet -- ResourceCatalogEntry's
+      // provider type is 'aws' | 'gcp' only. Honest RoadmapPanel.
+      { label: 'Multi-Cloud Coverage', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: false },
+    ],
+  },
+  {
+    label: 'Application & API Security',
+    icon: 'app-security',
+    section: 'Security',
+    to: APP_SEC,
+    children: [
+      { label: 'Overview', to: APP_SEC, real: true },
+      { label: 'Applications', to: tabLink(APP_SEC, 'Applications'), real: false },
+      { label: 'APIs', to: tabLink(APP_SEC, 'APIs'), real: false },
+      { label: 'URLs & Domains', to: tabLink(APP_SEC, 'URLs & Domains'), real: false },
+      { label: 'DAST Results', to: tabLink(APP_SEC, 'DAST Results'), real: false },
+      { label: 'SAST Results', to: tabLink(APP_SEC, 'SAST Results'), real: false },
+      { label: 'API Security Findings', to: tabLink(APP_SEC, 'API Security Findings'), real: false },
+      { label: 'Web Vulnerabilities', to: tabLink(APP_SEC, 'Web Vulnerabilities'), real: false },
+      { label: 'Testing History', to: tabLink(APP_SEC, 'Testing History'), real: false },
+    ],
+  },
+  {
+    label: 'Code & Repository Security',
+    icon: 'code-security',
+    section: 'Security',
+    to: CODE_SEC,
+    children: [
+      { label: 'Overview', to: CODE_SEC, real: true },
+      // Real -- api.getGitInstallations()/getInstallationRepos() already
+      // back Settings > Git Integration's Auto-PR feature with real,
+      // persisted repo rows.
+      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true },
+      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false },
+      { label: 'Dependency Vulnerabilities', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false },
+      { label: 'Secrets Detected', to: tabLink(CODE_SEC, 'Secrets Detected'), real: false },
+      // Blocked even in principle today -- ScannerFinding.location carries
+      // no named repo/branch/project field. Backend item, not a UI gap.
+      { label: 'Findings by Branch/Project', to: tabLink(CODE_SEC, 'Findings by Branch/Project'), real: false },
+    ],
+  },
+  {
+    // Distinct from the operational Clusters module (pods/deployments/
+    // nodes) -- this is the security-posture lens over the same
+    // container/K8s surface.
+    label: 'Container & Kubernetes Security',
+    icon: 'container-security',
+    section: 'Security',
+    to: CONTAINER_SEC,
+    children: [
+      { label: 'Overview', to: CONTAINER_SEC, real: true },
+      { label: 'Kubernetes Security', to: tabLink(CONTAINER_SEC, 'Kubernetes Security'), real: false },
+      { label: 'Rancher', to: tabLink(CONTAINER_SEC, 'Rancher'), real: false },
+      // Real, canonical -- api.getFindingsBySource('container-images')
+      // (Trivy), the same persisted data Vulnerability Management's own
+      // Container Images tab reads, presented here as the security lens.
+      { label: 'Docker & Container Images', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true },
+      { label: 'Container Registries', to: tabLink(CONTAINER_SEC, 'Container Registries'), real: false },
+      { label: 'Runtime Risks', to: tabLink(CONTAINER_SEC, 'Runtime Risks'), real: false },
+      { label: 'Configuration Risks', to: tabLink(CONTAINER_SEC, 'Configuration Risks'), real: false },
+    ],
+  },
+  {
+    // Zero backend surface anywhere for servers/OS/on-prem today -- exists
+    // in Phase 1 to state real product scope honestly, same as AksConsole's
+    // precedent below.
+    label: 'Infrastructure Security',
+    icon: 'infra-security',
+    section: 'Security',
+    to: INFRA_SEC,
+    children: [
+      { label: 'Overview', to: INFRA_SEC, real: true },
+      { label: 'Servers', to: tabLink(INFRA_SEC, 'Servers'), real: false },
+      { label: 'Linux', to: tabLink(INFRA_SEC, 'Linux'), real: false },
+      { label: 'Ubuntu', to: tabLink(INFRA_SEC, 'Ubuntu'), real: false },
+      { label: 'Windows', to: tabLink(INFRA_SEC, 'Windows'), real: false },
+      { label: 'On-Premises Infrastructure', to: tabLink(INFRA_SEC, 'On-Premises Infrastructure'), real: false },
+      { label: 'Network & Security Configuration', to: tabLink(INFRA_SEC, 'Network & Security Configuration'), real: false },
+    ],
+  },
+  {
+    // IMPORTANT: this module's children (Repositories/Servers/Applications/
+    // APIs/Domains & URLs below) cross-link into the Security-section
+    // modules just above -- moduleMatchesPath scans EVERY child's `to`
+    // regardless of `real`, and NAV_MODULES.find() returns the first array
+    // match, so this module must stay AFTER every module its children
+    // cross-link into, or a cross-link child's `to` prefix-matching another
+    // module's own base route would make findActiveModule (and therefore
+    // AppRail/Sidebar's "which module is active" highlighting) resolve to
+    // THIS module instead of the real one. Caught by navConfig.test.ts's
+    // "resolves each new security module to itself" case -- keep that test
+    // passing if this module (or its children's cross-link targets) ever
+    // moves again.
+    //
+    // Relabeled from "Resources" to communicate the unified, cross-domain
+    // asset-inventory positioning (cloud resources today; servers/apps/
+    // repos/APIs cross-link in as their own modules ship). Label-only change
+    // -- `icon` (the RBAC menu_key) and every route below are untouched, so
+    // no per-org menu_permissions override can be orphaned by this. See
+    // icons.tsx's NAV_ICON_MAP['Asset Inventory'] entry and App.tsx's four
+    // `module="Asset Inventory"` ProtectedRoute props, which MUST stay in
+    // sync with this label (ProtectedRoute matches on label, not icon, and
+    // fails closed -- AccessDenied, not open -- on a mismatch).
+    label: 'Asset Inventory',
+    icon: 'resources',
+    section: 'Cloud Operations',
+    to: RESOURCES,
+    children: [
+      { label: 'Resource Inventory', to: RESOURCES, real: true },
+      { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
+      { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
+      { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
+      { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
+      { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
+      { label: 'Bulk Operations', to: `${RESOURCES}/all?bulk=1`, real: true, minRole: 'editor' },
+      // Already a real, live resource category (see ResourcesOverview.tsx's
+      // CATEGORIES) -- not new backend, just a direct shortcut into it.
+      { label: 'Databases', to: `${RESOURCES}/Database`, real: true },
+      // Cross-links into Code & Repository Security's real Repositories tab.
+      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true },
+      // Cross-links into Infrastructure Security / Application & API
+      // Security -- both honest RoadmapPanel destinations today, so these
+      // stay `real: false` (disabled "Planned" pill) rather than a link
+      // that lands on a page with nothing real behind it yet.
+      { label: 'Servers', to: tabLink(INFRA_SEC, 'Servers'), real: false },
+      { label: 'Applications', to: tabLink(APP_SEC, 'Applications'), real: false },
+      { label: 'APIs', to: tabLink(APP_SEC, 'APIs'), real: false },
+      { label: 'Domains & URLs', to: tabLink(APP_SEC, 'URLs & Domains'), real: false },
+    ],
+  },
+  {
+    label: 'Custom Dashboards',
+    icon: 'dashboard',
+    section: 'Cloud Operations',
+    to: DASHBOARDS,
+    children: [
+      { label: 'My Dashboards', to: DASHBOARDS, real: true },
+      { label: 'Shared Dashboards', to: tabLink(DASHBOARDS, 'shared'), real: true },
+      { label: 'Dashboard Templates', to: tabLink(DASHBOARDS, 'templates'), real: true },
+      { label: 'Widget Library', to: tabLink(DASHBOARDS, 'widgets'), real: true },
+    ],
+  },
+  {
+    label: 'Cost Management',
+    icon: 'cost',
+    section: 'Cloud Operations',
+    to: COST,
+    children: [
+      { label: 'Cost Explorer', to: COST, real: true },
+      { label: 'Cost Analytics', to: tabLink(COST, 'Cost Analytics'), real: true },
+      { label: 'Forecast', to: tabLink(COST, 'Forecast'), real: true },
+      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true, minRole: 'editor' },
+      { label: 'Cost Allocation', to: tabLink(COST, 'Cost Allocation'), real: true },
+      { label: 'Chargeback', to: tabLink(COST, 'Chargeback'), real: true },
+      { label: 'Showback', to: tabLink(COST, 'Showback'), real: true },
+      { label: 'Cost Reports', to: tabLink(COST, 'Cost Reports'), real: true },
+    ],
+  },
+  {
+    label: 'Cost Optimization',
+    icon: 'optimization',
+    section: 'Cloud Operations',
+    to: OPT,
+    children: [
+      { label: 'Savings Opportunities', to: tabLink(OPT, 'Recommendations'), real: true },
+      { label: 'Rightsizing', to: tabLink(OPT, 'Rightsizing'), real: true },
+      { label: 'Idle Resources', to: tabLink(OPT, 'Idle Resources'), real: true },
+      { label: 'Reserved Instances', to: tabLink(OPT, 'Reserved Instances'), real: true },
+      { label: 'Savings Plans', to: tabLink(OPT, 'Savings Plans'), real: true },
+      { label: 'Cost Anomalies', to: tabLink(OPT, 'Cost Anomalies'), real: true },
+      { label: 'Optimization History', to: tabLink(OPT, 'History'), real: true },
+    ],
+  },
+  {
     label: 'Clusters',
     icon: 'containers',
+    section: 'Cloud Operations',
     to: EKS_CONSOLE,
     children: [
       { label: 'AWS EKS', to: EKS_CONSOLE, real: true },
@@ -239,6 +431,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Monitoring',
     icon: 'monitoring',
+    section: 'Cloud Operations',
     to: MON,
     children: [
       { label: 'CloudWatch', to: MON, real: true },
@@ -254,6 +447,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Alerts',
     icon: 'alerts',
+    section: 'Cloud Operations',
     to: ALERTS,
     children: [
       { label: 'Active Alerts', to: ALERTS, real: true },
@@ -267,6 +461,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Issues',
     icon: 'issues',
+    section: 'Cloud Operations',
     to: ISSUES,
     children: [
       { label: 'All Issues', to: ISSUES, real: true },
@@ -275,6 +470,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Incidents',
     icon: 'incidents',
+    section: 'Cloud Operations',
     to: INCIDENTS,
     children: [
       { label: 'All Incidents', to: INCIDENTS, real: true },
@@ -286,6 +482,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Reports',
     icon: 'reports',
+    section: 'Cloud Operations',
     to: REPORTS,
     children: [
       { label: 'Executive Reports', to: REPORTS, real: true },
@@ -301,6 +498,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Users & Groups',
     icon: 'users',
+    section: 'Platform',
     to: USERS,
     minRole: 'admin',
     children: [
@@ -317,6 +515,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Organization Management',
     icon: 'organization',
+    section: 'Platform',
     to: ORG,
     minRole: 'admin',
     children: [
@@ -333,6 +532,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Automation',
     icon: 'automation',
+    section: 'Platform',
     to: AUTOMATION,
     minRole: 'editor',
     children: [
@@ -348,6 +548,7 @@ export const NAV_MODULES: NavModule[] = [
   {
     label: 'Settings',
     icon: 'settings',
+    section: 'Platform',
     to: SETTINGS,
     minRole: 'editor',
     children: [
@@ -367,6 +568,7 @@ export const NAV_MODULES: NavModule[] = [
   ...(isBillingEnabled() ? [{
     label: 'Subscription',
     icon: 'credit-card',
+    section: 'Platform',
     to: SUBSCRIPTION,
     roles: ['billing_admin', 'admin', 'owner'] as Role[],
     children: [

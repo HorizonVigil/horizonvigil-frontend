@@ -24,6 +24,12 @@ import { ResourcesCategory } from './pages/resources/ResourcesCategory';
 import { CostManagement } from './pages/CostManagement';
 import { CostOptimization } from './pages/CostOptimization';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
+import { SecurityScanningCenter } from './pages/SecurityScanningCenter';
+import { CloudSecurity } from './pages/CloudSecurity';
+import { ApplicationSecurity } from './pages/ApplicationSecurity';
+import { CodeSecurity } from './pages/CodeSecurity';
+import { ContainerKubernetesSecurity } from './pages/ContainerKubernetesSecurity';
+import { InfrastructureSecurity } from './pages/InfrastructureSecurity';
 import { EksConsole } from './pages/EksConsole';
 import { GkeConsole } from './pages/GkeConsole';
 import { AksConsole } from './pages/AksConsole';
@@ -127,13 +133,22 @@ export default function App() {
                           <Route path="/aws-accounts/:id" element={<RedirectToAccountDetail />} />
                           <Route path="/gcp-projects" element={<Navigate to="/cloud-accounts" replace />} />
                           <Route path="/gcp-projects/:id" element={<RedirectToAccountDetail />} />
-                          <Route path="/resources" element={<ProtectedRoute module="Resources"><ResourcesOverview /></ProtectedRoute>} />
-                          <Route path="/resources/all" element={<ProtectedRoute module="Resources"><Resources /></ProtectedRoute>} />
-                          <Route path="/resources/:category" element={<ProtectedRoute module="Resources"><ResourcesCategory /></ProtectedRoute>} />
-                          <Route path="/resources/:category/:service" element={<ProtectedRoute module="Resources"><Resources /></ProtectedRoute>} />
+                          {/* module="Asset Inventory" must match navConfig.ts's relabeled
+                              module (label-only rename from "Resources") -- ProtectedRoute
+                              matches on label and fails closed (AccessDenied) on any mismatch. */}
+                          <Route path="/resources" element={<ProtectedRoute module="Asset Inventory"><ResourcesOverview /></ProtectedRoute>} />
+                          <Route path="/resources/all" element={<ProtectedRoute module="Asset Inventory"><Resources /></ProtectedRoute>} />
+                          <Route path="/resources/:category" element={<ProtectedRoute module="Asset Inventory"><ResourcesCategory /></ProtectedRoute>} />
+                          <Route path="/resources/:category/:service" element={<ProtectedRoute module="Asset Inventory"><Resources /></ProtectedRoute>} />
                           <Route path="/cost-management" element={<ProtectedRoute module="Cost Management"><CostManagement /></ProtectedRoute>} />
                           <Route path="/cost-optimization" element={<ProtectedRoute module="Cost Optimization"><CostOptimization /></ProtectedRoute>} />
                           <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
+                          <Route path="/security-scanning" element={<ProtectedRoute module="Security Scanning Center"><SecurityScanningCenter /></ProtectedRoute>} />
+                          <Route path="/cloud-security" element={<ProtectedRoute module="Cloud Security"><CloudSecurity /></ProtectedRoute>} />
+                          <Route path="/application-security" element={<ProtectedRoute module="Application & API Security"><ApplicationSecurity /></ProtectedRoute>} />
+                          <Route path="/code-security" element={<ProtectedRoute module="Code & Repository Security"><CodeSecurity /></ProtectedRoute>} />
+                          <Route path="/container-security" element={<ProtectedRoute module="Container & Kubernetes Security"><ContainerKubernetesSecurity /></ProtectedRoute>} />
+                          <Route path="/infrastructure-security" element={<ProtectedRoute module="Infrastructure Security"><InfrastructureSecurity /></ProtectedRoute>} />
                           {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. Just a redirect, nothing to protect. */}
                           <Route path="/clusters" element={<Navigate to="/clusters/aws" replace />} />
                           <Route path="/clusters/aws" element={<ProtectedRoute module="Clusters"><EksConsole /></ProtectedRoute>} />
