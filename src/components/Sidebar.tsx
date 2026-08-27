@@ -5,6 +5,30 @@ import { useAuth } from '../lib/auth';
 import { findActiveModule, isChildActive, canSeeChild, canSeeModule, type Role } from '../lib/navConfig';
 import { Icon, NAV_ICON_MAP } from './icons';
 
+/** Fixed display order for Sidebar's group dividers within one module's
+ * children list -- purely cosmetic, mirrors AppRail's SECTION_ORDER for the
+ * same reason: unrelated to NavChild array order or RBAC. Currently only
+ * Vulnerability Management's ~100 children use `group`; every other
+ * module's children have no `group` and render in one unlabeled bucket,
+ * unchanged from before this existed. */
+const GROUP_ORDER = [
+  'Overview', 'Vulnerabilities', 'Risk', 'Assets', 'Security Scanning',
+  'Cloud Security', 'Application Security', 'Code Security',
+  'Container & Kubernetes', 'Infrastructure', 'Remediation', 'Reports',
+  'AWS-Native Sources',
+];
+
+function groupByGroup<T extends { group?: string }>(children: T[]): { group: string; children: T[] }[] {
+  const buckets = new Map<string, T[]>();
+  for (const c of children) {
+    const key = c.group ?? '';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(c);
+  }
+  const order = [...GROUP_ORDER, ...[...buckets.keys()].filter(k => k && !GROUP_ORDER.includes(k)), ''];
+  return order.filter(k => buckets.has(k)).map(k => ({ group: k, children: buckets.get(k)! }));
+}
+
 interface SidebarProps {
   /** Below `lg` (1024px) the sidebar is an off-canvas drawer, closed by
    * default — there's no width left to show it inline once AppRail's 64px
@@ -171,28 +195,37 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       </div>
 
       <nav className="px-2 py-2 flex flex-col gap-0.5 border-b border-slate-200 dark:border-slate-800 max-h-[38vh] overflow-y-auto">
-        {filteredChildren.map(child => (
-          <div key={child.label}>
-            {child.action === 'open-chat' ? (
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('horizonvigil:open-chat'))}
-                className="w-full text-left truncate rounded-md px-2 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                {child.label}
-              </button>
-            ) : child.real && child.to ? (
-              <NavLink
-                to={child.to}
-                className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search, location.hash) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-              >
-                {child.label}
-              </NavLink>
-            ) : (
-              <div className="flex items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-sm cursor-default" title="Planned capability">
-                <span className="truncate text-slate-400 dark:text-slate-600">{child.label}</span>
-                <span className="shrink-0 text-[9px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-600">Planned</span>
+        {groupByGroup(filteredChildren).map(({ group, children: groupChildren }, i) => (
+          <div key={group || '_ungrouped'} className={i > 0 ? 'mt-2' : ''}>
+            {group && (
+              <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                {group}
               </div>
             )}
+            {groupChildren.map(child => (
+              <div key={child.label}>
+                {child.action === 'open-chat' ? (
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('horizonvigil:open-chat'))}
+                    className="w-full text-left truncate rounded-md px-2 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    {child.label}
+                  </button>
+                ) : child.real && child.to ? (
+                  <NavLink
+                    to={child.to}
+                    className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search, location.hash) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                  >
+                    {child.label}
+                  </NavLink>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-sm cursor-default" title="Planned capability">
+                    <span className="truncate text-slate-400 dark:text-slate-600">{child.label}</span>
+                    <span className="shrink-0 text-[9px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-600">Planned</span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         ))}
       </nav>

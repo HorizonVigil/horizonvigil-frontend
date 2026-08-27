@@ -1,13 +1,25 @@
 /**
- * Full information architecture (24 top-level modules). Six of these —
- * Security Scanning Center, Cloud Security, Application & API Security,
- * Code & Repository Security, Container & Kubernetes Security, and
- * Infrastructure Security — are the unified-security-platform pillars added
- * in the Phase 1 IA redesign; they sit alongside (not replacing) the
- * existing cloud-ops modules, cross-linking into real data (Trivy container
- * findings, AWS-native findings, git installations, identities) wherever it
- * already exists rather than duplicating it. See the `section` field below
- * for the purely-cosmetic AppRail grouping this produces.
+ * Full information architecture (18 top-level modules). Vulnerability
+ * Management is the unified security workspace: its own children span
+ * Overview/Vulnerabilities/Risk/Assets plus five domain pillars (Security
+ * Scanning, Cloud Security, Application Security, Code Security, Container &
+ * Kubernetes, Infrastructure) that were briefly separate top-level modules
+ * (an earlier "Phase 1 IA redesign" pass) before being folded in here per
+ * later direction -- each pillar's own page (CloudSecurity.tsx,
+ * SecurityScanningCenter.tsx, etc.) is unchanged, still its own route with
+ * its own tab bar, just reached via this module's Sidebar now. See the
+ * `group` field on NavChild for the purely-cosmetic Sidebar-section
+ * dividers this produces, and `section` below for AppRail's (separate,
+ * module-level) grouping.
+ *
+ * NavChild labels are unique *within one module's children* (findNavChild/
+ * submenuKey/RBAC overrides/React list keys are all label-keyed per module,
+ * not globally) -- with ~100 children now on Vulnerability Management alone,
+ * several leaves that are the same concept in the spec this was built from
+ * (e.g. "SAST" under both Security Scanning and Code Security) are
+ * deliberately disambiguated with a qualifier ("SAST Scanning" vs "SAST") --
+ * don't drop the qualifier when editing, it's there to avoid a real
+ * silent-collision bug, not decoration.
  *
  * Every module and sub-item below
  * is real product scope, not aspiration copy — but not everything listed has
@@ -84,6 +96,12 @@ export interface NavChild {
   minRole?: Role;
   /** Explicit list of roles allowed to see this item. */
   roles?: Role[];
+  /** Purely cosmetic sub-grouping within one module's Sidebar children list
+   * (e.g. Vulnerability Management's Overview/Vulnerabilities/Risk/Assets/...
+   * sections) — mirrors NavModule.section's role for AppRail. Never affects
+   * canSeeChild/findNavChild/isChildActive/moduleMatchesPath, purely a
+   * Sidebar rendering hint. */
+  group?: string;
 }
 
 export interface NavModule {
@@ -134,6 +152,14 @@ function tabLink(base: string, tab: string): string {
   return `${base}?tab=${encodeURIComponent(tab)}`;
 }
 
+/** Same as tabLink, plus a `preset=<value>` param — used by the Vulnerabilities
+ * group's Critical/Exploitable/Newly Discovered/Aging/Suppressed/Resolved
+ * children, all of which land on the same Security Findings tab pre-filtered
+ * rather than each being its own table. */
+function presetLink(base: string, tab: string, preset: string): string {
+  return `${tabLink(base, tab)}&preset=${encodeURIComponent(preset)}`;
+}
+
 export const NAV_MODULES: NavModule[] = [
   {
     label: 'Overview',
@@ -166,18 +192,39 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
+    // The unified security workspace -- Overview/Vulnerabilities/Risk/Assets
+    // groups plus the five domain pillars (Security Scanning, Cloud
+    // Security, Application Security, Code Security, Container &
+    // Kubernetes, Infrastructure) that were separate top-level modules
+    // before this restructure. Each pillar's own page (CloudSecurity.tsx,
+    // SecurityScanningCenter.tsx, etc.) is unchanged -- still its own route,
+    // still its own tab bar -- only reached via this module's Sidebar now
+    // instead of its own rail icon. `group` tags below drive Sidebar's
+    // section dividers; purely cosmetic, see NavChild.group's own comment.
     label: 'Vulnerability Management',
     icon: 'security',
     section: 'Security',
     to: VULN,
     children: [
-      { label: 'Security Hub', to: VULN, real: true },
-      { label: 'GuardDuty', to: tabLink(VULN, 'GuardDuty'), real: true },
-      { label: 'Inspector', to: tabLink(VULN, 'Inspector'), real: true },
-      { label: 'IAM Access Analyzer', to: tabLink(VULN, 'IAM Access Analyzer'), real: true },
-      { label: 'AWS Config', to: tabLink(VULN, 'AWS Config'), real: true },
-      { label: 'Container Images', to: tabLink(VULN, 'Container Images'), real: true },
-      { label: 'Security Findings', to: tabLink(VULN, 'Security Findings'), real: true },
+      // ── Overview ──────────────────────────────────────────────────────
+      { label: 'Vulnerability Overview', to: VULN, real: true, group: 'Overview' },
+      { label: 'Risk Overview', real: false, group: 'Overview' },
+      { label: 'Exposure Overview', real: false, group: 'Overview' },
+
+      // ── Vulnerabilities ───────────────────────────────────────────────
+      // All seven land on the same Security Findings table, pre-filtered by
+      // a `preset` param -- not seven separate table implementations.
+      { label: 'All Vulnerabilities', to: tabLink(VULN, 'Security Findings'), real: true, group: 'Vulnerabilities' },
+      { label: 'Critical Vulnerabilities', to: presetLink(VULN, 'Security Findings', 'critical'), real: true, group: 'Vulnerabilities' },
+      { label: 'Exploitable Vulnerabilities', to: presetLink(VULN, 'Security Findings', 'exploitable'), real: true, group: 'Vulnerabilities' },
+      { label: 'Newly Discovered', to: presetLink(VULN, 'Security Findings', 'new'), real: true, group: 'Vulnerabilities' },
+      { label: 'Aging Vulnerabilities', to: presetLink(VULN, 'Security Findings', 'aging'), real: true, group: 'Vulnerabilities' },
+      { label: 'Suppressed / Accepted Risk', to: presetLink(VULN, 'Security Findings', 'suppressed'), real: true, group: 'Vulnerabilities' },
+      { label: 'Resolved Vulnerabilities', to: presetLink(VULN, 'Security Findings', 'resolved'), real: true, group: 'Vulnerabilities' },
+
+      // ── Risk ──────────────────────────────────────────────────────────
+      { label: 'Risk Prioritization', real: false, group: 'Risk' },
+      { label: 'Risk Score', real: false, group: 'Risk' },
       // real: false until confirmed live against a real positive END-TO-END
       // match (see this session's attack-path-engine plan) -- the tab and
       // its backend route both work, and the exposure leg now has a real
@@ -185,138 +232,171 @@ export const NAV_MODULES: NavModule[] = [
       // resource has no ASSUMES edge to an IAM role (load balancers don't
       // carry one) and no matching critical/high finding on it either, so
       // no row has ever actually rendered here yet. Flip once one does.
-      { label: 'Attack Paths', to: tabLink(VULN, 'Attack Paths'), real: false },
-      { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true },
-      { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true },
-      { label: 'Scanners', to: tabLink(VULN, 'Scanners'), real: true },
-    ],
-  },
-  {
-    // Command-center for every scan category (SAST/DAST/SCA/container/IaC/
-    // secrets/API/web/pentest/cloud/infra) -- the unified entry point the
-    // "don't build a pile of separate scanner pages" requirement calls for.
-    // Cross-links into the Scanners tab above (session-ephemeral results,
-    // see api.ts's getScanStatus/getScanResults -- no list-all-scans
-    // endpoint exists yet) rather than duplicating it.
-    label: 'Security Scanning Center',
-    icon: 'scanning-center',
-    section: 'Security',
-    to: SCANNING,
-    children: [
-      { label: 'Overview', to: SCANNING, real: true },
-      { label: 'SAST', to: tabLink(SCANNING, 'SAST'), real: false },
-      { label: 'DAST', to: tabLink(SCANNING, 'DAST'), real: false },
-      { label: 'SCA', to: tabLink(SCANNING, 'SCA'), real: false },
+      { label: 'Attack Paths', to: tabLink(VULN, 'Attack Paths'), real: false, group: 'Risk' },
+      { label: 'Business Risk', real: false, group: 'Risk' },
+      { label: 'Risk Correlation', real: false, group: 'Risk' },
+
+      // ── Assets ────────────────────────────────────────────────────────
+      // "Cloud Assets"/"Databases" are deliberately NOT listed here as their
+      // own cross-link children, unlike Repository Inventory/Containers
+      // below -- their natural target is /resources*, which is Asset
+      // Inventory's own exclusively-owned base path. Asset Inventory sits
+      // AFTER this module in NAV_MODULES (see the ordering-constraint
+      // comment on that module), so a child here pointing at /resources*
+      // would win moduleMatchesPath's prefix match before Asset Inventory's
+      // own `to` is ever checked -- the same class of collision this file's
+      // header comment warns about, just in the opposite direction. Asset
+      // Inventory is one rail-icon click away regardless, so the fix is
+      // simply not claiming its territory from in here.
+      { label: 'All Assets', real: false, group: 'Assets' },
+      { label: 'Infrastructure', real: false, group: 'Assets' },
+      // "* Assets"/"* Inventory" naming below disambiguates from the
+      // same-named leaves under Application Security/Code Security/
+      // Container & Kubernetes further down -- NavChild identity (findNavChild,
+      // submenuKey, RBAC overrides, React list keys) is label-keyed *within*
+      // one module's children, so a label can't repeat here even across groups.
+      { label: 'Kubernetes Assets', real: false, group: 'Assets' },
+      // Real -- same Trivy-backed table as Container & Kubernetes Security's own tab.
+      { label: 'Containers', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Assets' },
+      // Real -- api.getGitInstallations()/getInstallationRepos(), same as Code & Repository Security's own tab.
+      { label: 'Repository Inventory', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Assets' },
+      { label: 'Application Inventory', real: false, group: 'Assets' },
+      { label: 'API Inventory', real: false, group: 'Assets' },
+      { label: 'Domain Inventory', real: false, group: 'Assets' },
+      // Real, live resource category (ResourcesOverview.tsx's CATEGORIES) --
+      // not cross-linked with a `to` here for the same /resources*
+      // ownership reason as "Cloud Assets" above; reachable via Asset
+      // Inventory's own Databases shortcut.
+      { label: 'Databases', real: false, group: 'Assets' },
+
+      // ── Security Scanning ────────────────────────────────────────────
+      // Command-center for every scan category -- the unified entry point
+      // the "don't build a pile of separate scanner pages" requirement
+      // calls for. Cross-links into the Scanners tab (session-ephemeral
+      // results, see api.ts's getScanStatus/getScanResults -- no
+      // list-all-scans endpoint exists yet) rather than duplicating it.
+      { label: 'Scan Overview', to: SCANNING, real: true, group: 'Security Scanning' },
+      { label: 'All Scans', to: tabLink(VULN, 'Scanners'), real: true, group: 'Security Scanning' },
+      // "* Scanning"/"* Testing" naming disambiguates from the same-named
+      // leaves under Code Security/Application Security further down --
+      // NavChild labels are unique-per-module, not globally.
+      { label: 'SAST Scanning', to: tabLink(SCANNING, 'SAST'), real: false, group: 'Security Scanning' },
+      { label: 'DAST Scanning', to: tabLink(SCANNING, 'DAST'), real: false, group: 'Security Scanning' },
+      { label: 'SCA Scanning', to: tabLink(SCANNING, 'SCA'), real: false, group: 'Security Scanning' },
       // Real -- deep-links to Container & Kubernetes Security's canonical
       // Docker & Container Images tab (real Trivy findings) rather than
       // rendering a second copy of the same table.
-      { label: 'Container Scanning', to: tabLink(SCANNING, 'Container Scanning'), real: true },
-      { label: 'IaC Scanning', to: tabLink(SCANNING, 'IaC Scanning'), real: false },
-      { label: 'Secrets Detection', to: tabLink(SCANNING, 'Secrets Detection'), real: false },
-      { label: 'API Security Testing', to: tabLink(SCANNING, 'API Security Testing'), real: false },
-      { label: 'Web Security Testing', to: tabLink(SCANNING, 'Web Security Testing'), real: false },
-      { label: 'Pentest', to: tabLink(SCANNING, 'Pentest'), real: false },
+      { label: 'Container Scanning', to: tabLink(SCANNING, 'Container Scanning'), real: true, group: 'Security Scanning' },
+      { label: 'IaC Scanning', to: tabLink(SCANNING, 'IaC Scanning'), real: false, group: 'Security Scanning' },
+      { label: 'Secrets Scanning', to: tabLink(SCANNING, 'Secrets Detection'), real: false, group: 'Security Scanning' },
+      { label: 'API Security Testing', to: tabLink(SCANNING, 'API Security Testing'), real: false, group: 'Security Scanning' },
+      { label: 'Web Security Testing', to: tabLink(SCANNING, 'Web Security Testing'), real: false, group: 'Security Scanning' },
+      { label: 'URL / Domain Testing', real: false, group: 'Security Scanning' },
+      { label: 'Penetration Testing', to: tabLink(SCANNING, 'Pentest'), real: false, group: 'Security Scanning' },
+      { label: 'Infrastructure Scanning', real: false, group: 'Security Scanning' },
       // Real -- reuses SecurityPostureSummary fed by the same vulnerability
       // dashboard endpoint Cloud Security's own Posture tab uses.
-      { label: 'Cloud Posture', to: tabLink(SCANNING, 'Cloud Posture'), real: true },
-    ],
-  },
-  {
-    // Multi-cloud security posture pillar -- distinct from Cloud Accounts
-    // (connection management/ops) and from Vulnerability Management's raw
-    // AWS-native tool tabs, which this module re-presents through a
-    // posture/risk lens rather than duplicating.
-    label: 'Cloud Security',
-    icon: 'cloud-security',
-    section: 'Security',
-    to: CLOUD_SEC,
-    children: [
-      { label: 'Posture', to: CLOUD_SEC, real: true },
-      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true },
-      { label: 'Identity & Access Risk', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true },
-      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true },
-      // Deep-link only -- to Vulnerability Management's own Security
-      // Findings tab (same real getFindings() data), not a second table.
-      { label: 'Cloud Vulnerabilities', to: tabLink(CLOUD_SEC, 'Cloud Vulnerabilities'), real: true },
-      { label: 'Compliance', to: tabLink(CLOUD_SEC, 'Compliance'), real: true },
-      // No Azure/OCI posture connector exists yet -- ResourceCatalogEntry's
-      // provider type is 'aws' | 'gcp' only. Honest RoadmapPanel.
-      { label: 'Multi-Cloud Coverage', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: false },
-    ],
-  },
-  {
-    label: 'Application & API Security',
-    icon: 'app-security',
-    section: 'Security',
-    to: APP_SEC,
-    children: [
-      { label: 'Overview', to: APP_SEC, real: true },
-      { label: 'Applications', to: tabLink(APP_SEC, 'Applications'), real: false },
-      { label: 'APIs', to: tabLink(APP_SEC, 'APIs'), real: false },
-      { label: 'URLs & Domains', to: tabLink(APP_SEC, 'URLs & Domains'), real: false },
-      { label: 'DAST Results', to: tabLink(APP_SEC, 'DAST Results'), real: false },
-      { label: 'SAST Results', to: tabLink(APP_SEC, 'SAST Results'), real: false },
-      { label: 'API Security Findings', to: tabLink(APP_SEC, 'API Security Findings'), real: false },
-      { label: 'Web Vulnerabilities', to: tabLink(APP_SEC, 'Web Vulnerabilities'), real: false },
-      { label: 'Testing History', to: tabLink(APP_SEC, 'Testing History'), real: false },
-    ],
-  },
-  {
-    label: 'Code & Repository Security',
-    icon: 'code-security',
-    section: 'Security',
-    to: CODE_SEC,
-    children: [
-      { label: 'Overview', to: CODE_SEC, real: true },
+      { label: 'Cloud Security Scanning', to: tabLink(SCANNING, 'Cloud Posture'), real: true, group: 'Security Scanning' },
+
+      // ── Cloud Security ────────────────────────────────────────────────
+      // Multi-cloud security posture pillar -- distinct from Cloud Accounts
+      // (connection management/ops) and from the AWS-native tool tabs
+      // above, which this pillar re-presents through a posture/risk lens.
+      { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
+      { label: 'AWS', real: false, group: 'Cloud Security' },
+      { label: 'Azure', real: false, group: 'Cloud Security' },
+      { label: 'GCP', real: false, group: 'Cloud Security' },
+      { label: 'OCI', real: false, group: 'Cloud Security' },
+      { label: 'Other Clouds', real: false, group: 'Cloud Security' },
+      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
+      { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
+      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
+
+      // ── Application Security ─────────────────────────────────────────
+      { label: 'Application Security Overview', to: APP_SEC, real: true, group: 'Application Security' },
+      { label: 'Applications', to: tabLink(APP_SEC, 'Applications'), real: false, group: 'Application Security' },
+      { label: 'APIs', to: tabLink(APP_SEC, 'APIs'), real: false, group: 'Application Security' },
+      { label: 'Web Applications', real: false, group: 'Application Security' },
+      { label: 'Domains / URLs', to: tabLink(APP_SEC, 'URLs & Domains'), real: false, group: 'Application Security' },
+      { label: 'DAST', to: tabLink(APP_SEC, 'DAST Results'), real: false, group: 'Application Security' },
+      { label: 'API Security', to: tabLink(APP_SEC, 'API Security Findings'), real: false, group: 'Application Security' },
+      { label: 'Web Vulnerabilities', to: tabLink(APP_SEC, 'Web Vulnerabilities'), real: false, group: 'Application Security' },
+
+      // ── Code Security ─────────────────────────────────────────────────
+      { label: 'Code Security Overview', to: CODE_SEC, real: true, group: 'Code Security' },
       // Real -- api.getGitInstallations()/getInstallationRepos() already
       // back Settings > Git Integration's Auto-PR feature with real,
       // persisted repo rows.
-      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true },
-      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false },
-      { label: 'Dependency Vulnerabilities', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false },
-      { label: 'Secrets Detected', to: tabLink(CODE_SEC, 'Secrets Detected'), real: false },
-      // Blocked even in principle today -- ScannerFinding.location carries
-      // no named repo/branch/project field. Backend item, not a UI gap.
-      { label: 'Findings by Branch/Project', to: tabLink(CODE_SEC, 'Findings by Branch/Project'), real: false },
-    ],
-  },
-  {
-    // Distinct from the operational Clusters module (pods/deployments/
-    // nodes) -- this is the security-posture lens over the same
-    // container/K8s surface.
-    label: 'Container & Kubernetes Security',
-    icon: 'container-security',
-    section: 'Security',
-    to: CONTAINER_SEC,
-    children: [
-      { label: 'Overview', to: CONTAINER_SEC, real: true },
-      { label: 'Kubernetes Security', to: tabLink(CONTAINER_SEC, 'Kubernetes Security'), real: false },
-      { label: 'Rancher', to: tabLink(CONTAINER_SEC, 'Rancher'), real: false },
+      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
+      { label: 'SAST', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false, group: 'Code Security' },
+      { label: 'SCA', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false, group: 'Code Security' },
+      { label: 'Dependencies', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false, group: 'Code Security' },
+      { label: 'Secrets', to: tabLink(CODE_SEC, 'Secrets Detected'), real: false, group: 'Code Security' },
+      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false, group: 'Code Security' },
+
+      // ── Container & Kubernetes ────────────────────────────────────────
+      // Distinct from the operational Clusters module (pods/deployments/
+      // nodes) -- this is the security-posture lens over the same
+      // container/K8s surface.
+      { label: 'Container & Kubernetes Overview', to: CONTAINER_SEC, real: true, group: 'Container & Kubernetes' },
+      { label: 'Kubernetes', to: tabLink(CONTAINER_SEC, 'Kubernetes Security'), real: false, group: 'Container & Kubernetes' },
+      { label: 'Rancher', to: tabLink(CONTAINER_SEC, 'Rancher'), real: false, group: 'Container & Kubernetes' },
       // Real, canonical -- api.getFindingsBySource('container-images')
-      // (Trivy), the same persisted data Vulnerability Management's own
-      // Container Images tab reads, presented here as the security lens.
-      { label: 'Docker & Container Images', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true },
-      { label: 'Container Registries', to: tabLink(CONTAINER_SEC, 'Container Registries'), real: false },
-      { label: 'Runtime Risks', to: tabLink(CONTAINER_SEC, 'Runtime Risks'), real: false },
-      { label: 'Configuration Risks', to: tabLink(CONTAINER_SEC, 'Configuration Risks'), real: false },
-    ],
-  },
-  {
-    // Zero backend surface anywhere for servers/OS/on-prem today -- exists
-    // in Phase 1 to state real product scope honestly, same as AksConsole's
-    // precedent below.
-    label: 'Infrastructure Security',
-    icon: 'infra-security',
-    section: 'Security',
-    to: INFRA_SEC,
-    children: [
-      { label: 'Overview', to: INFRA_SEC, real: true },
-      { label: 'Servers', to: tabLink(INFRA_SEC, 'Servers'), real: false },
-      { label: 'Linux', to: tabLink(INFRA_SEC, 'Linux'), real: false },
-      { label: 'Ubuntu', to: tabLink(INFRA_SEC, 'Ubuntu'), real: false },
-      { label: 'Windows', to: tabLink(INFRA_SEC, 'Windows'), real: false },
-      { label: 'On-Premises Infrastructure', to: tabLink(INFRA_SEC, 'On-Premises Infrastructure'), real: false },
-      { label: 'Network & Security Configuration', to: tabLink(INFRA_SEC, 'Network & Security Configuration'), real: false },
+      // (Trivy), the same persisted data the AWS-native "Container Images"
+      // source tab further down reads. Labeled "Container Image Inventory"
+      // here (not "Container Images") since that exact label is already
+      // used by the AWS-native tab below -- same label-uniqueness
+      // constraint as the Assets/Security Scanning renames above.
+      { label: 'Docker', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
+      { label: 'Container Image Inventory', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
+      { label: 'Registries', to: tabLink(CONTAINER_SEC, 'Container Registries'), real: false, group: 'Container & Kubernetes' },
+      { label: 'Runtime Security', to: tabLink(CONTAINER_SEC, 'Runtime Risks'), real: false, group: 'Container & Kubernetes' },
+      { label: 'Container Vulnerabilities', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
+
+      // ── Infrastructure ────────────────────────────────────────────────
+      // Zero backend surface anywhere for servers/OS/on-prem today -- exists
+      // to state real product scope honestly, same as AksConsole's precedent.
+      { label: 'Infrastructure Overview', to: INFRA_SEC, real: true, group: 'Infrastructure' },
+      { label: 'Servers', to: tabLink(INFRA_SEC, 'Servers'), real: false, group: 'Infrastructure' },
+      { label: 'Linux', to: tabLink(INFRA_SEC, 'Linux'), real: false, group: 'Infrastructure' },
+      { label: 'Ubuntu', to: tabLink(INFRA_SEC, 'Ubuntu'), real: false, group: 'Infrastructure' },
+      { label: 'Windows', to: tabLink(INFRA_SEC, 'Windows'), real: false, group: 'Infrastructure' },
+      { label: 'Operating Systems', to: INFRA_SEC, real: false, group: 'Infrastructure' },
+      { label: 'Network Security', to: tabLink(INFRA_SEC, 'Network & Security Configuration'), real: false, group: 'Infrastructure' },
+      { label: 'Infrastructure Vulnerabilities', to: INFRA_SEC, real: false, group: 'Infrastructure' },
+
+      // ── Remediation ───────────────────────────────────────────────────
+      { label: 'Remediation Overview', real: false, group: 'Remediation' },
+      { label: 'Remediation Queue', real: false, group: 'Remediation' },
+      { label: 'Fix Recommendations', real: false, group: 'Remediation' },
+      { label: 'Tickets', real: false, group: 'Remediation' },
+      { label: 'SLA', real: false, group: 'Remediation' },
+      { label: 'Exceptions', real: false, group: 'Remediation' },
+
+      // ── Reports ───────────────────────────────────────────────────────
+      // The real Reports module (its own top-level rail icon, unaffected by
+      // this restructure) owns every /reports* path. Vulnerability
+      // Management sits before it in NAV_MODULES, so -- same reasoning as
+      // the Assets group's Cloud Assets/Databases above -- these can't
+      // carry a `to` without stealing /reports* away from the real Reports
+      // module. Reports is one rail-icon click away regardless.
+      { label: 'Vulnerability Reports', real: false, group: 'Reports' },
+      { label: 'Executive Reports', real: false, group: 'Reports' },
+      { label: 'Compliance Reports', real: false, group: 'Reports' },
+      { label: 'Scan Reports', real: false, group: 'Reports' },
+      { label: 'Asset Reports', real: false, group: 'Reports' },
+      { label: 'Export Center', real: false, group: 'Reports' },
+
+      // ── AWS-native source tabs (unchanged from before this restructure) ─
+      { label: 'Security Hub', to: tabLink(VULN, 'Security Hub'), real: true, group: 'AWS-Native Sources' },
+      { label: 'GuardDuty', to: tabLink(VULN, 'GuardDuty'), real: true, group: 'AWS-Native Sources' },
+      { label: 'Inspector', to: tabLink(VULN, 'Inspector'), real: true, group: 'AWS-Native Sources' },
+      { label: 'IAM Access Analyzer', to: tabLink(VULN, 'IAM Access Analyzer'), real: true, group: 'AWS-Native Sources' },
+      { label: 'AWS Config', to: tabLink(VULN, 'AWS Config'), real: true, group: 'AWS-Native Sources' },
+      { label: 'Container Images', to: tabLink(VULN, 'Container Images'), real: true, group: 'AWS-Native Sources' },
+      { label: 'Compliance', to: tabLink(VULN, 'Compliance'), real: true, group: 'AWS-Native Sources' },
+      { label: 'Trusted Advisor', to: tabLink(VULN, 'Trusted Advisor'), real: true, group: 'AWS-Native Sources' },
+      { label: 'Scanners', to: tabLink(VULN, 'Scanners'), real: true, group: 'AWS-Native Sources' },
     ],
   },
   {
@@ -357,12 +437,16 @@ export const NAV_MODULES: NavModule[] = [
       // Already a real, live resource category (see ResourcesOverview.tsx's
       // CATEGORIES) -- not new backend, just a direct shortcut into it.
       { label: 'Databases', to: `${RESOURCES}/Database`, real: true },
-      // Cross-links into Code & Repository Security's real Repositories tab.
-      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true },
-      // Cross-links into Infrastructure Security / Application & API
-      // Security -- both honest RoadmapPanel destinations today, so these
-      // stay `real: false` (disabled "Planned" pill) rather than a link
-      // that lands on a page with nothing real behind it yet.
+      // Code Security/Infrastructure/Application & API Security are all now
+      // nested under Vulnerability Management (not standalone modules), and
+      // Vulnerability Management sits before this module in NAV_MODULES --
+      // a `real: true` cross-link into any of their paths from here would
+      // let this module's children steal that path away from Vulnerability
+      // Management in moduleMatchesPath's prefix scan (caught by
+      // navConfig.test.ts's cross-link-ownership test). Real, working
+      // pages -- just reachable via Vulnerability Management's own Sidebar
+      // (Assets/Code Security groups), not cross-linked from here.
+      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: false },
       { label: 'Servers', to: tabLink(INFRA_SEC, 'Servers'), real: false },
       { label: 'Applications', to: tabLink(APP_SEC, 'Applications'), real: false },
       { label: 'APIs', to: tabLink(APP_SEC, 'APIs'), real: false },

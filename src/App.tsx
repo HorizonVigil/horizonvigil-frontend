@@ -6,6 +6,7 @@ import { OrgProvider } from './lib/orgContext';
 import { FilterProvider } from './lib/filterContext';
 import { SyncProvider } from './lib/syncContext';
 import { ToastProvider } from './lib/toast';
+import { DemoDataProvider } from './lib/demoData/context';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
@@ -24,6 +25,7 @@ import { ResourcesCategory } from './pages/resources/ResourcesCategory';
 import { CostManagement } from './pages/CostManagement';
 import { CostOptimization } from './pages/CostOptimization';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
+import { VulnerabilityDetail } from './pages/VulnerabilityDetail';
 import { SecurityScanningCenter } from './pages/SecurityScanningCenter';
 import { CloudSecurity } from './pages/CloudSecurity';
 import { ApplicationSecurity } from './pages/ApplicationSecurity';
@@ -96,6 +98,7 @@ export default function App() {
         <AuthProvider>
           <OrgProvider>
             <FilterProvider>
+              <DemoDataProvider>
               <SyncProvider>
                 <ToastProvider>
                   <Routes>
@@ -143,6 +146,7 @@ export default function App() {
                           <Route path="/cost-management" element={<ProtectedRoute module="Cost Management"><CostManagement /></ProtectedRoute>} />
                           <Route path="/cost-optimization" element={<ProtectedRoute module="Cost Optimization"><CostOptimization /></ProtectedRoute>} />
                           <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
+                          <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
                           <Route path="/security-scanning" element={<ProtectedRoute module="Security Scanning Center"><SecurityScanningCenter /></ProtectedRoute>} />
                           <Route path="/cloud-security" element={<ProtectedRoute module="Cloud Security"><CloudSecurity /></ProtectedRoute>} />
                           <Route path="/application-security" element={<ProtectedRoute module="Application & API Security"><ApplicationSecurity /></ProtectedRoute>} />
@@ -180,6 +184,7 @@ export default function App() {
                   </Routes>
                 </ToastProvider>
               </SyncProvider>
+              </DemoDataProvider>
             </FilterProvider>
           </OrgProvider>
         </AuthProvider>

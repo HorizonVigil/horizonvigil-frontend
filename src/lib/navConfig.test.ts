@@ -16,6 +16,38 @@ describe('NAV_MODULES sections', () => {
     const icons = NAV_MODULES.map(m => m.icon);
     expect(new Set(icons).size).toBe(icons.length);
   });
+
+  /**
+   * findActiveModule/moduleMatchesPath do a prefix match over EVERY child's
+   * `to` regardless of `real` or which module declares it, and NAV_MODULES
+   * .find() returns the first array match -- so a child that cross-links
+   * into a path another module actually owns can silently "steal" that
+   * path if it happens to sit earlier in the array (caught twice by hand
+   * this session: Asset Inventory's old cross-links into the six now-folded
+   * security modules, and Vulnerability Management's Reports/Resources
+   * cross-links). This test asserts the invariant directly instead of
+   * relying on catching each instance by hand again: every real child's
+   * path must resolve, via findActiveModule, back to the module that
+   * actually declares it.
+   */
+  it('every real child\'s path resolves back to its own declaring module (no cross-link steals another module\'s path)', () => {
+    function pathOnly(to: string): string {
+      return to.split('#')[0].split('?')[0];
+    }
+    const offenders: string[] = [];
+    for (const m of NAV_MODULES) {
+      for (const c of m.children) {
+        if (!c.real || !c.to) continue;
+        const path = pathOnly(c.to);
+        if (!path) continue;
+        const resolved = findActiveModule(path);
+        if (resolved.label !== m.label) {
+          offenders.push(`"${m.label}" > "${c.label}" (${c.to}) resolves to "${resolved.label}" instead`);
+        }
+      }
+    }
+    expect(offenders, offenders.join('\n')).toEqual([]);
+  });
 });
 
 describe('moduleMatchesPath', () => {
@@ -57,13 +89,13 @@ describe('findActiveModule', () => {
     expect(findActiveModule('/resources').label).toBe('Asset Inventory');
   });
 
-  it('resolves each new security module to itself', () => {
-    expect(findActiveModule('/security-scanning').label).toBe('Security Scanning Center');
-    expect(findActiveModule('/cloud-security').label).toBe('Cloud Security');
-    expect(findActiveModule('/application-security').label).toBe('Application & API Security');
-    expect(findActiveModule('/code-security').label).toBe('Code & Repository Security');
-    expect(findActiveModule('/container-security').label).toBe('Container & Kubernetes Security');
-    expect(findActiveModule('/infrastructure-security').label).toBe('Infrastructure Security');
+  it('resolves each security pillar route to Vulnerability Management, which now owns them all', () => {
+    expect(findActiveModule('/security-scanning').label).toBe('Vulnerability Management');
+    expect(findActiveModule('/cloud-security').label).toBe('Vulnerability Management');
+    expect(findActiveModule('/application-security').label).toBe('Vulnerability Management');
+    expect(findActiveModule('/code-security').label).toBe('Vulnerability Management');
+    expect(findActiveModule('/container-security').label).toBe('Vulnerability Management');
+    expect(findActiveModule('/infrastructure-security').label).toBe('Vulnerability Management');
   });
 
   it('falls back to the first module for a path nothing claims', () => {
