@@ -43,6 +43,7 @@ function formatReferralCents(cents: number): string {
 const METRIC_LABELS: Record<string, string> = {
   cloud_accounts: 'Cloud Accounts', users: 'Users', api_requests: 'API Requests',
   ai_requests: 'AI Requests', storage_gb: 'Storage (GB)', automations: 'Automations / mo',
+  resources: 'Resources Tracked', containers: 'Containers', findings: 'Open Findings',
 };
 
 export function Subscription() {
