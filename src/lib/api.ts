@@ -600,8 +600,8 @@ class ApiClient {
   updateAlertStatus(id: string, status: 'open' | 'acknowledged' | 'in_progress' | 'resolved') { return this.patch<AlertRow>('alerts', `/api/alerts/alerts/${id}`, { status }); }
 
   getAlertRules(params: { enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<AlertRule>>('alerts', `/api/alerts/rules${qs(params)}`); }
-  createAlertRule(data: { name: string; condition?: unknown; severity?: string; notificationChannels?: unknown[]; enabled?: boolean }) { return this.post<AlertRule>('alerts', '/api/alerts/rules', data); }
-  updateAlertRule(id: string, data: Partial<{ name: string; condition: unknown; severity: string; notificationChannels: unknown[]; enabled: boolean }>) { return this.put<AlertRule>('alerts', `/api/alerts/rules/${id}`, data); }
+  createAlertRule(data: { name: string; condition?: unknown; severity?: string; notificationChannels?: unknown[]; enabled?: boolean; escalationPolicyId?: string | null }) { return this.post<AlertRule>('alerts', '/api/alerts/rules', data); }
+  updateAlertRule(id: string, data: Partial<{ name: string; condition: unknown; severity: string; notificationChannels: unknown[]; enabled: boolean; escalationPolicyId: string | null }>) { return this.put<AlertRule>('alerts', `/api/alerts/rules/${id}`, data); }
   deleteAlertRule(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/rules/${id}`); }
   // Evaluates enabled alert_rules against monitoring_alarms/cloud_resources and inserts real alerts rows -- called automatically after a Discover Resources scan finishes (see syncContext.tsx, mirroring generateRecommendations) and from a manual "Evaluate Now" button.
   evaluateAlertRules(connectionId?: string) {
@@ -1144,7 +1144,7 @@ export interface ScannerFinding {
   status: 'open' | 'resolved' | 'suppressed' | 'accepted_risk'; first_seen: string; last_seen: string;
   source_finding_id: string; location: Record<string, unknown> | null; references: string[] | null;
 }
-export interface AlertRule { id: string; org_id: string; name: string; condition: unknown; severity: string; notification_channels: unknown[]; enabled: boolean; created_at: string }
+export interface AlertRule { id: string; org_id: string; name: string; condition: unknown; severity: string; notification_channels: unknown[]; enabled: boolean; escalation_policy_id: string | null; created_at: string }
 export interface NotificationChannel { id: string; org_id: string; channel_type: string; name: string; config: unknown; enabled: boolean; created_at: string }
 export interface EscalationPolicy { id: string; org_id: string; name: string; steps: unknown[]; created_at: string }
 export interface MaintenanceWindow { id: string; org_id: string; connection_id: string | null; name: string; starts_at: string; ends_at: string; recurrence: unknown; created_by: string; created_at: string }

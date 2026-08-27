@@ -235,6 +235,7 @@ export function Alerts() {
   const [ruleSeverity, setRuleSeverity] = useState('medium');
   const [ruleEnabled, setRuleEnabled] = useState(true);
   const [ruleChannelIds, setRuleChannelIds] = useState<string[]>([]);
+  const [ruleEscalationPolicyId, setRuleEscalationPolicyId] = useState('');
   const [ruleConditionText, setRuleConditionText] = useState('{}');
   const [ruleError, setRuleError] = useState('');
   const [evaluating, setEvaluating] = useState(false);
@@ -252,7 +253,7 @@ export function Alerts() {
   }
 
   function resetRuleForm() {
-    setRuleName(''); setRuleSeverity('medium'); setRuleEnabled(true); setRuleChannelIds([]); setRuleConditionText('{}'); setRuleError('');
+    setRuleName(''); setRuleSeverity('medium'); setRuleEnabled(true); setRuleChannelIds([]); setRuleEscalationPolicyId(''); setRuleConditionText('{}'); setRuleError('');
   }
 
   async function createRule(e: FormEvent) {
@@ -274,6 +275,7 @@ export function Alerts() {
         severity: ruleSeverity,
         enabled: ruleEnabled,
         notificationChannels: ruleChannelIds,
+        escalationPolicyId: ruleEscalationPolicyId || null,
         condition,
       });
       setRuleModalOpen(false);
@@ -725,6 +727,16 @@ export function Alerts() {
               ))}
             </div>
           </div>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="form-label">Escalation policy (optional)</span>
+            <select value={ruleEscalationPolicyId} onChange={e => setRuleEscalationPolicyId(e.target.value)} className="form-input w-full">
+              <option value="">None — use the org-wide critical broadcast only</option>
+              {escalations.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              When this rule fires, the policy's first step is notified immediately (Slack/webhook channels only — email/SMS/PagerDuty channels aren't wired to escalations yet). Timed escalation to later steps isn't built yet either; a policy currently applies its first step only.
+            </p>
+          </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="form-label">Condition (JSON, optional)</span>
             <p className="text-[11px] text-slate-400 leading-snug">
