@@ -592,6 +592,13 @@ class ApiClient {
   getScanResults(scanner: string, scanId: string, params: { severity?: string; status?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ScannerFinding>>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans/${scanId}/results${qs(params)}`);
   }
+  /** A tenant's own scan history for one scanner, newest first -- real,
+   * persisted, independently-queryable (not session-ephemeral). As of this
+   * pass, only implemented upstream by semgrep; the other 9 scanners 404
+   * until their own /v1/scans route is rolled out. */
+  listScans(scanner: string, params: { limit?: number; offset?: number } = {}) {
+    return this.get<{ items: ScanRecord[]; total: number; limit: number; offset: number }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans${qs(params)}`);
+  }
 
   // ── alerts-api ───────────────────────────────────────────────────────────
 

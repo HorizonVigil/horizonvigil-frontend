@@ -280,7 +280,11 @@ export const NAV_MODULES: NavModule[] = [
       // "* Scanning"/"* Testing" naming disambiguates from the same-named
       // leaves under Code Security/Application Security further down --
       // NavChild labels are unique-per-module, not globally.
-      { label: 'SAST Scanning', to: tabLink(SCANNING, 'SAST'), real: false, group: 'Security Scanning' },
+      // Real -- Security Scanning Center's SAST tab now shows a persisted,
+      // independently-queryable Semgrep scan history (api.listScans),
+      // unlike the other 4 scanning-category tabs still awaiting their own
+      // scanner service's GET /v1/scans rollout.
+      { label: 'SAST Scanning', to: tabLink(SCANNING, 'SAST'), real: true, group: 'Security Scanning' },
       { label: 'DAST Scanning', to: tabLink(SCANNING, 'DAST'), real: false, group: 'Security Scanning' },
       { label: 'SCA Scanning', to: tabLink(SCANNING, 'SCA'), real: false, group: 'Security Scanning' },
       // Real -- deep-links to Container & Kubernetes Security's canonical
