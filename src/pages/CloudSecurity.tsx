@@ -43,6 +43,12 @@ export function CloudSecurity() {
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
   const [riskyIdentities, setRiskyIdentities] = useState<CloudIdentity[]>([]);
   const [benchmarks, setBenchmarks] = useState<ComplianceBenchmark[]>([]);
+  // Real, persisted findings -- connector-gcp's Security Command Center scan
+  // and connector-azure's Defender for Cloud scan both write into the same
+  // vulnerability_findings table every other source does; this tab was the
+  // one place nothing surfaced them, not because the data was ever fake.
+  const [gcpFindings, setGcpFindings] = useState<VulnerabilityFinding[]>([]);
+  const [azureFindings, setAzureFindings] = useState<VulnerabilityFinding[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -50,7 +56,7 @@ export function CloudSecurity() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance] = await Promise.all([
+      const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.all([
         api.getVulnerabilityDashboard(),
         api.getFindingsBySource('aws-config', { limit: 50 }),
         api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
@@ -58,6 +64,8 @@ export function CloudSecurity() {
         api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
         api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
         api.getComplianceBenchmarks({ limit: 20 }),
+        api.getFindingsBySource('gcp-scc', { limit: 50 }),
+        api.getFindingsBySource('defender', { limit: 50 }),
       ]);
       setDashboard(dash);
       setMisconfigs(misconfig.items);
@@ -65,6 +73,8 @@ export function CloudSecurity() {
       setIdentitySummary(idSummary);
       setRiskyIdentities([...admin.items, ...broad.items]);
       setBenchmarks(compliance.items);
+      setGcpFindings(gcpScc.items);
+      setAzureFindings(defender.items);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load cloud security data.');
     } finally {
@@ -189,11 +199,57 @@ export function CloudSecurity() {
       )}
 
       {tab === 'Multi-Cloud Coverage' && (
-        <RoadmapPanel
-          icon="globe"
-          title="Azure and OCI posture scanning isn't built yet"
-          description="AWS-native posture (Security Hub, Config, Access Analyzer) is real today. Azure Defender for Cloud and OCI Cloud Guard equivalents — and native GCP Security Command Center coverage — are on the roadmap, not implemented."
-        />
+        <div className="flex flex-col gap-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            AWS posture is covered by the Misconfigurations/Exposed Resources tabs above (AWS Config + IAM Access Analyzer). GCP Security Command Center and Azure Defender for Cloud are real, connected sources too — OCI has no native posture connector built yet.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">GCP — Security Command Center</span>
+                <Badge tone={gcpFindings.length > 0 ? 'warning' : 'good'}>{gcpFindings.length} finding{gcpFindings.length === 1 ? '' : 's'}</Badge>
+              </div>
+              {gcpFindings.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-slate-400">No Security Command Center findings — either clean, or no GCP project with SCC enabled is connected yet.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {gcpFindings.slice(0, 6).map(f => (
+                    <li key={f.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                      <span className="truncate text-slate-700 dark:text-slate-200">{f.title}</span>
+                      <Badge tone={severityTone(f.severity)}>{f.severity}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <div className="px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Azure — Defender for Cloud</span>
+                <Badge tone={azureFindings.length > 0 ? 'warning' : 'good'}>{azureFindings.length} finding{azureFindings.length === 1 ? '' : 's'}</Badge>
+              </div>
+              {azureFindings.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-slate-400">No Defender for Cloud findings — either clean, or no Azure subscription with Defender enabled is connected yet.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {azureFindings.slice(0, 6).map(f => (
+                    <li key={f.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                      <span className="truncate text-slate-700 dark:text-slate-200">{f.title}</span>
+                      <Badge tone={severityTone(f.severity)}>{f.severity}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <RoadmapPanel
+            icon="globe"
+            title="OCI posture scanning isn't built yet"
+            description="No OCI connector or Cloud Guard integration exists today — this section will show real OCI findings once that's built, not before."
+          />
+        </div>
       )}
     </div>
   );

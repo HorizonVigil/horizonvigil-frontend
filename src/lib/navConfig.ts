@@ -303,9 +303,14 @@ export const NAV_MODULES: NavModule[] = [
       // (connection management/ops) and from the AWS-native tool tabs
       // above, which this pillar re-presents through a posture/risk lens.
       { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
-      { label: 'AWS', real: false, group: 'Cloud Security' },
-      { label: 'Azure', real: false, group: 'Cloud Security' },
-      { label: 'GCP', real: false, group: 'Cloud Security' },
+      // AWS's own posture lives in Misconfigurations/Exposed Resources below
+      // (real, AWS Config + IAM Access Analyzer); Azure/GCP are real too as
+      // of the gcp-scc/defender source routes -- all three now point at the
+      // real Multi-Cloud Coverage tab's per-provider breakdown rather than
+      // being separate unbuilt tabs. OCI has no connector at all yet.
+      { label: 'AWS', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'Azure', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'GCP', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
       { label: 'OCI', real: false, group: 'Cloud Security' },
       { label: 'Other Clouds', real: false, group: 'Cloud Security' },
       { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },

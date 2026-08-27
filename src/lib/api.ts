@@ -556,7 +556,7 @@ class ApiClient {
   bulkUpdateFindingStatus(ids: string[], status: 'open' | 'resolved' | 'suppressed', reason?: string) {
     return this.patch<{ requestedCount: number; updatedCount: number; items: VulnerabilityFinding[] }>('vulnerabilityManagement', '/api/vulnerability-management/findings/bulk-status', reason ? { ids, status, reason } : { ids, status });
   }
-  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images', params: { page?: number; limit?: number } = {}) {
+  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images' | 'gcp-scc' | 'defender', params: { page?: number; limit?: number } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
   }
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
