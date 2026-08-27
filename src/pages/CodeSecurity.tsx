@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { RoadmapPanel } from '../components/EmptyState';
+import { ScanHistoryTable } from '../components/ScanHistoryTable';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api } from '../lib/api';
@@ -15,24 +15,13 @@ type Tab = typeof TABS[number];
 
 interface RepoRow { key: string; installationLogin: string; fullName: string; defaultBranch: string; private: boolean }
 
-function ScannerCta({ scanner, label }: { scanner: string; label: string }) {
-  return (
-    <RoadmapPanel
-      icon="terminal"
-      title={`${label} results run live, not persisted yet`}
-      description={`${scanner} runs on demand from the Scanners tab this session — there's no list-all-scans endpoint yet to show a persisted, independently-queryable history here. Run it from Vulnerability Management > Scanners, or check back once a persisted results store ships.`}
-    />
-  );
-}
-
 /**
- * Code & repository security -- Repositories is the one tab with genuinely
- * real, persisted data today (via the same GitHub App installation the
- * Settings > Git Integration Auto-PR feature already uses). The finding-shaped
- * tabs (Code/Dependency/Secrets) point at the real scanners (Semgrep,
- * Dependency-Check + Grype, Gitleaks + TruffleHog) but those results are
- * session-ephemeral today -- no persisted, independently-queryable store
- * exists, so this page is honest about that instead of faking a table.
+ * Code & repository security -- Repositories, Code Vulnerabilities,
+ * Dependency Vulnerabilities, and Secrets Detected are all real, persisted
+ * data today: Repositories via the same GitHub App installation Settings >
+ * Git Integration's Auto-PR feature already uses, and the finding-shaped
+ * tabs via each backing scanner's own GET /v1/scans (Semgrep, Dependency-
+ * Check + Grype, Gitleaks + TruffleHog) -- no longer session-ephemeral.
  */
 export function CodeSecurity() {
   const canSeeTab = useSubmenuAccess('code-security');
@@ -116,8 +105,7 @@ export function CodeSecurity() {
             <StatCard label="Private Repos" value={String(repos.filter(r => r.private).length)} icon="key" />
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real data today: Repositories (GitHub App installations). Code/Dependency/Secrets findings run live from{' '}
-            <Link to="/vulnerability-management?tab=Scanners" className="text-brand-600 dark:text-brand-400 hover:underline">Vulnerability Management's Scanners tab</Link> but aren't persisted yet — see each tab for detail.
+            Real, persisted data across every tab — Repositories (GitHub App installations) and Code/Dependency/Secrets findings (each backed by a real scanner's own scan history).
           </p>
         </div>
       )}
@@ -126,9 +114,19 @@ export function CodeSecurity() {
         <DataTable columns={repoColumns} rows={repos} rowKey={r => r.key} emptyMessage="No repositories connected yet — connect a GitHub App installation under Settings > Git Integration." />
       )}
 
-      {tab === 'Code Vulnerabilities' && <ScannerCta scanner="Semgrep (SAST)" label="Code vulnerability" />}
-      {tab === 'Dependency Vulnerabilities' && <ScannerCta scanner="Dependency-Check + Grype (SCA)" label="Dependency vulnerability" />}
-      {tab === 'Secrets Detected' && <ScannerCta scanner="Gitleaks + TruffleHog" label="Secrets detection" />}
+      {tab === 'Code Vulnerabilities' && <ScanHistoryTable scannerKey="semgrep" scannerLabel="Semgrep" />}
+      {tab === 'Dependency Vulnerabilities' && (
+        <div className="flex flex-col gap-6">
+          <ScanHistoryTable scannerKey="dependency-check" scannerLabel="Dependency-Check" />
+          <ScanHistoryTable scannerKey="grype" scannerLabel="Grype" />
+        </div>
+      )}
+      {tab === 'Secrets Detected' && (
+        <div className="flex flex-col gap-6">
+          <ScanHistoryTable scannerKey="gitleaks" scannerLabel="Gitleaks" />
+          <ScanHistoryTable scannerKey="trufflehog" scannerLabel="TruffleHog" />
+        </div>
+      )}
 
       {tab === 'Findings by Branch/Project' && (
         <RoadmapPanel

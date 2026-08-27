@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { RoadmapPanel } from '../components/EmptyState';
+import { ScanHistoryTable } from '../components/ScanHistoryTable';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 
@@ -12,11 +12,11 @@ type Tab = typeof TABS[number];
 /**
  * Application & API security -- no first-class Application/API/URL/Domain
  * entity exists anywhere in the product today (confirmed against
- * api.ts and the Resources category taxonomy), so this module is primarily
- * an honest IA/positioning placeholder in Phase 1, not a functionally rich
- * page like Cloud Security or Code & Repository Security. SAST/Web tabs
- * cross-link to the real (session-ephemeral) scanner results rather than
- * duplicating them.
+ * api.ts and the Resources category taxonomy), so most of this module is
+ * still an honest IA/positioning placeholder rather than a functionally
+ * rich page like Cloud Security or Code & Repository Security. SAST
+ * Results and Web Vulnerabilities are the exception -- real, persisted
+ * Semgrep/Nuclei scan history, not a cross-link to a session-ephemeral run.
  */
 export function ApplicationSecurity() {
   const canSeeTab = useSubmenuAccess('app-security');
@@ -57,8 +57,7 @@ export function ApplicationSecurity() {
         <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-6 py-8">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Positioning today, not yet a functionally rich module</p>
           <p className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
-            No Application, API, or URL/domain entity exists in the product yet — every tab below is honestly scoped rather than showing fabricated data. SAST and Web Vulnerabilities cross-link to real (session-ephemeral) scanner results in{' '}
-            <Link to="/vulnerability-management?tab=Scanners" className="text-brand-600 dark:text-brand-400 hover:underline">Vulnerability Management's Scanners tab</Link>. The rest are on the roadmap.
+            No Application, API, or URL/domain entity exists in the product yet — every tab below is honestly scoped rather than showing fabricated data. SAST Results and Web Vulnerabilities are the exception: real, persisted Semgrep/Nuclei scan history. The rest are on the roadmap.
           </p>
         </div>
       )}
@@ -75,23 +74,11 @@ export function ApplicationSecurity() {
       {tab === 'DAST Results' && (
         <RoadmapPanel icon="globe" title="DAST isn't built yet" description="No dynamic application security testing tool is connected today — see Security Scanning Center's DAST tab for the same honest status." />
       )}
-      {tab === 'SAST Results' && (
-        <RoadmapPanel
-          icon="terminal"
-          title="SAST results run live, not persisted yet"
-          description="Semgrep runs on demand from Vulnerability Management's Scanners tab — there's no list-all-scans endpoint yet to show a persisted, independently-queryable history here."
-        />
-      )}
+      {tab === 'SAST Results' && <ScanHistoryTable scannerKey="semgrep" scannerLabel="Semgrep" />}
       {tab === 'API Security Findings' && (
         <RoadmapPanel icon="lock" title="API security testing isn't built yet" description="Dedicated API endpoint testing (auth bypass, injection, schema conformance) is on the roadmap." />
       )}
-      {tab === 'Web Vulnerabilities' && (
-        <RoadmapPanel
-          icon="terminal"
-          title="Web vulnerability results run live, not persisted yet"
-          description="Nuclei runs on demand from Vulnerability Management's Scanners tab — there's no list-all-scans endpoint yet to show a persisted, independently-queryable history here."
-        />
-      )}
+      {tab === 'Web Vulnerabilities' && <ScanHistoryTable scannerKey="nuclei" scannerLabel="Nuclei" />}
       {tab === 'Testing History' && (
         <RoadmapPanel icon="clock" title="Persisted testing history isn't built yet" description="A cross-category testing history needs a persisted results store behind every scan type, which doesn't exist yet — see each tab above for its own status." />
       )}

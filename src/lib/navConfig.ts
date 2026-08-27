@@ -280,21 +280,22 @@ export const NAV_MODULES: NavModule[] = [
       // "* Scanning"/"* Testing" naming disambiguates from the same-named
       // leaves under Code Security/Application Security further down --
       // NavChild labels are unique-per-module, not globally.
-      // Real -- Security Scanning Center's SAST tab now shows a persisted,
-      // independently-queryable Semgrep scan history (api.listScans),
-      // unlike the other 4 scanning-category tabs still awaiting their own
-      // scanner service's GET /v1/scans rollout.
+      // Real -- Security Scanning Center's SAST/SCA/IaC/Secrets/Web tabs now
+      // show a persisted, independently-queryable scan history
+      // (api.listScans) for each of their 6 backing scanners, all of which
+      // got a GET /v1/scans route this pass. DAST/API Security Testing stay
+      // honest RoadmapPanels -- no scanner exists for either yet.
       { label: 'SAST Scanning', to: tabLink(SCANNING, 'SAST'), real: true, group: 'Security Scanning' },
       { label: 'DAST Scanning', to: tabLink(SCANNING, 'DAST'), real: false, group: 'Security Scanning' },
-      { label: 'SCA Scanning', to: tabLink(SCANNING, 'SCA'), real: false, group: 'Security Scanning' },
+      { label: 'SCA Scanning', to: tabLink(SCANNING, 'SCA'), real: true, group: 'Security Scanning' },
       // Real -- deep-links to Container & Kubernetes Security's canonical
       // Docker & Container Images tab (real Trivy findings) rather than
       // rendering a second copy of the same table.
       { label: 'Container Scanning', to: tabLink(SCANNING, 'Container Scanning'), real: true, group: 'Security Scanning' },
-      { label: 'IaC Scanning', to: tabLink(SCANNING, 'IaC Scanning'), real: false, group: 'Security Scanning' },
-      { label: 'Secrets Scanning', to: tabLink(SCANNING, 'Secrets Detection'), real: false, group: 'Security Scanning' },
+      { label: 'IaC Scanning', to: tabLink(SCANNING, 'IaC Scanning'), real: true, group: 'Security Scanning' },
+      { label: 'Secrets Scanning', to: tabLink(SCANNING, 'Secrets Detection'), real: true, group: 'Security Scanning' },
       { label: 'API Security Testing', to: tabLink(SCANNING, 'API Security Testing'), real: false, group: 'Security Scanning' },
-      { label: 'Web Security Testing', to: tabLink(SCANNING, 'Web Security Testing'), real: false, group: 'Security Scanning' },
+      { label: 'Web Security Testing', to: tabLink(SCANNING, 'Web Security Testing'), real: true, group: 'Security Scanning' },
       { label: 'URL / Domain Testing', real: false, group: 'Security Scanning' },
       { label: 'Penetration Testing', to: tabLink(SCANNING, 'Pentest'), real: false, group: 'Security Scanning' },
       { label: 'Infrastructure Scanning', real: false, group: 'Security Scanning' },
@@ -328,8 +329,13 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Web Applications', real: false, group: 'Application Security' },
       { label: 'Domains / URLs', to: tabLink(APP_SEC, 'URLs & Domains'), real: false, group: 'Application Security' },
       { label: 'DAST', to: tabLink(APP_SEC, 'DAST Results'), real: false, group: 'Application Security' },
+      // Real -- persisted Semgrep scan history. This nav entry was missing
+      // entirely before (the page's own SAST Results tab had no matching
+      // sidebar child) -- added along with flipping it real.
+      { label: 'SAST Results', to: tabLink(APP_SEC, 'SAST Results'), real: true, group: 'Application Security' },
       { label: 'API Security', to: tabLink(APP_SEC, 'API Security Findings'), real: false, group: 'Application Security' },
-      { label: 'Web Vulnerabilities', to: tabLink(APP_SEC, 'Web Vulnerabilities'), real: false, group: 'Application Security' },
+      // Real -- persisted Nuclei scan history.
+      { label: 'Web Vulnerabilities', to: tabLink(APP_SEC, 'Web Vulnerabilities'), real: true, group: 'Application Security' },
 
       // ── Code Security ─────────────────────────────────────────────────
       { label: 'Code Security Overview', to: CODE_SEC, real: true, group: 'Code Security' },
@@ -337,11 +343,13 @@ export const NAV_MODULES: NavModule[] = [
       // back Settings > Git Integration's Auto-PR feature with real,
       // persisted repo rows.
       { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
-      { label: 'SAST', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false, group: 'Code Security' },
-      { label: 'SCA', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false, group: 'Code Security' },
-      { label: 'Dependencies', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: false, group: 'Code Security' },
-      { label: 'Secrets', to: tabLink(CODE_SEC, 'Secrets Detected'), real: false, group: 'Code Security' },
-      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: false, group: 'Code Security' },
+      // Real -- each backed by its own scanner's persisted GET /v1/scans
+      // history (Semgrep / Dependency-Check+Grype / Gitleaks+TruffleHog).
+      { label: 'SAST', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
+      { label: 'SCA', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
+      { label: 'Dependencies', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
+      { label: 'Secrets', to: tabLink(CODE_SEC, 'Secrets Detected'), real: true, group: 'Code Security' },
+      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
 
       // ── Container & Kubernetes ────────────────────────────────────────
       // Distinct from the operational Clusters module (pods/deployments/
