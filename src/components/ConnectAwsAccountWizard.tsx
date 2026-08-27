@@ -3,6 +3,7 @@ import { Modal } from './Modal';
 import { api, type ProjectRow, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
 import { useSync } from '../lib/syncContext';
+import { useToast } from '../lib/toast';
 
 // Every AWS region enabled by default (no opt-in required) — this list
 // previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
@@ -35,6 +36,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { startDiscovery } = useSync();
+  const { toast } = useToast();
 
   function toggleRegion(r: string) {
     setScanRegions(prev => (prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]));
@@ -66,6 +68,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         environment: form.environment,
       });
       autoSync(created.id);
+      if (created.planLimitWarning) toast(created.planLimitWarning, 'info');
       onConnected();
       onClose();
     } catch (err) {

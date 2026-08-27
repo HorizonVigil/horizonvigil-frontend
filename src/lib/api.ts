@@ -180,7 +180,7 @@ class ApiClient {
     accessKeyId?: string; secretAccessKey?: string; roleArn?: string; externalId?: string;
     defaultRegion?: string; environment?: string; scanRegions?: string[]; projectId?: string;
   }) {
-    return this.post<CloudConnection>('awsAccounts', '/api/aws-accounts/accounts', data);
+    return this.post<CloudConnection & { planLimitWarning?: string | null }>('awsAccounts', '/api/aws-accounts/accounts', data);
   }
   updateAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null; defaultRegion?: string; scanRegions?: string[]; supportPlan?: string | null }) {
     return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`, data);
@@ -226,7 +226,7 @@ class ApiClient {
     serviceAccountKeyJson?: string; impersonatedServiceAccount?: string;
     defaultRegion?: string; environment?: string; scanRegions?: string[]; projectId?: string;
   }) {
-    return this.post<GcpConnection>('gcpAccounts', '/api/gcp-accounts/accounts', data);
+    return this.post<GcpConnection & { planLimitWarning?: string | null }>('gcpAccounts', '/api/gcp-accounts/accounts', data);
   }
   updateGcpAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null; defaultRegion?: string; scanRegions?: string[] }) {
     return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`, data);
@@ -270,7 +270,7 @@ class ApiClient {
     // `_reconnected: true` means this subscription id was already connected
     // (active or disconnected) and the backend updated that row's
     // credentials/status in place instead of inserting a duplicate.
-    return this.post<AzureConnection & { _reconnected?: boolean }>('azureAccounts', '/api/azure-accounts/accounts', data);
+    return this.post<AzureConnection & { _reconnected?: boolean; planLimitWarning?: string | null }>('azureAccounts', '/api/azure-accounts/accounts', data);
   }
   updateAzureAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null }) {
     return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`, data);

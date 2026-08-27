@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal } from './Modal';
 import { api, type ProjectRow, type Environment } from '../lib/api';
 import { GCP_RECOMMENDED_ROLE, GCP_ROLE_DESCRIPTION, SERVICE_ACCOUNT_KEY_STEPS, SERVICE_ACCOUNT_IMPERSONATION_STEPS } from '../lib/gcpRequiredPermissions';
+import { useToast } from '../lib/toast';
 
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 // GCP regions aren't a call-fanout concern for Phase 1's scanners (all four
@@ -19,6 +20,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,7 +28,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
     setNotice(null);
     setLoading(true);
     try {
-      await api.createGcpAccount({
+      const created = await api.createGcpAccount({
         connectionMethod: method,
         gcpProjectId: form.gcpProjectId.trim(),
         serviceAccountKeyJson: method === 'service_account_key' ? form.serviceAccountKeyJson.trim() : undefined,
@@ -36,6 +38,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
         connectionName: form.connectionName.trim() || form.gcpProjectId.trim(),
         environment: form.environment,
       });
+      if (created.planLimitWarning) toast(created.planLimitWarning, 'info');
       onConnected();
       onClose();
     } catch (err) {

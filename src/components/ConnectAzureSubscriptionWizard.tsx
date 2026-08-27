@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal } from './Modal';
 import { api, type ProjectRow, type Environment } from '../lib/api';
 import { AZURE_RECOMMENDED_ROLE, AZURE_ROLE_DESCRIPTION, SERVICE_PRINCIPAL_STEPS } from '../lib/azureRequiredPermissions';
+import { useToast } from '../lib/toast';
 
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 
@@ -13,13 +14,12 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
     projectId: '', connectionName: '', environment: 'production' as Environment,
   });
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setNotice(null);
     setLoading(true);
     try {
       // The backend upserts: reconnecting a subscription id already
@@ -27,6 +27,9 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
       // that row's credentials/status in place and returns `_reconnected:
       // true`, rather than rejecting a duplicate insert -- so there's
       // nothing here to catch or retry, just a notice to show either way.
+      // Both are toasts, not the local `notice` state above: this modal
+      // closes right after a successful submit, so a notice rendered only
+      // inside the form would never actually be seen.
       const result = await api.createAzureAccount({
         azureSubscriptionId: form.azureSubscriptionId.trim(),
         azureTenantId: form.azureTenantId.trim(),
@@ -39,7 +42,8 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
         connectionName: form.connectionName.trim() || form.azureSubscriptionId.trim(),
         environment: form.environment,
       });
-      if (result._reconnected) setNotice('This subscription was already connected — its credentials were updated instead of creating a duplicate.');
+      if (result._reconnected) toast('This subscription was already connected — its credentials were updated instead of creating a duplicate.', 'info');
+      if (result.planLimitWarning) toast(result.planLimitWarning, 'info');
       onConnected();
       onClose();
     } catch (err) {
@@ -119,7 +123,6 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
           </select>
         </label>
 
-        {notice && <p className="col-span-2 text-sm rounded-md border border-brand-200 dark:border-brand-900 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300 px-3 py-2">{notice}</p>}
         {error && <p className="col-span-2 text-sm text-red-500">{error}</p>}
         <button type="submit" disabled={loading} className="col-span-2 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
           {loading ? 'Validating & connecting…' : 'Connect Azure Subscription'}
