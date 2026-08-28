@@ -21,7 +21,9 @@ export const LEAST_PRIVILEGE_POLICY = `{
     ], "Resource": "*" },
     { "Sid": "AnalyticsAndDataPipelines", "Effect": "Allow", "Action": [
       "athena:List*", "athena:Get*", "glue:Get*", "glue:List*",
-      "kinesis:List*", "kinesis:Describe*", "kafka:List*", "elasticmapreduce:List*"
+      "kinesis:List*", "kinesis:Describe*", "kafka:List*", "elasticmapreduce:List*",
+      "es:List*", "es:Describe*", "firehose:List*", "firehose:Describe*",
+      "dms:Describe*", "lakeformation:List*"
     ], "Resource": "*" },
     { "Sid": "DevOpsCiCdAndMl", "Effect": "Allow", "Action": [
       "codebuild:List*", "codebuild:BatchGet*", "codepipeline:List*",
@@ -33,7 +35,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "eks:Describe*", "eks:List*", "ecs:Describe*", "ecs:List*", "lambda:List*", "lambda:Get*",
       "cloudformation:Describe*", "cloudformation:List*", "cloudformation:Get*",
       "events:List*", "events:Describe*", "states:List*", "states:Describe*",
-      "batch:Describe*", "elasticbeanstalk:Describe*", "apigateway:GET"
+      "batch:Describe*", "elasticbeanstalk:Describe*", "apigateway:GET", "appsync:List*"
     ], "Resource": "*" },
     { "Sid": "NetworkingEdgeDns", "Effect": "Allow", "Action": [
       "route53:List*", "route53:Get*", "cloudfront:List*", "cloudfront:Get*",
@@ -41,7 +43,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "sqs:List*", "sqs:Get*", "sns:List*", "sns:Get*",
       "directconnect:Describe*", "globalaccelerator:ListAccelerators",
       "route53resolver:List*", "servicediscovery:List*", "appmesh:List*",
-      "appmesh:Describe*"
+      "appmesh:Describe*", "ses:List*", "mq:List*"
     ], "Resource": "*" },
     { "Sid": "IdentityAndKms", "Effect": "Allow", "Action": [
       "iam:List*", "iam:Get*", "iam:GenerateCredentialReport", "iam:GenerateServiceLastAccessedDetails",
@@ -55,7 +57,8 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "inspector2:List*", "inspector2:Get*", "inspector2:BatchGetAccountStatus",
       "access-analyzer:List*", "access-analyzer:Get*", "config:Describe*", "config:Get*", "config:List*",
       "fms:ListPolicies", "shield:ListProtections", "network-firewall:List*",
-      "cloudhsm:DescribeClusters", "detective:ListGraphs"
+      "cloudhsm:DescribeClusters", "detective:ListGraphs",
+      "acm-pca:List*", "macie2:List*"
     ], "Resource": "*" },
     { "Sid": "MonitoringAndOps", "Effect": "Allow", "Action": [
       "cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*",
@@ -66,7 +69,8 @@ export const LEAST_PRIVILEGE_POLICY = `{
     { "Sid": "CostAndBilling", "Effect": "Allow", "Action": [
       "ce:Get*", "ce:Describe*", "budgets:View*", "budgets:Describe*",
       "pricing:GetProducts", "pricing:DescribeServices", "pricing:GetAttributeValues",
-      "cur:Describe*", "account:GetAccountInformation", "account:ListRegions"
+      "cur:Describe*", "account:GetAccountInformation", "account:ListRegions",
+      "savingsplans:Describe*"
     ], "Resource": "*" },
     { "Sid": "TrustedAdvisorSupport", "Effect": "Allow", "Action": ["support:Describe*", "trustedadvisor:Describe*"], "Resource": "*" },
     { "Sid": "TaggingAndResourceGroups", "Effect": "Allow", "Action": [
@@ -76,7 +80,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "controltower:ListLandingZones", "resiliencehub:ListApps", "wellarchitected:ListWorkloads",
       "compute-optimizer:GetEnrollmentStatus", "compute-optimizer:GetEC2InstanceRecommendations",
       "servicecatalog:ListPortfolios", "servicecatalog:SearchProductsAsAdmin",
-      "ram:GetResourceShares", "ds:DescribeDirectories"
+      "ram:GetResourceShares", "ds:DescribeDirectories", "license-manager:List*"
     ], "Resource": "*" }
   ]
 }`;
