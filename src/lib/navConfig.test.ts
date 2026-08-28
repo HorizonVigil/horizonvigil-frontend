@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { moduleMatchesPath, isChildActive, findActiveModule, NAV_MODULES, type NavModule, type NavChild } from './navConfig';
 
+// Raw-text import (Vite feature, typed via vite/client in vite-env.d.ts) --
+// avoids depending on node:fs/node:path, which aren't available under this
+// project's browser-targeted tsconfig (no @types/node on the `src` program).
+const appSourceFiles = import.meta.glob('../App.tsx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
 function mod(overrides: Partial<NavModule> & { children: NavChild[] }): NavModule {
   return { label: 'Test', icon: '•', ...overrides };
 }
@@ -47,6 +52,36 @@ describe('NAV_MODULES sections', () => {
       }
     }
     expect(offenders, offenders.join('\n')).toEqual([]);
+  });
+
+  /**
+   * ProtectedRoute's module-level check does `NAV_MODULES.find(m => m.label
+   * === module)` -- a totally separate lookup path from findActiveModule
+   * above, keyed by App.tsx's own hardcoded `module="..."` strings rather
+   * than by URL. When a module is folded into another one (as the six
+   * security pillars were, into Vulnerability Management, in the Phase 1 IA
+   * redesign) and App.tsx isn't updated to match, `mod` comes back
+   * `undefined` and ProtectedRoute unconditionally renders AccessDenied --
+   * for every role, including admin/owner. This silently broke 6 routes for
+   * an entire session before being caught by a live bug report, precisely
+   * because it fails "closed" (looks like a permissions problem, not a
+   * typo) and nothing exercises this lookup path. Asserts every module=
+   * string in App.tsx resolves to a real NAV_MODULES label so this class of
+   * bug can't reoccur silently again.
+   */
+  it('every ProtectedRoute module="..." in App.tsx resolves to a real NAV_MODULES label', () => {
+    const appSource = Object.values(appSourceFiles)[0];
+    expect(appSource, 'App.tsx raw import came back empty -- check the glob pattern still resolves').toBeTruthy();
+    // 'Subscription' is feature-flagged out of NAV_MODULES by isBillingEnabled()
+    // (reads VITE_BILLING_API_URL, never set in the vitest environment) --
+    // legitimately absent here without being a stale-label bug like this test
+    // otherwise guards against. Confirmed by reading featureFlags.ts directly,
+    // not assumed.
+    const labels = new Set([...NAV_MODULES.map(m => m.label), 'Subscription']);
+    const found = [...appSource.matchAll(/ProtectedRoute module="([^"]+)"/g)].map(m => m[1]);
+    expect(found.length, 'no ProtectedRoute module="..." usages found -- check the regex/file path still match App.tsx').toBeGreaterThan(0);
+    const offenders = found.filter(label => !labels.has(label));
+    expect(offenders, `these module="..." values in App.tsx don't match any current NAV_MODULES label: ${offenders.join(', ')}`).toEqual([]);
   });
 });
 

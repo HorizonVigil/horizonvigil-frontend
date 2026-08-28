@@ -151,12 +151,22 @@ export default function App() {
                           <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
                           <Route path="/source-inventory/:category" element={<ProtectedRoute module="Vulnerability Management"><SourceInventoryCategory /></ProtectedRoute>} />
                           <Route path="/source-inventory/:category/:assetId" element={<ProtectedRoute module="Vulnerability Management"><SourceAssetDetail /></ProtectedRoute>} />
-                          <Route path="/security-scanning" element={<ProtectedRoute module="Security Scanning Center"><SecurityScanningCenter /></ProtectedRoute>} />
-                          <Route path="/cloud-security" element={<ProtectedRoute module="Cloud Security"><CloudSecurity /></ProtectedRoute>} />
-                          <Route path="/application-security" element={<ProtectedRoute module="Application & API Security"><ApplicationSecurity /></ProtectedRoute>} />
-                          <Route path="/code-security" element={<ProtectedRoute module="Code & Repository Security"><CodeSecurity /></ProtectedRoute>} />
-                          <Route path="/container-security" element={<ProtectedRoute module="Container & Kubernetes Security"><ContainerKubernetesSecurity /></ProtectedRoute>} />
-                          <Route path="/infrastructure-security" element={<ProtectedRoute module="Infrastructure Security"><InfrastructureSecurity /></ProtectedRoute>} />
+                          {/* These 6 pages stopped being their own top-level NAV_MODULES
+                              entries in the Phase 1 IA redesign (folded into Vulnerability
+                              Management's own submenu) but this file kept the old
+                              standalone module labels -- ProtectedRoute's `NAV_MODULES.find(m
+                              => m.label === module)` then found nothing for any of the 6
+                              and unconditionally rendered AccessDenied, for every role
+                              including admin/owner. Fixed by pointing every one of these at
+                              their actual current owning module, matching how
+                              /source-inventory/* and /vulnerability-management/findings/:id
+                              already correctly do it. */}
+                          <Route path="/security-scanning" element={<ProtectedRoute module="Vulnerability Management"><SecurityScanningCenter /></ProtectedRoute>} />
+                          <Route path="/cloud-security" element={<ProtectedRoute module="Vulnerability Management"><CloudSecurity /></ProtectedRoute>} />
+                          <Route path="/application-security" element={<ProtectedRoute module="Vulnerability Management"><ApplicationSecurity /></ProtectedRoute>} />
+                          <Route path="/code-security" element={<ProtectedRoute module="Vulnerability Management"><CodeSecurity /></ProtectedRoute>} />
+                          <Route path="/container-security" element={<ProtectedRoute module="Vulnerability Management"><ContainerKubernetesSecurity /></ProtectedRoute>} />
+                          <Route path="/infrastructure-security" element={<ProtectedRoute module="Vulnerability Management"><InfrastructureSecurity /></ProtectedRoute>} />
                           {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. Just a redirect, nothing to protect. */}
                           <Route path="/clusters" element={<Navigate to="/clusters/aws" replace />} />
                           <Route path="/clusters/aws" element={<ProtectedRoute module="Clusters"><EksConsole /></ProtectedRoute>} />
