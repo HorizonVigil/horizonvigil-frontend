@@ -15,6 +15,7 @@ import {
   type SourceCategory, type SourceAsset, type SourceInventoryFilters as Filters,
 } from '../lib/demoData/sourceInventory';
 import { RealCloudInventory } from './sourceInventory/RealCloudInventory';
+import { RealRepositoryInventory } from './sourceInventory/RealRepositoryInventory';
 
 const TABS = ['Overview', 'Asset List'] as const;
 type Tab = typeof TABS[number];
@@ -52,7 +53,7 @@ export function SourceInventoryCategory() {
   const navigate = useNavigate();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
 
-  const isValidCategory = category !== undefined && category !== 'cloud' && category in SOURCE_CATEGORY_CONFIG;
+  const isValidCategory = category !== undefined && category !== 'cloud' && category !== 'repository' && category in SOURCE_CATEGORY_CONFIG;
   const config = isValidCategory ? SOURCE_CATEGORY_CONFIG[category as SourceCategory] : null;
 
   const [filters, setFilters] = useState<Filters>({});
@@ -72,11 +73,13 @@ export function SourceInventoryCategory() {
 
   useEffect(() => { loadAssets(); }, [loadAssets]);
 
-  // Clouds has real backend data now (see lib/sourceInventoryClouds.ts).
-  // Placed after every hook above so this component calls the same hooks in
-  // the same order on every render regardless of which category the route
-  // is currently on. The other 5 categories are untouched, still fully mock.
+  // Clouds and Repositories have real backend data now (see
+  // lib/sourceInventoryClouds.ts / lib/sourceInventoryRepos.ts). Placed
+  // after every hook above so this component calls the same hooks in the
+  // same order on every render regardless of which category the route is
+  // currently on. The other 4 categories are untouched, still fully mock.
   if (category === 'cloud') return <RealCloudInventory />;
+  if (category === 'repository') return <RealRepositoryInventory />;
 
   if (!isValidCategory || !config) {
     return (
