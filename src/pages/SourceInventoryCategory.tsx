@@ -14,6 +14,7 @@ import {
   SOURCE_CATEGORY_CONFIG, generateSourceAssetsPage, generateCategoryOverviewStats,
   type SourceCategory, type SourceAsset, type SourceInventoryFilters as Filters,
 } from '../lib/demoData/sourceInventory';
+import { RealCloudInventory } from './sourceInventory/RealCloudInventory';
 
 const TABS = ['Overview', 'Asset List'] as const;
 type Tab = typeof TABS[number];
@@ -51,7 +52,7 @@ export function SourceInventoryCategory() {
   const navigate = useNavigate();
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
 
-  const isValidCategory = category !== undefined && category in SOURCE_CATEGORY_CONFIG;
+  const isValidCategory = category !== undefined && category !== 'cloud' && category in SOURCE_CATEGORY_CONFIG;
   const config = isValidCategory ? SOURCE_CATEGORY_CONFIG[category as SourceCategory] : null;
 
   const [filters, setFilters] = useState<Filters>({});
@@ -70,6 +71,12 @@ export function SourceInventoryCategory() {
   }, [category, isValidCategory, page, pageSize, filters]);
 
   useEffect(() => { loadAssets(); }, [loadAssets]);
+
+  // Clouds has real backend data now (see lib/sourceInventoryClouds.ts).
+  // Placed after every hook above so this component calls the same hooks in
+  // the same order on every render regardless of which category the route
+  // is currently on. The other 5 categories are untouched, still fully mock.
+  if (category === 'cloud') return <RealCloudInventory />;
 
   if (!isValidCategory || !config) {
     return (
@@ -101,7 +108,7 @@ export function SourceInventoryCategory() {
     { key: 'medium', header: 'Med', render: a => String(a.bySeverity.medium), sortValue: a => a.bySeverity.medium, defaultHidden: true },
     { key: 'low', header: 'Low', render: a => String(a.bySeverity.low), sortValue: a => a.bySeverity.low, defaultHidden: true },
     { key: 'risk', header: 'Risk Score', render: a => String(a.riskScore), sortValue: a => a.riskScore },
-    { key: 'exposure', header: 'Internet Exposure', render: a => a.internetExposed ? <Badge tone="critical">Exposed</Badge> : 'No' },
+    { key: 'exposure', header: 'Internet Exposure', render: a => a.internetExposed === null ? 'Unknown' : a.internetExposed ? <Badge tone="critical">Exposed</Badge> : 'No' },
   ];
 
   return (

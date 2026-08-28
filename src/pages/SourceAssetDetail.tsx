@@ -7,6 +7,7 @@ import {
   SOURCE_CATEGORY_CONFIG, generateSourceAssetById, generateAggregatedFindings,
   type SourceCategory, type ScannerAttachment,
 } from '../lib/demoData/sourceInventory';
+import { RealCloudAssetDetail } from './sourceInventory/RealCloudAssetDetail';
 
 const SCANNER_STATUS_TONE: Record<ScannerAttachment['status'], 'good' | 'warning' | 'critical' | 'neutral'> = {
   completed: 'good', running: 'warning', failed: 'critical', never_run: 'neutral',
@@ -50,10 +51,21 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
  */
 export function SourceAssetDetail() {
   const { category, assetId } = useParams<{ category: string; assetId: string }>();
-  const isValidCategory = category !== undefined && category in SOURCE_CATEGORY_CONFIG;
+
+  const isValidCategory = category !== undefined && category !== 'cloud' && category in SOURCE_CATEGORY_CONFIG;
   const config = isValidCategory ? SOURCE_CATEGORY_CONFIG[category as SourceCategory] : null;
   const asset = isValidCategory && assetId ? generateSourceAssetById(category as SourceCategory, assetId) : null;
+  // Hook stays unconditional (React's rules) even though its result is
+  // unused on the 'cloud' branch below -- asset is always null there, so
+  // this resolves to [] immediately, no wasted work.
   const findings = useMemo(() => (asset ? generateAggregatedFindings(asset) : []), [asset]);
+
+  // Same real/mock split as SourceInventoryCategory.tsx -- Clouds is real
+  // now. Placed after every hook above so this component calls the same
+  // hooks in the same order on every render regardless of which category
+  // the route is currently on (React Router re-renders this same component
+  // instance in place when only :category/:assetId change).
+  if (category === 'cloud') return assetId ? <RealCloudAssetDetail assetId={assetId} /> : null;
 
   if (!isValidCategory || !config || !asset) {
     return (

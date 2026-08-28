@@ -43,7 +43,10 @@ export interface SourceAsset {
   lastAggregatedScanAt: string | null;
   bySeverity: Record<Severity, number>;
   riskScore: number;
-  internetExposed: boolean;
+  /** null = not determined (used by the real-Clouds data path, which has no
+   * real internet-exposure signal on VulnerabilityFinding today) -- the 5
+   * still-mock categories always generate a real boolean here, unchanged. */
+  internetExposed: boolean | null;
 }
 
 interface SubTypeSpec { key: string; label: string; weight: number }

@@ -12,9 +12,9 @@ import { Icon, NAV_ICON_MAP } from './icons';
  * module's children have no `group` and render in one unlabeled bucket,
  * unchanged from before this existed. */
 const GROUP_ORDER = [
-  'Overview', 'Vulnerabilities', 'Risk', 'Assets', 'Source Inventory', 'Security Scanning',
+  'Overview', 'Vulnerabilities', 'Assets', 'Source Inventory', 'Security Scanning',
   'Cloud Security', 'Application Security', 'Code Security',
-  'Container & Kubernetes', 'Infrastructure', 'Remediation', 'Reports',
+  'Container & Kubernetes', 'Infrastructure',
   'AWS-Native Sources',
 ];
 
