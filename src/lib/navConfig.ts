@@ -153,10 +153,6 @@ function tabLink(base: string, tab: string): string {
   return `${base}?tab=${encodeURIComponent(tab)}`;
 }
 
-/** Same as tabLink, plus a `preset=<value>` param — used by the Vulnerabilities
- * group's Critical/Exploitable/Newly Discovered/Aging/Suppressed/Resolved
- * children, all of which land on the same Security Findings tab pre-filtered
- * rather than each being its own table. */
 function presetLink(base: string, tab: string, preset: string): string {
   return `${tabLink(base, tab)}&preset=${encodeURIComponent(preset)}`;
 }
@@ -189,6 +185,9 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Sync Center', to: tabLink(ACCOUNTS, 'Sync Center'), real: true, minRole: 'editor' },
       { label: 'Reports', to: tabLink(ACCOUNTS, 'Reports'), real: true },
       { label: 'Identities', to: tabLink(ACCOUNTS, 'Identities'), real: true },
+      { label: 'GCP Projects', to: tabLink(ACCOUNTS, 'GCP Projects'), real: true },
+      { label: 'AWS Accounts', to: tabLink(ACCOUNTS, 'AWS Accounts'), real: true },
+      { label: 'Azure accounts', to: tabLink(ACCOUNTS, 'Azure accounts'), real: true },
       { label: 'Settings', real: false, minRole: 'admin' },
     ],
   },

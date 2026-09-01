@@ -13,37 +13,10 @@ import { useOrg } from '../lib/orgContext';
 import { useFilters, dateRangeToDays } from '../lib/filterContext';
 import { useToast } from '../lib/toast';
 import { api, friendlyErrorMessage, type OverviewDashboard, type ActivityEntry, type QuickAction, type Favorite } from '../lib/api';
-import { money } from '../lib/format';
-
-function daysAgoISO(days: number): string {
-  return new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-function formatActivityAction(action: string): string {
-  return action.replace(/_/g, ' ').replace(/\./g, ' — ');
-}
-
-function formatActivityDate(value: string): string {
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? 'Unknown time'
-    : date.toLocaleString();
-}
+import { money, daysAgoISO, formatActivityAction, formatDate, healthTier } from '../lib/format';
+import { NAV_MODULES, canSeeModule, type Role } from '../lib/navConfig';
 
 
-// Health label/color tiers — extracted so the KPI card stays readable.
-function healthTier(score: number): { label: string; className: string } {
-  if (score >= 90) return { label: 'Excellent', className: 'text-emerald-600 dark:text-emerald-400 font-medium' };
-  if (score >= 70) return { label: 'Needs attention', className: 'text-amber-600 dark:text-amber-400 font-medium' };
-  if (score >= 40) return { label: 'Degraded', className: 'text-orange-600 dark:text-orange-400 font-medium' };
-  return { label: 'Critical', className: 'text-red-600 dark:text-red-400 font-medium' };
-}
-
-// A widget that failed to load must never render identically to "genuinely
-// empty" (the same EmptyState both cases used to share) -- a cost-fetch
-// timeout and an account with zero spend look the same to a reader unless
-// the failure says so explicitly.
 function WidgetError({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -53,12 +26,21 @@ function WidgetError({ message }: { message: string }) {
   );
 }
 
+
+
 export function Overview() {
-  const { folders, projects, currentOrg } = useOrg();
+  const { folders, projects, currentOrg, menuPermissions } = useOrg();
   const { region, dateRange, refreshToken } = useFilters();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+
+  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  const cloudModule = useMemo(() => NAV_MODULES.find((m) => m.icon === 'cloud'), []);
+  const canSeeCloud = useMemo(() => {
+    if (!cloudModule) return true;
+    return canSeeModule(cloudModule, role, menuPermissions);
+  }, [cloudModule, role, menuPermissions]);
 
   const [dashboard, setDashboard] = useState<OverviewDashboard | null>(null);
   const [resourceTrend, setResourceTrend] = useState<{ date: string; created: number; deleted: number }[]>([]);
@@ -68,26 +50,13 @@ export function Overview() {
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [securityDashboard, setSecurityDashboard] = useState<SecurityPostureDashboard | null>(null);
-  // Per-widget failure flags so a degraded widget can say so instead of
-  // silently rendering an EmptyState that reads as "genuinely no data".
+  const [providerCounts, setProviderCounts] = useState<{ aws: number; azure: number; gcp: number }>({ aws: 0, azure: 0, gcp: 0 });
   const [widgetErrors, setWidgetErrors] = useState<{
     trend?: boolean; cost?: boolean; activity?: boolean; quickActions?: boolean; favorites?: boolean; security?: boolean;
   }>({});
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // re-fetch on top of already-visible data
+  const [refreshing, setRefreshing] = useState(false); 
   const [error, setError] = useState<string | null>(null);
-  // Whether to show the skeleton (first load / retry after failure) or the
-  // subtle refreshing bar (real data already on screen) has to survive
-  // `load` being memoized -- a plain `!dashboard` read inside `load` closes
-  // over whatever `dashboard` was bound to at the callback's last recreation
-  // (whenever region/dateRange/toast last changed), not its current value,
-  // since `dashboard` isn't a dependency of this callback. Concretely: after
-  // the first successful load, `load` itself is NOT recreated (its deps
-  // didn't change), so it keeps closing over the pre-load `null` -- every
-  // later refresh (e.g. clicking Refresh, which only bumps `refreshToken`)
-  // would still see `!dashboard` as true and wrongly re-show the skeleton
-  // instead of the refreshing bar. A ref sidesteps this: `.current` is
-  // always read fresh at call time, never captured by a stale closure.
   const hasLoadedOnce = useRef(false);
   const requestIdRef = useRef(0);
   const [removingFavoriteId, setRemovingFavoriteId] = useState<string | null>(null);
@@ -100,14 +69,7 @@ export function Overview() {
     try {
       const days = dateRangeToDays(dateRange);
       const from = daysAgoISO(days);
-
-      // allSettled, not all -- every backend service this page calls runs at
-      // Cloud Run min-instances=0 (see the deploy config), so a cold start on
-      // any single one of these calls used to blank the ENTIRE dashboard
-      // behind one generic error. The primary dashboard call is still treated
-      // as required -- there's no meaningful page without it -- but every
-      // other widget is independent and should degrade on its own.
-      const [dashRes, resourcesRes, costRes, activityRes, quickActionsRes, favoritesRes, securityRes] = await Promise.allSettled([
+      const [dashRes, resourcesRes, costRes, activityRes, quickActionsRes, favoritesRes, securityRes, awsRes, azureRes, gcpRes] = await Promise.allSettled([
         api.getOverviewDashboard({ region }),
         api.getResourcesDashboard({ region, days }),
         api.getCostAnalytics({ region, from }),
@@ -115,6 +77,9 @@ export function Overview() {
         api.getQuickActions(),
         api.getFavorites(),
         api.getVulnerabilityDashboard(),
+        api.getAccounts({ limit: 1 }),
+        api.getAzureAccounts({ limit: 1 }),
+        api.getGcpAccounts({ limit: 1 }),
       ]);
 
       if (dashRes.status === 'rejected') throw dashRes.reason;
@@ -123,10 +88,11 @@ export function Overview() {
       setDashboard(dashRes.value);
       hasLoadedOnce.current = true;
 
-      if (requestId !== requestIdRef.current) return;
+      const awsCount = awsRes.status === 'fulfilled' ? (awsRes.value.pagination?.total ?? 0) : ((dashRes.value.connections as unknown as Record<string, unknown>)?.byProvider as Record<string, number> | undefined)?.aws ?? 0;
+      const azureCount = azureRes.status === 'fulfilled' ? (azureRes.value.pagination?.total ?? 0) : ((dashRes.value.connections as unknown as Record<string, unknown>)?.byProvider as Record<string, number> | undefined)?.azure ?? 0;
+      const gcpCount = gcpRes.status === 'fulfilled' ? (gcpRes.value.pagination?.total ?? 0) : ((dashRes.value.connections as unknown as Record<string, unknown>)?.byProvider as Record<string, number> | undefined)?.gcp ?? 0;
+      setProviderCounts({ aws: awsCount, azure: azureCount, gcp: gcpCount });
 
-      // Clear stale widget data up-front so a failed refetch never leaves old
-      // numbers on screen masquerading as current ones.
       setWidgetErrors({
         trend: resourcesRes.status !== 'fulfilled',
         cost: costRes.status !== 'fulfilled',
@@ -175,15 +141,10 @@ export function Overview() {
     }
   }, [region, dateRange, toast]);
 
-  // OrgProvider resolves the active org (and only then makes api.ts attach
-  // the X-Org-Id header every one of these calls needs) asynchronously after
-  // login -- without waiting for currentOrg, this fired before an org id
-  // existed and every call 400'd with "Missing X-Org-Id header".
+
   useEffect(() => { if (currentOrg) void load(); }, [load, refreshToken, currentOrg]);
 
-  // The Overview submenu links to sections within this same page rather than
-  // separate routes, so scrolling has to happen client-side. Waits for
-  // `loading` to clear since target sections don't exist in the DOM yet.
+ 
   useEffect(() => {
     if (loading || !location.hash) return;
     document.getElementById(location.hash.slice(1))
@@ -249,8 +210,6 @@ export function Overview() {
   const totalConnections = Math.max(0, dashboard?.connections.total ?? 0);
   const errorConnections = Math.max(0, dashboard?.connections.error ?? 0);
   const monthToDate = Math.max(0, dashboard?.cost.monthToDate ?? 0);
-  // With zero connections there is nothing to score -- showing "100%" would
-  // read as "everything is fine", so surface an explicit em-dash instead.
   const hasConnections = totalConnections > 0;
   const healthScore = hasConnections
     ? Math.max(
@@ -286,9 +245,7 @@ export function Overview() {
     );
   }
 
-  // A failed first load has nothing real to show underneath it — a zeroed-out
-  // dashboard would read as "nothing here yet" instead of "the request
-  // failed", so this replaces the whole page.
+  
   if (error && !dashboard) {
     return (
       <div>
@@ -316,8 +273,7 @@ export function Overview() {
     <div>
       <FilterBar title="Overview" breadcrumb={<Breadcrumb />} showAccountFilter={false} />
 
-      {/* Subtle indicator while filter-driven refetches are in flight --
-          content stays visible but users need to know it's updating. */}
+
       {refreshing && (
         <div role="status" aria-live="polite"
           className="h-0.5 mb-3 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
@@ -338,22 +294,33 @@ export function Overview() {
 
       {/* Executive KPI Row */}
       <div id="executive-dashboard" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 scroll-mt-4">
-        <button type="button" onClick={() => navigate('/cloud-accounts')}
-          aria-label={`${totalConnections} cloud accounts${errorConnections > 0 ? `, ${errorConnections} need attention` : ', all connected'}`}
-          className="exec-kpi-card text-left w-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 rounded-lg">
-          <span className="exec-kpi-label flex items-center gap-1.5">
-            <Icon name="cloud" size={14} className="text-brand-500" />
-            Cloud Accounts
-          </span>
-          <span className="exec-kpi-value">{totalConnections}</span>
-          <span className="text-xs text-slate-400">
-            {!hasConnections ? 'No accounts connected yet' : errorConnections > 0 ? (
-              <span className="text-amber-600 dark:text-amber-400 font-medium">{errorConnections} need attention</span>
-            ) : (
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">All connected</span>
-            )}
-          </span>
-        </button>
+        {canSeeCloud && (
+          <button type="button" onClick={() => navigate('/cloud-accounts')}
+            aria-label={`${totalConnections} cloud accounts: ${providerCounts.aws} aws, ${providerCounts.azure} azure, ${providerCounts.gcp} gcp${errorConnections > 0 ? `, ${errorConnections} need attention` : ', all connected'}`}
+            className="exec-kpi-card text-left w-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 rounded-lg">
+            <span className="exec-kpi-label flex items-center gap-1.5">
+              <Icon name="cloud" size={14} className="text-brand-500" />
+              Cloud Accounts
+            </span>
+            <span className="exec-kpi-value">{totalConnections}</span>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
+              {(['aws', 'azure', 'gcp'] as const).map((p, idx) => (
+                <span key={p} className="flex items-center gap-1">
+                  {idx > 0 && <span className="text-slate-300 dark:text-slate-700 font-normal mr-1">•</span>}
+                  <span>{providerCounts[p]}</span>
+                  <img src={`/logos/${p}.png`} alt={p.toUpperCase()} className="h-3.5 w-auto object-contain" />
+                </span>
+              ))}
+            </div>
+            <span className="text-xs text-slate-400">
+              {!hasConnections ? 'No accounts connected yet' : errorConnections > 0 ? (
+                <span className="text-amber-600 dark:text-amber-400 font-medium">{errorConnections} need attention</span>
+              ) : (
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">All connected</span>
+              )}
+            </span>
+          </button>
+        )}
 
         <button type="button" onClick={() => navigate('/resources')}
           aria-label={`${totalResources.toLocaleString()} total resources`}
@@ -572,7 +539,7 @@ export function Overview() {
                     <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span>
                   </span>
                   <span className="text-xs text-slate-400 shrink-0 whitespace-nowrap">
-                    {formatActivityDate(entry.occurredAt)}
+                    {formatDate(entry.occurredAt)}
                   </span>
                 </li>
               ))}
