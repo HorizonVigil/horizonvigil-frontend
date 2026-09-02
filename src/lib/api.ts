@@ -656,6 +656,7 @@ class ApiClient {
   inviteMember(email: string, role: Role) { return this.post<PendingInviteRow & { emailSent: boolean }>('users', '/api/users/invite', { email, role }); }
   getInvitePreview(token: string) { return this.get<{ orgName: string; inviterName: string; role: Role; email: string }>('users', `/api/users/invites/${token}`); }
   acceptInvite(token: string) { return this.post<{ orgId: string; role: Role }>('users', `/api/users/invites/${token}/accept`); }
+  cancelInvite(id: string) { return this.delete<{ removed: string }>('users', `/api/users/invites/${id}`); }
   updateRoleGrant(id: string, role: Role) { return this.put<{ id: string; role: Role }>('users', `/api/users/role-grants/${id}`, { role }); }
   deleteRoleGrant(id: string) { return this.delete<{ removed: string }>('users', `/api/users/role-grants/${id}`); }
   transferOwnership(newOwnerUserId: string) { return this.post<{ newOwnerUserId: string; previousOwnerRole: Role }>('users', '/api/users/transfer-ownership', { newOwnerUserId }); }

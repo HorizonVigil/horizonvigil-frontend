@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { queryClient } from './api/queryClient';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ThemeProvider } from './lib/theme';
 import { OrgProvider } from './lib/orgContext';
@@ -96,6 +99,7 @@ function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
           <OrgProvider>
@@ -151,16 +155,6 @@ export default function App() {
                           <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
                           <Route path="/source-inventory/:category" element={<ProtectedRoute module="Vulnerability Management"><SourceInventoryCategory /></ProtectedRoute>} />
                           <Route path="/source-inventory/:category/:assetId" element={<ProtectedRoute module="Vulnerability Management"><SourceAssetDetail /></ProtectedRoute>} />
-                          {/* These 6 pages stopped being their own top-level NAV_MODULES
-                              entries in the Phase 1 IA redesign (folded into Vulnerability
-                              Management's own submenu) but this file kept the old
-                              standalone module labels -- ProtectedRoute's `NAV_MODULES.find(m
-                              => m.label === module)` then found nothing for any of the 6
-                              and unconditionally rendered AccessDenied, for every role
-                              including admin/owner. Fixed by pointing every one of these at
-                              their actual current owning module, matching how
-                              /source-inventory/* and /vulnerability-management/findings/:id
-                              already correctly do it. */}
                           <Route path="/security-scanning" element={<ProtectedRoute module="Vulnerability Management"><SecurityScanningCenter /></ProtectedRoute>} />
                           <Route path="/cloud-security" element={<ProtectedRoute module="Vulnerability Management"><CloudSecurity /></ProtectedRoute>} />
                           <Route path="/application-security" element={<ProtectedRoute module="Vulnerability Management"><ApplicationSecurity /></ProtectedRoute>} />
@@ -203,6 +197,8 @@ export default function App() {
           </OrgProvider>
         </AuthProvider>
       </BrowserRouter>
+      <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-left" />
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

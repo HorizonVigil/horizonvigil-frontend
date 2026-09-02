@@ -163,13 +163,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'overview',
     section: 'Get Started',
     to: OVERVIEW,
-    children: [
-      { label: 'Executive Dashboard', to: `${OVERVIEW}#executive-dashboard`, real: true },
-      { label: 'Security Posture', to: `${OVERVIEW}#security-posture`, real: true },
-      { label: 'Activity Timeline', to: `${OVERVIEW}#activity-timeline`, real: true },
-      { label: 'Quick Actions', to: `${OVERVIEW}#quick-actions`, real: true },
-      { label: 'Favorites', to: `${OVERVIEW}#favorites`, real: true },
-    ],
+    children: [],
   },
   {
     label: 'Cloud Accounts',

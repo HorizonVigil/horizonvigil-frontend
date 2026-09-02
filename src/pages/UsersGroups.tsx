@@ -594,6 +594,24 @@ export function UsersGroups() {
     }
   }
 
+  async function handleCancelInvite(inviteId: string, email: string) {
+    if (!(await confirm(`Cancel the pending invite for ${email}? The invite link will stop working.`))) return;
+    if (!beginMutation(`invite-cancel:${inviteId}`)) return;
+
+    setError(null);
+    try {
+      await api.cancelInvite(inviteId);
+      toast(`Invite for ${email} cancelled.`, 'success');
+      await load();
+    } catch (err) {
+      const message = normalizeError(err, 'Could not cancel this invite.');
+      setError(message);
+      toast(message, 'error');
+    } finally {
+      endMutation(`invite-cancel:${inviteId}`);
+    }
+  }
+
   async function handleRoleChange(roleGrantId: string, role: Role) {
     const member = members.find(m => m.roleGrantId === roleGrantId);
     if (!member) return;
@@ -1111,6 +1129,7 @@ export function UsersGroups() {
                 {pendingInvites.map(pi => (
                   <li key={pi.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                     <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({ENTERPRISE_ROLES.find(r => r.value === pi.role)?.label ?? pi.role})</span>
+                    <button type="button" onClick={() => void handleCancelInvite(pi.id, pi.email)} className="text-xs text-red-500 hover:underline">Remove</button>
                   </li>
                 ))}
               </ul>

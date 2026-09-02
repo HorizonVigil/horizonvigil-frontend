@@ -194,6 +194,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <span className="font-semibold text-slate-900 dark:text-white truncate">{activeModule.label}</span>
       </div>
 
+      {filteredChildren.length > 0 && (
       <nav className="px-2 py-2 flex flex-col gap-0.5 border-b border-slate-200 dark:border-slate-800 max-h-[38vh] overflow-y-auto">
         {groupByGroup(filteredChildren).map(({ group, children: groupChildren }, i) => (
           <div key={group || '_ungrouped'} className={i > 0 ? 'mt-2' : ''}>
@@ -229,6 +230,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </div>
         ))}
       </nav>
+      )}
 
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="relative">
