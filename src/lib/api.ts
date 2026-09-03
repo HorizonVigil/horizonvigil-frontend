@@ -326,11 +326,18 @@ class ApiClient {
   getAwsOrgHierarchy(managementConnectionId?: string) {
     return this.get<AwsOrgHierarchyResponse>('awsAccounts', `/api/aws-accounts/organizations/hierarchy${qs({ managementConnectionId })}`);
   }
+  getAzureHierarchy() { return this.get<ProviderHierarchyResponse>('azureAccounts', '/api/azure-accounts/hierarchy'); }
+  getGcpHierarchy() { return this.get<ProviderHierarchyResponse>('gcpAccounts', '/api/gcp-accounts/hierarchy'); }
   getAwsBulkImportPreview(managementConnectionId: string) {
     return this.get<{ total: number; active: number; inactive: number; alreadyConnected: number; importable: number; overLimit: number; sample: { id: string; name: string }[] }>('awsAccounts', `/api/aws-accounts/accounts/bulk-import/preview${qs({ managementConnectionId })}`);
   }
   bulkImportAwsFromOrg(data: { managementConnectionId: string; projectId?: string | null; environment?: string }) {
     return this.post<{ imported: number; skippedAlreadyConnected: number; skippedInactive: number; connections: { id: string; awsAccountId: string }[] }>('awsAccounts', '/api/aws-accounts/accounts/bulk-import-from-organization', data);
+  }
+  /** Azure / GCP config-change timeline (Activity Log / Cloud Audit Logs), normalized to the CloudTrail-events shape. */
+  getProviderChanges(id: string, provider: 'azure' | 'gcp') {
+    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${id}/changes` : `/api/azure-accounts/accounts/${id}/changes`;
+    return this.get<{ provider: string; events: ProviderChangeEvent[] }>(provider === 'gcp' ? 'gcpAccounts' : 'azureAccounts', path);
   }
 
   // Real AWS permission/connection validation (sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer probes)
@@ -1094,6 +1101,31 @@ export interface AwsOrgHierarchyNode {
 export type AwsOrgHierarchyResponse =
   | { mode: 'tree'; roots: AwsOrgHierarchyNode[] }
   | { mode: 'flat'; awsAccounts: { awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string; id: string }[] }[] };
+
+/** Azure management-group / GCP folder hierarchy — a generic annotated tree. */
+export interface ProviderHierarchyNode {
+  id: string;
+  name: string;
+  type: 'org' | 'group' | 'folder' | 'subscription' | 'project';
+  connected?: boolean;
+  connectionId?: string | null;
+  environment?: string | null;
+  children: ProviderHierarchyNode[];
+}
+export type ProviderHierarchyResponse =
+  | { mode: 'tree'; roots: ProviderHierarchyNode[] }
+  | { mode: 'flat'; tenants?: { tenantId: string; subscriptions: { azure_subscription_id: string; id: string; connection_name: string; status: string; environment: string }[] }[]; projects?: { gcp_project_id: string; id: string; connection_name: string; status: string; environment: string }[] };
+
+export interface ProviderChangeEvent {
+  id: string;
+  when: string | null;
+  who: string;
+  operation: string;
+  status: string | null;
+  resource: string | null;
+  resourceType: string | null;
+  level: string | null;
+}
 
 export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
 export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }

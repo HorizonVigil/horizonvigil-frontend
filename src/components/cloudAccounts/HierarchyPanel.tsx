@@ -12,7 +12,7 @@ import { Badge } from '../Badge';
 import { Icon } from '../icons';
 import { CardSkeleton } from '../Skeleton';
 import { EmptyState } from '../EmptyState';
-import { api, friendlyErrorMessage, type AwsOrgHierarchyNode } from '../../lib/api';
+import { api, friendlyErrorMessage, type AwsOrgHierarchyNode, type ProviderHierarchyNode } from '../../lib/api';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
 import { buildHierarchy, type HierNode } from '../../lib/cloudAccounts/hierarchy';
 
@@ -81,6 +81,36 @@ function AwsOuNode({ node, depth, onOpenAccount }: { node: AwsOrgHierarchyNode; 
   );
 }
 
+function GenericNode({ node, depth, onOpenAccount }: { node: ProviderHierarchyNode; depth: number; onOpenAccount: (id: string) => void }) {
+  const [open, setOpen] = useState(depth < 2);
+  const isLeaf = node.type === 'subscription' || node.type === 'project';
+  const icon = node.type === 'org' ? 'organization' : node.type === 'group' || node.type === 'folder' ? 'folder' : 'box';
+  if (isLeaf) {
+    return (
+      <div className="flex items-center gap-1.5 py-1" style={{ paddingLeft: depth * 16 + 22 }}>
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${node.connected ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+        {node.connected && node.connectionId ? (
+          <button type="button" onClick={() => onOpenAccount(node.connectionId!)} className="text-xs text-slate-600 dark:text-slate-300 hover:underline">{node.name}</button>
+        ) : (
+          <span className="text-xs text-slate-500 dark:text-slate-400">{node.name}</span>
+        )}
+        <span className="font-mono text-[10px] text-slate-400">{node.id}</span>
+        {!node.connected && <span className="text-[10px] text-amber-600 dark:text-amber-400">not connected</span>}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 w-full text-left py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded" style={{ paddingLeft: depth * 16 + 4 }}>
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} className="text-slate-400 shrink-0" />
+        <Icon name={icon} size={13} className="text-slate-400 shrink-0" />
+        <span className="text-sm text-slate-700 dark:text-slate-200">{node.name}</span>
+      </button>
+      {open && node.children.map((c) => <GenericNode key={c.id} node={c} depth={depth + 1} onOpenAccount={onOpenAccount} />)}
+    </div>
+  );
+}
+
 export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedAccountRow[]; orgName: string; refreshToken: number }) {
   const navigate = useNavigate();
   const openAccount = (id: string) => navigate(`/cloud-accounts/${id}`);
@@ -95,6 +125,20 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
     queryFn: () => api.getAwsOrgHierarchy(),
     staleTime: 60_000,
     retry: false,
+  });
+  const azureH = useQuery({
+    queryKey: ['cloud-accounts', 'azure-hierarchy', refreshToken],
+    queryFn: () => api.getAzureHierarchy(),
+    staleTime: 60_000,
+    retry: false,
+    enabled: rows.some((r) => r.provider === 'azure'),
+  });
+  const gcpH = useQuery({
+    queryKey: ['cloud-accounts', 'gcp-hierarchy', refreshToken],
+    queryFn: () => api.getGcpHierarchy(),
+    staleTime: 60_000,
+    retry: false,
+    enabled: rows.some((r) => r.provider === 'gcp'),
   });
 
   const tree = useMemo(() => buildHierarchy(orgName, hier.data ?? null, rows), [orgName, hier.data, rows]);
@@ -117,12 +161,35 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
         ) : awsOu.data?.mode === 'tree' ? (
           awsOu.data.roots.map((r) => <AwsOuNode key={r.id} node={r} depth={0} onOpenAccount={openAccount} />)
         ) : (
-          <p className="text-xs text-slate-400">
-            No live OU tree yet — connect your AWS Organizations management account and pass it to the hierarchy view.
-            Azure management groups and GCP folder hierarchy are a backend follow-up.
-          </p>
+          <p className="text-xs text-slate-400">No live OU tree — connect your AWS Organizations management account and pass it to this view.</p>
         )}
       </div>
+
+      {rows.some((r) => r.provider === 'azure') && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Azure Management Groups</h3>
+          {azureH.isLoading ? <CardSkeleton lines={3} /> : azureH.isError ? (
+            <p className="text-xs text-slate-400">Couldn't load: {friendlyErrorMessage(azureH.error)}</p>
+          ) : azureH.data?.mode === 'tree' ? (
+            azureH.data.roots.map((r) => <GenericNode key={r.id} node={r} depth={0} onOpenAccount={openAccount} />)
+          ) : (
+            <p className="text-xs text-slate-400">Management-group read access isn't granted — showing subscriptions flat. Grant the service principal Reader on the tenant root management group for the full tree.</p>
+          )}
+        </div>
+      )}
+
+      {rows.some((r) => r.provider === 'gcp') && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">GCP Organization &amp; Folders</h3>
+          {gcpH.isLoading ? <CardSkeleton lines={3} /> : gcpH.isError ? (
+            <p className="text-xs text-slate-400">Couldn't load: {friendlyErrorMessage(gcpH.error)}</p>
+          ) : gcpH.data?.mode === 'tree' ? (
+            gcpH.data.roots.map((r) => <GenericNode key={r.id} node={r} depth={0} onOpenAccount={openAccount} />)
+          ) : (
+            <p className="text-xs text-slate-400">Folder-hierarchy read access isn't granted — showing projects flat. Grant the service account <code>resourcemanager.folders.list</code> at the org level for the full tree.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
