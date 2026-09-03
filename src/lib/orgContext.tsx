@@ -13,6 +13,14 @@ interface OrgContextType {
   scope: Scope | null;
   /** Effective per-menu permission level (explicit override or role-derived default) — see rbac.ts's getEffectiveMenuPermissions. Null while loading; navConfig's canSee treats null as "not yet known" and falls back to role-only, same as before this existed. */
   menuPermissions: Record<string, MenuPermissionLevel> | null;
+  /**
+   * The caller's own effective cloud-connection access. `restricted: false`
+   * means unrestricted (see everything); `restricted: true` limits them to
+   * `connectionIds`. Consumed by the dynamic Overview's scope layer
+   * (lib/overview/scope.ts) so widget queries are scoped, not client-filtered.
+   * Null while loading.
+   */
+  resourceGrants: { restricted: boolean; connectionIds: string[] } | null;
   isLoading: boolean;
   setCurrentOrg: (org: OrganizationRow) => void;
   setScope: (scope: Scope | null) => void;
@@ -30,6 +38,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [scope, setScope] = useState<Scope | null>(null);
   const [menuPermissions, setMenuPermissions] = useState<Record<string, MenuPermissionLevel> | null>(null);
+  const [resourceGrants, setResourceGrants] = useState<{ restricted: boolean; connectionIds: string[] } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -45,12 +54,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       if (active) {
         api.setCurrentOrgId(active.id);
         setCurrentOrgState(active);
-        const [{ folders: f }, { projects: p }, { permissions }] = await Promise.all([
+        // getEffectiveResourceGrants is best-effort: a failure here must not
+        // block the whole org bootstrap, so it's caught to a permissive
+        // default (unrestricted) rather than rejected with the rest.
+        const [{ folders: f }, { projects: p }, { permissions }, grants] = await Promise.all([
           api.getFolders(), api.getProjects(), api.getEffectiveMenuPermissions(),
+          api.getEffectiveResourceGrants().catch(() => ({ restricted: false, connectionIds: [] as string[] })),
         ]);
         setFolders(f);
         setProjects(p);
         setMenuPermissions(permissions);
+        setResourceGrants({ restricted: grants.restricted, connectionIds: grants.connectionIds });
         setScope({ type: 'org', id: active.id, name: active.name });
       } else {
         api.setCurrentOrgId(null);
@@ -58,6 +72,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setFolders([]);
         setProjects([]);
         setMenuPermissions(null);
+        setResourceGrants(null);
         setScope(null);
       }
     } finally {
@@ -81,7 +96,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [setCurrentOrg]);
 
   return (
-    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, menuPermissions, isLoading, setCurrentOrg, setScope, refresh, createOrg }}>
+    <OrgContext.Provider value={{ orgs, currentOrg, folders, projects, scope, menuPermissions, resourceGrants, isLoading, setCurrentOrg, setScope, refresh, createOrg }}>
       {children}
     </OrgContext.Provider>
   );
