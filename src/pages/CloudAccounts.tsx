@@ -10,9 +10,17 @@ import { ConnectAwsAccountWizard } from '../components/ConnectAwsAccountWizard';
 import { ConnectGcpProjectWizard } from '../components/ConnectGcpProjectWizard';
 import { ConnectAzureSubscriptionWizard } from '../components/ConnectAzureSubscriptionWizard';
 import { AddAccountChooser } from '../components/AddAccountChooser';
+import { OverviewPanel } from '../components/cloudAccounts/OverviewPanel';
+import { ConnectionsPanel } from '../components/cloudAccounts/ConnectionsPanel';
+import { HierarchyPanel } from '../components/cloudAccounts/HierarchyPanel';
+import { HealthPanel } from '../components/cloudAccounts/HealthPanel';
+import { ChangesPanel } from '../components/cloudAccounts/ChangesPanel';
+import { ActivityPanel } from '../components/cloudAccounts/ActivityPanel';
+import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
+import { BulkOnboardingModal } from '../components/cloudAccounts/BulkOnboardingModal';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
-import { StatCardSkeleton, CardSkeleton, TableSkeleton } from '../components/Skeleton';
+import { TableSkeleton } from '../components/Skeleton';
 import { useOrg } from '../lib/orgContext';
 import { useFilters } from '../lib/filterContext';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
@@ -21,7 +29,7 @@ import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
-import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AwsAccountsDashboard, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
+import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
 import { fetchAllPages } from '../lib/fetchAllPages';
 
@@ -56,17 +64,28 @@ import { fetchAllPages } from '../lib/fetchAllPages';
 // CRUD + discovery), and fabricating numbers for a tab GCP has no backend
 // behind would violate this codebase's own "never ship a tab with nothing
 // real behind it" rule.
-const TABS = ['Dashboard', 'Inventory', 'Onboarding', 'Organizations', 'Regions', 'Sync Center', 'Reports', 'Identities'] as const;
+// Restructured to the Cloud Accounts spec §4 information architecture. Tab
+// *values* are kept close to the originals where a body was migrated
+// verbatim (Inventory / Sync Center / Regions / Reports) so existing
+// `?tab=` bookmarks and navConfig links keep working; TAB_LABEL carries the
+// spec's display name. New tabs: Overview (was Dashboard), Connections,
+// Hierarchy (was Organizations), Access (was Identities + access matrix),
+// Health, Changes, Activity, Settings. Onboarding folds into "+ Connect
+// Cloud" + the Bulk Onboarding flow.
+const TABS = ['Overview', 'Connections', 'Inventory', 'Hierarchy', 'Access', 'Sync Center', 'Health', 'Changes', 'Activity', 'Regions', 'Settings'] as const;
 type Tab = typeof TABS[number];
 
-// This page's own tab values are shorter than navConfig.ts's sidebar labels
-// for the same items ("Inventory" here vs. "Account Inventory" there) --
-// useSubmenuAccess keys off the navConfig label, so the two have to be
-// bridged by hand rather than passed straight through.
+const TAB_LABEL: Record<Tab, string> = {
+  Overview: 'Overview', Connections: 'Connections', Inventory: 'Accounts', Hierarchy: 'Hierarchy',
+  Access: 'Access & Permissions', 'Sync Center': 'Sync & Discovery', Health: 'Health', Changes: 'Changes',
+  Activity: 'Activity', Regions: 'Regions', Settings: 'Settings',
+};
+
+// useSubmenuAccess keys off the navConfig label, so the two are bridged by hand.
 const TAB_TO_NAV_LABEL: Record<Tab, string> = {
-  Dashboard: 'Dashboard', Inventory: 'Account Inventory', Onboarding: 'Account Onboarding',
-  Organizations: 'Organizations', Regions: 'Regions', 'Sync Center': 'Sync Center', Reports: 'Reports',
-  Identities: 'Identities',
+  Overview: 'Overview', Connections: 'Connections', Inventory: 'Account Inventory', Hierarchy: 'Hierarchy',
+  Access: 'Access & Permissions', 'Sync Center': 'Sync & Discovery', Health: 'Health', Changes: 'Changes',
+  Activity: 'Activity', Regions: 'Regions', Settings: 'Settings',
 };
 
 const IDENTITY_PRIVILEGE_TONE: Record<string, 'good' | 'warning' | 'critical'> = { scoped: 'good', broad: 'warning', admin_equivalent: 'critical' };
@@ -75,13 +94,6 @@ const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'
 const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }, { value: 'azure', label: 'Azure' }] as const;
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 const PAGE_SIZES = [25, 50, 100];
-const REPORT_KINDS = [
-  { kind: 'account-summary' as const, label: 'Account Summary' },
-  { kind: 'health' as const, label: 'Health Report' },
-  { kind: 'permissions' as const, label: 'Permission Report' },
-  { kind: 'sync' as const, label: 'Sync Report' },
-  { kind: 'cost' as const, label: 'Cost Report' },
-];
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -123,8 +135,8 @@ function IdentityPermissionsList({ identity }: { identity: CloudIdentity }) {
 }
 
 export function CloudAccounts() {
-  const { projects } = useOrg();
-  const { refreshToken } = useFilters();
+  const { projects, currentOrg } = useOrg();
+  const { refreshToken, connections: allConnectionRows } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
@@ -141,7 +153,7 @@ export function CloudAccounts() {
   const canSeeNavTab = useSubmenuAccess('cloud');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
   const visibleTabs = TABS.filter(canSeeTab);
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'Dashboard');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   useEffect(() => {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
@@ -149,6 +161,7 @@ export function CloudAccounts() {
   const [gcpConnections, setGcpConnections] = useState<GcpConnection[]>([]);
   const [azureConnections, setAzureConnections] = useState<AzureConnection[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [awsWizardOpen, setAwsWizardOpen] = useState(false);
   const [gcpWizardOpen, setGcpWizardOpen] = useState(false);
   const [azureWizardOpen, setAzureWizardOpen] = useState(false);
@@ -216,16 +229,11 @@ export function CloudAccounts() {
   const setInventoryPage = (v: number) => { setPage(v); resetInventorySelection(); };
 
   // Tab-specific data
-  const [dashboard, setDashboard] = useState<AwsAccountsDashboard | null>(null);
-  const [gcpProjectCount, setGcpProjectCount] = useState<number | null>(null);
-  const [azureAccountCount, setAzureAccountCount] = useState<number | null>(null);
-  const [awsOrgs, setAwsOrgs] = useState<{ awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[]>([]);
   const [syncStatus, setSyncStatus] = useState<AccountSummary[]>([]);
   const [regions, setRegions] = useState<{ region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[]>([]);
   const [permissionsSummary, setPermissionsSummary] = useState<AccountPermissionSummary[]>([]);
   const [syncCenterLoaded, setSyncCenterLoaded] = useState(false);
   const [expandedSyncRow, setExpandedSyncRow] = useState<string | null>(null);
-  const [downloadingReport, setDownloadingReport] = useState<string | null>(null);
   const [updateCredsFor, setUpdateCredsFor] = useState<UnifiedAccountRow | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
 
@@ -326,20 +334,9 @@ export function CloudAccounts() {
     let cancelled = false;
     const run = async () => {
       try {
-        if (tab === 'Dashboard') {
-          const [dash, gcp, azure] = await Promise.allSettled([
-            api.getAwsAccountsDashboard(),
-            api.getGcpAccounts({ limit: 1 }),
-            api.getAzureAccounts({ limit: 1 }),
-          ]);
-          if (cancelled) return;
-          if (dash.status === 'fulfilled') setDashboard(dash.value); else toast(dash.reason instanceof Error ? dash.reason.message : 'Failed to load account dashboard.', 'error');
-          if (gcp.status === 'fulfilled') setGcpProjectCount(gcp.value.pagination.total);
-          if (azure.status === 'fulfilled') setAzureAccountCount(azure.value.pagination.total);
-        } else if (tab === 'Organizations') {
-          const r = await api.getAwsOrganizations();
-          if (!cancelled) setAwsOrgs(r.awsAccounts);
-        } else if (tab === 'Regions') {
+        // Overview / Connections / Hierarchy / Health / Changes / Activity
+        // tabs each own their data-loading in their own component now.
+        if (tab === 'Regions') {
           const r = await api.getAwsAccountsRegions();
           if (!cancelled) setRegions(r.regions);
         } else if (tab === 'Sync Center') {
@@ -410,7 +407,7 @@ export function CloudAccounts() {
 
 
   useEffect(() => {
-    if (tab === 'Identities') void loadIdentities();
+    if (tab === 'Access') void loadIdentities();
   }, [tab, loadIdentities, refreshToken]);
 
   useEffect(() => {
@@ -544,27 +541,6 @@ export function CloudAccounts() {
     }
   }
 
-  async function downloadReport(kind: typeof REPORT_KINDS[number]['kind']) {
-    setDownloadingReport(kind);
-    try {
-      const { blob, filename } = await api.downloadAwsAccountsReport(kind);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      // Give the browser a chance to consume the download before revoking it.
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Failed to download report.', 'error');
-    } finally {
-      setDownloadingReport(null);
-    }
-  }
-
 
   const identityColumns: Column<CloudIdentity>[] = useMemo(() => [
     { key: 'display_name', header: 'Identity', sticky: true, sortValue: r => r.display_name ?? r.native_id, render: r => (
@@ -606,7 +582,7 @@ export function CloudAccounts() {
       if (tab === 'Sync Center') {
         void api.getAwsAccountsPermissionsSummary().then(r => setPermissionsSummary(r.accounts));
         void api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts));
-      } else if (tab === 'Dashboard') void api.getAwsAccountsDashboard().then(setDashboard);
+      }
     }
   }
 
@@ -700,147 +676,36 @@ export function CloudAccounts() {
           just missed. */}
       <FilterBar title="Cloud Accounts" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3">
         <div className="flex gap-1 text-sm flex-wrap">
           {visibleTabs.map(t => (
             <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-md whitespace-nowrap transition-colors ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-              {t}
+              {TAB_LABEL[t]}
             </button>
           ))}
         </div>
-        <button onClick={() => setChooserOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2 shrink-0 transition-colors">+ Add Account</button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setBulkOpen(true)} className="rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-medium px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Bulk Onboard</button>
+          <button onClick={() => setChooserOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2 transition-colors">+ Connect Cloud</button>
+        </div>
       </div>
 
-      {tab === 'Dashboard' && (
-        !dashboard ? (
-          <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 9 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard label="AWS Accounts" value={String(dashboard.totalAccounts)} />
-              <StatCard label="GCP Projects" value={gcpProjectCount === null ? '…' : String(gcpProjectCount)} />
-              <StatCard label="Azure Subscriptions" value={azureAccountCount === null ? '…' : String(azureAccountCount)} />
-              <StatCard label="Healthy" value={String(dashboard.healthyAccounts)} caption="AWS only" />
-              <StatCard label="Failed" value={String(dashboard.failedAccounts)} caption="AWS only" />
-              <StatCard label="Disconnected" value={String(dashboard.disconnectedAccounts)} caption="AWS only" />
-              <StatCard label="Needing Attention" value={String(dashboard.accountsNeedingAttention)} caption="AWS only" />
-              <StatCard label="Resources Discovered" value={dashboard.resourcesDiscovered.toLocaleString()} />
-              <StatCard label="Credential Rotation Due" value={String(dashboard.rotationDue)} caption="AWS only" />
-            </div>
-            <p className="text-xs text-slate-400 -mt-3">GCP projects and Azure subscriptions appear in Inventory alongside AWS accounts, and their own health can be seen there.</p>
-
-            {dashboard.accountsNeedingAttentionList.length > 0 && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
-                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-1.5">
-                  <Icon name="alert-triangle" size={14} />
-                  Accounts Needing Attention
-                </h3>
-                <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
-                  {dashboard.accountsNeedingAttentionList.map(a => {
-                    const isValidationPending = a.reason === 'Not yet validated';
-                    return (
-                      <li key={a.connectionId} className="flex items-center justify-between gap-3 py-2 text-sm">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Badge tone={isValidationPending ? 'warning' : 'critical'}>{isValidationPending ? 'Pending' : 'Critical'}</Badge>
-                          <button onClick={() => navigate(`/cloud-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline font-medium truncate">{a.connectionName}</button>
-                          <span className="text-slate-500 dark:text-slate-400 truncate">— {a.reason}</span>
-                        </div>
-                        <button onClick={() => void runValidation(a.connectionId, a.connectionName)} disabled={validatingIds.has(a.connectionId)} className="text-xs text-brand-600 dark:text-brand-400 hover:underline shrink-0 disabled:opacity-50">
-                          {validatingIds.has(a.connectionId) ? 'Validating…' : 'Validate'}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {dashboard.accountsNeedingAttention > dashboard.accountsNeedingAttentionList.length && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">+{dashboard.accountsNeedingAttention - dashboard.accountsNeedingAttentionList.length} more — narrow with Inventory filters to see the rest.</p>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Discovery</h3>
-                <dl className="text-sm flex flex-col gap-2">
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Last Discovery</dt><dd className="text-slate-800 dark:text-slate-100">{dashboard.lastDiscovery ? new Date(dashboard.lastDiscovery).toLocaleString() : 'Never'}</dd></div>
-                </dl>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Validation</h3>
-                <dl className="text-sm flex flex-col gap-2">
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Permission Errors</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.permissionErrors}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Sync/Validation Failures</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.syncFailures}</dd></div>
-                </dl>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Cost & Recommendations</h3>
-                <dl className="text-sm flex flex-col gap-2">
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Monthly Cost (MTD)</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.monthlyCost)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Open Recommendations</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{dashboard.openRecommendations}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500 dark:text-slate-400">Potential Savings/mo</dt><dd className="text-slate-800 dark:text-slate-100 tabular-nums">{money(dashboard.potentialMonthlySavings)}</dd></div>
-                </dl>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Cost Accounts</h3>
-                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                  {dashboard.topCostAccounts.map(a => (
-                    <li key={a.connectionId} className="flex justify-between py-2 text-sm">
-                      <button onClick={() => navigate(`/cloud-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
-                      <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(a.monthToDate)}</span>
-                    </li>
-                  ))}
-                  {dashboard.topCostAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No cost data synced yet.</li>}
-                </ul>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Top Growing Accounts</h3>
-                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                  {dashboard.topGrowingAccounts.map(a => (
-                    <li key={a.connectionId} className="flex justify-between py-2 text-sm">
-                      <button onClick={() => navigate(`/cloud-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline">{a.connectionName}</button>
-                      <span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{a.totalResources.toLocaleString()} resources</span>
-                    </li>
-                  ))}
-                  {dashboard.topGrowingAccounts.length === 0 && <li className="py-2 text-sm text-slate-400">No resource data yet.</li>}
-                </ul>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Activity</h3>
-                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                  {dashboard.recentActivity.map(entry => (
-                    <li key={entry.id} className="py-2 text-sm flex justify-between">
-                      <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actorEmail ?? 'system'}</span></span>
-                      <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
-                    </li>
-                  ))}
-                  {dashboard.recentActivity.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
-                </ul>
-              </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Alerts</h3>
-                <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-                  {dashboard.recentAlerts.map(a => (
-                    <li key={a.id} className="py-2 text-sm flex justify-between">
-                      <span className="text-slate-700 dark:text-slate-200 flex items-center gap-2"><Badge>{a.severity}</Badge>{a.alertName}</span>
-                      <span className="text-xs text-slate-400 shrink-0">{new Date(a.triggeredAt).toLocaleString()}</span>
-                    </li>
-                  ))}
-                  {dashboard.recentAlerts.length === 0 && <li className="py-2 text-sm text-slate-400">No open alerts.</li>}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )
+      {tab === 'Overview' && (
+        <OverviewPanel
+          refreshToken={refreshToken}
+          onProviderClick={(p) => { setProviderFilter(p); setTab('Inventory'); }}
+        />
       )}
+      {tab === 'Connections' && (
+        <ConnectionsPanel rows={allConnectionRows} onAddConnection={() => setChooserOpen(true)} />
+      )}
+      {tab === 'Hierarchy' && (
+        <HierarchyPanel rows={allConnectionRows} orgName={currentOrg?.name ?? ''} refreshToken={refreshToken} />
+      )}
+      {tab === 'Health' && <HealthPanel refreshToken={refreshToken} />}
+      {tab === 'Changes' && <ChangesPanel rows={allConnectionRows} />}
+      {tab === 'Activity' && <ActivityPanel refreshToken={refreshToken} />}
+      {tab === 'Settings' && <SettingsTab folderProjectCount={projects.length} />}
 
       {tab === 'Inventory' && (
         <>
@@ -940,48 +805,6 @@ export function CloudAccounts() {
             />
           )}
         </>
-      )}
-
-      {tab === 'Onboarding' && (
-        <div className="max-w-xl mx-auto flex flex-col items-center text-center gap-4 py-14">
-          <div className="h-14 w-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
-            <Icon name="cloud" size={24} className="text-brand-600 dark:text-brand-400" />
-          </div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Connect a New Cloud Account</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
-            Connect an AWS account (via a cross-account IAM role or access keys), a GCP project (via a service account key or impersonation), or an Azure subscription (via a service principal). Each wizard walks through least-privilege permissions, region selection, and an initial connection check.
-          </p>
-          <button onClick={() => setChooserOpen(true)} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2.5">Start Onboarding</button>
-          {providerTotal > 0 && (
-            <p className="text-xs text-slate-400 mt-6">
-              {providerTotal.toLocaleString()} account{providerTotal === 1 ? '' : 's'} already connected — see{' '}
-              <button onClick={() => setTab('Inventory')} className="text-brand-600 dark:text-brand-400 hover:underline">Account Inventory</button> to manage them.
-            </p>
-          )}
-        </div>
-      )}
-
-      {tab === 'Organizations' && (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-slate-400">Connected AWS accounts grouped by their 12-digit AWS account ID. GCP projects use project-level grouping instead.</p>
-          {awsOrgs.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No AWS accounts connected yet.</p>}
-          {awsOrgs.map(group => (
-            <div key={group.awsAccountId} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <div className="text-sm font-medium text-slate-700 dark:text-slate-200 font-mono mb-2">{group.awsAccountId}</div>
-              <ul className="flex flex-col gap-1.5">
-                {group.connections.map((c, i) => (
-                  <li key={i} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600 dark:text-slate-300">{c.connection_name}</span>
-                    <span className="flex items-center gap-2">
-                      <Badge tone="neutral">{c.environment}</Badge>
-                      <Badge>{c.status}</Badge>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
       )}
 
       {tab === 'Regions' && (
@@ -1086,22 +909,15 @@ export function CloudAccounts() {
         </div>
       )}
 
-      {tab === 'Reports' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {REPORT_KINDS.map(r => (
-            <div key={r.kind} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{r.label}</span>
-              <span className="text-xs text-slate-400">Live CSV export from this org's current AWS account data.</span>
-              <button onClick={() => void downloadReport(r.kind)} disabled={downloadingReport === r.kind} className="mt-1 text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-3 py-1.5 self-start">
-                {downloadingReport === r.kind ? 'Downloading…' : 'Download CSV'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'Identities' && (
+      {tab === 'Access' && (
         <div className="flex flex-col gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">Access &amp; Permissions</h3>
+            <p className="text-xs text-slate-400">
+              What HorizonVigil can access in each connected environment, and every cloud identity it has discovered. Open an
+              account (Access tab) to see its exact permission-validation matrix and the actions HorizonVigil never performs.
+            </p>
+          </div>
           <p className="text-xs text-slate-400 max-w-2xl">
             One row per identity across every connected cloud — AWS (IAM users, roles, and groups), GCP (service accounts and real project IAM-policy members), or Azure (role-assignment principals: users, service principals, managed identities, groups). Click a row for its full permissions list — attached/inline policies on AWS, bound IAM roles on GCP, resolved role-assignment names on Azure. Privilege level is computed per-cloud from each account's own IAM data (AWS additionally has MFA/access-key staleness from its credential report; GCP/Azure don't expose that the same way). Azure identities show their principal ID rather than a resolved name — that needs Microsoft Graph access this connection doesn't have yet.
           </p>
@@ -1211,7 +1027,86 @@ export function CloudAccounts() {
           onUpdated={() => { setUpdateCredsFor(null); void loadInventory(); }}
         />
       )}
+      <BulkOnboardingModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={allConnectionRows} onImported={loadInventory} />
       {confirmDialog}
+    </div>
+  );
+}
+
+/** Cloud Accounts — Settings tab (spec §4). Default scoping, credential rotation, and the AWS Organization prerequisites for bulk onboarding. */
+function SettingsTab({ folderProjectCount }: { folderProjectCount: number }) {
+  const { toast } = useToast();
+  const [externalId, setExternalId] = useState<{ externalId: string; roleName: string } | null>(null);
+  const [loadingExt, setLoadingExt] = useState(false);
+
+  async function loadExternalId() {
+    setLoadingExt(true);
+    try {
+      setExternalId(await api.getAwsOrgExternalId());
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not load the AWS Organization external ID.', 'error');
+    } finally {
+      setLoadingExt(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 max-w-3xl">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Scope &amp; defaults</h3>
+        <p className="text-xs text-slate-400">
+          {folderProjectCount} project{folderProjectCount === 1 ? '' : 's'} configured. Accounts are assigned to a project in the
+          Connect wizard or from an account's Settings tab. Manage folders and projects under{' '}
+          <span className="text-slate-500 dark:text-slate-400">Organization Management</span>.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Bulk onboarding from an AWS Organization</h3>
+        <ol className="text-xs text-slate-500 dark:text-slate-400 list-decimal list-inside space-y-1">
+          <li>Connect your AWS Organizations management account as a normal cross-account-role connection.</li>
+          <li>Deploy the <code>HorizonVigilRead</code> role as a StackSet across your Organization, using the external ID below.</li>
+          <li>Use <strong>Bulk Onboard</strong> (top right) to import every member account in one step.</li>
+        </ol>
+        <div className="mt-3 flex items-center gap-2">
+          {externalId ? (
+            <>
+              <code className="text-xs bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 font-mono">{externalId.externalId}</code>
+              <button type="button" onClick={() => { void navigator.clipboard.writeText(externalId.externalId); toast('External ID copied', 'success'); }} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Copy</button>
+              <span className="text-xs text-slate-400">role: {externalId.roleName}</span>
+            </>
+          ) : (
+            <button type="button" onClick={() => void loadExternalId()} disabled={loadingExt} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+              {loadingExt ? 'Loading…' : 'Reveal external ID'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Reports</h3>
+        <p className="text-xs text-slate-400 mb-2">CSV exports of the current AWS account data.</p>
+        <div className="flex flex-wrap gap-2">
+          {(['account-summary', 'health', 'permissions', 'sync', 'cost'] as const).map((kind) => (
+            <button key={kind} type="button"
+              onClick={async () => {
+                try {
+                  const { blob, filename } = await api.downloadAwsAccountsReport(kind);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = filename; a.rel = 'noopener';
+                  document.body.appendChild(a); a.click(); a.remove();
+                  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+                } catch (err) {
+                  toast(err instanceof ApiError ? err.message : 'Report download failed.', 'error');
+                }
+              }}
+              className="text-xs rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 capitalize">
+              {kind.replace('-', ' ')}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

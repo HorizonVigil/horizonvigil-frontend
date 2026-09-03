@@ -6,6 +6,8 @@ import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
 import { EditAccountModal } from '../components/EditAccountModal';
+import { AccountHealthTab } from '../components/cloudAccounts/AccountHealthTab';
+import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
@@ -16,7 +18,7 @@ import { api, ApiError, type AzureConnection, type CloudResource, type Validatio
 import { money } from '../lib/format';
 import { useResourceFilters } from '../lib/useResourceFilters';
 
-const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Sync History', 'Activity'] as const;
+const TABS = ['Overview', 'Health', 'Resources', 'Cost', 'Access', 'Permissions', 'Sync History', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -149,7 +151,7 @@ export function AzureAccountDetail() {
 
 
   useEffect(() => {
-    if (!id || tab !== 'Permissions') return;
+    if (!id || (tab !== 'Permissions' && tab !== 'Access')) return;
 
     const requestId = ++tabRequestRef.current;
     setTabError(null);
@@ -462,6 +464,13 @@ export function AzureAccountDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === 'Health' && id && <AccountHealthTab id={id} provider="azure" />}
+
+      {tab === 'Access' && (
+        <AccessMatrix checks={permissionChecks} lastCheckedAt={permissionRun?.finished_at ?? permissionRun?.started_at ?? null}
+          onRevalidate={() => void runValidation()} revalidating={validating} />
       )}
 
       {tab === 'Permissions' && (

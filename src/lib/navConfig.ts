@@ -166,23 +166,25 @@ export const NAV_MODULES: NavModule[] = [
     children: [],
   },
   {
+    // Restructured to the Cloud Accounts spec §4 IA. Tab query values match
+    // CloudAccounts.tsx's own TABS array (some kept from the old names where a
+    // body was migrated verbatim: Inventory, Sync Center, Regions).
     label: 'Cloud Accounts',
     icon: 'cloud',
     section: 'Cloud Operations',
     to: ACCOUNTS,
     children: [
-      { label: 'Dashboard', to: ACCOUNTS, real: true },
+      { label: 'Overview', to: ACCOUNTS, real: true },
+      { label: 'Connections', to: tabLink(ACCOUNTS, 'Connections'), real: true },
       { label: 'Account Inventory', to: tabLink(ACCOUNTS, 'Inventory'), real: true },
-      { label: 'Account Onboarding', to: tabLink(ACCOUNTS, 'Onboarding'), real: true, minRole: 'editor' },
-      { label: 'Organizations', to: tabLink(ACCOUNTS, 'Organizations'), real: true },
+      { label: 'Hierarchy', to: tabLink(ACCOUNTS, 'Hierarchy'), real: true },
+      { label: 'Access & Permissions', to: tabLink(ACCOUNTS, 'Access'), real: true },
+      { label: 'Sync & Discovery', to: tabLink(ACCOUNTS, 'Sync Center'), real: true, minRole: 'editor' },
+      { label: 'Health', to: tabLink(ACCOUNTS, 'Health'), real: true },
+      { label: 'Changes', to: tabLink(ACCOUNTS, 'Changes'), real: true },
+      { label: 'Activity', to: tabLink(ACCOUNTS, 'Activity'), real: true },
       { label: 'Regions', to: tabLink(ACCOUNTS, 'Regions'), real: true },
-      { label: 'Sync Center', to: tabLink(ACCOUNTS, 'Sync Center'), real: true, minRole: 'editor' },
-      { label: 'Reports', to: tabLink(ACCOUNTS, 'Reports'), real: true },
-      { label: 'Identities', to: tabLink(ACCOUNTS, 'Identities'), real: true },
-      { label: 'GCP Projects', to: tabLink(ACCOUNTS, 'GCP Projects'), real: true },
-      { label: 'AWS Accounts', to: tabLink(ACCOUNTS, 'AWS Accounts'), real: true },
-      { label: 'Azure accounts', to: tabLink(ACCOUNTS, 'Azure accounts'), real: true },
-      { label: 'Settings', real: false, minRole: 'admin' },
+      { label: 'Settings', to: tabLink(ACCOUNTS, 'Settings'), real: true, minRole: 'admin' },
     ],
   },
   {

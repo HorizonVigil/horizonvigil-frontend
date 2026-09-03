@@ -6,6 +6,8 @@ import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
 import { EditAccountModal } from '../components/EditAccountModal';
+import { AccountHealthTab } from '../components/cloudAccounts/AccountHealthTab';
+import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
@@ -50,7 +52,7 @@ const ACTION_LABEL: Record<RemediationActionType, string> = {
 };
 
 
-const TABS = ['Overview', 'Resources', 'Cost', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Activity'] as const;
+const TABS = ['Overview', 'Health', 'Resources', 'Cost', 'Access', 'Permissions', 'Regions', 'Sync History', 'Recommendations', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 type AccountCredentials = {
@@ -243,7 +245,7 @@ export function AwsAccountDetail() {
       try {
         if (tab === 'Cost') {
           setAccountCost(await api.getAccountCost(accountId));
-        } else if (tab === 'Permissions') {
+        } else if (tab === 'Permissions' || tab === 'Access') {
           await loadPermissions();
         } else if (tab === 'Regions') {
           const r = await api.getAccountRegions(accountId);
@@ -627,6 +629,17 @@ export function AwsAccountDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === 'Health' && id && <AccountHealthTab id={id} provider="aws" />}
+
+      {tab === 'Access' && (
+        <AccessMatrix
+          checks={permissionChecks}
+          lastCheckedAt={permissionRun?.finished_at ?? permissionRun?.started_at ?? null}
+          onRevalidate={() => void runValidation()}
+          revalidating={validating}
+        />
       )}
 
       {tab === 'Permissions' && (

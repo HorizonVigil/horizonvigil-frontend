@@ -6,6 +6,8 @@ import { Badge } from '../components/Badge';
 import { Donut } from '../components/charts/Donut';
 import { ResourceFilterBar } from '../components/ResourceFilterBar';
 import { EditAccountModal } from '../components/EditAccountModal';
+import { AccountHealthTab } from '../components/cloudAccounts/AccountHealthTab';
+import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { useTabParam } from '../lib/useTabParam';
 import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
@@ -16,7 +18,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { api, ApiError, type GcpConnection, type CloudResource, type ValidationRun, type RecurringFailure, type PermissionCheckResult, type GcpIdentitySummary, type ActivityEntry } from '../lib/api';
 import { useResourceFilters } from '../lib/useResourceFilters';
 
-const TABS = ['Overview', 'Resources', 'Permissions', 'Sync History', 'Activity'] as const;
+const TABS = ['Overview', 'Health', 'Resources', 'Access', 'Permissions', 'Sync History', 'Activity'] as const;
 type Tab = typeof TABS[number];
 
 /** GCP Compute Engine's own status values (RUNNING/TERMINATED/...), not AWS's lowercase 'running'/'stopped' — see gcp-accounts-api's scanners/compute.ts, which stores GCP's status verbatim. Only stop/start are wired yet (see gcpRemediation.ts's doc comment on why setMachineType/disk-delete equivalents of AWS's resize/delete_volume aren't built in this pass). */
@@ -121,7 +123,7 @@ export function GcpProjectDetail() {
 
     const loadTabData = async () => {
       try {
-        if (tab === 'Permissions') {
+        if (tab === 'Permissions' || tab === 'Access') {
           await loadPermissions();
         } else if (tab === 'Sync History') {
           const result = await api.getGcpAccountSyncHistory(id);
@@ -414,6 +416,13 @@ export function GcpProjectDetail() {
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'Health' && id && <AccountHealthTab id={id} provider="gcp" />}
+
+      {tab === 'Access' && (
+        <AccessMatrix checks={permissionChecks} lastCheckedAt={permissionRun?.finished_at ?? permissionRun?.started_at ?? null}
+          onRevalidate={() => void runValidation()} revalidating={validating} />
       )}
 
       {tab === 'Permissions' && (

@@ -306,6 +306,33 @@ class ApiClient {
   getAccountsHealth() { return this.get<{ healthy: number; unhealthy: number; total: number; accounts: AccountSummary[] }>('awsAccounts', '/api/aws-accounts/health'); }
   getAwsOrganizations() { return this.get<{ awsAccounts: { awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string }[] }[] }>('awsAccounts', '/api/aws-accounts/organizations'); }
 
+  // ── Cloud Accounts: explainable health / hierarchy / bulk onboarding ──────
+  // (spec §8/§25/§34/§37). Health + AWS bulk-import + AWS OU hierarchy are
+  // real. Azure/GCP hierarchy + bulk import are a tracked backend follow-up —
+  // the frontend degrades to an "available for AWS today" panel there.
+
+  getAwsHealthDetailed() { return this.get<CloudAccountsHealthResponse>('awsAccounts', '/api/aws-accounts/health/detailed'); }
+  getAzureHealthDetailed() { return this.get<CloudAccountsHealthResponse>('azureAccounts', '/api/azure-accounts/health/detailed'); }
+  getGcpHealthDetailed() { return this.get<CloudAccountsHealthResponse>('gcpAccounts', '/api/gcp-accounts/health/detailed'); }
+  getAccountHealth(id: string, provider: 'aws' | 'gcp' | 'azure') {
+    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${id}/health` : provider === 'azure' ? `/api/azure-accounts/accounts/${id}/health` : `/api/aws-accounts/accounts/${id}/health`;
+    return this.get<AccountHealth & { connectionName: string; provider: string; identifier: string; environment: string }>(provider === 'gcp' ? 'gcpAccounts' : provider === 'azure' ? 'azureAccounts' : 'awsAccounts', path);
+  }
+
+  getAzureAccountsDashboard() { return this.get<AwsAccountsDashboard>('azureAccounts', '/api/azure-accounts/dashboard'); }
+  getGcpAccountsDashboard() { return this.get<AwsAccountsDashboard>('gcpAccounts', '/api/gcp-accounts/dashboard'); }
+
+  getAwsOrgExternalId() { return this.get<{ externalId: string; roleName: string }>('awsAccounts', '/api/aws-accounts/organizations/external-id'); }
+  getAwsOrgHierarchy(managementConnectionId?: string) {
+    return this.get<AwsOrgHierarchyResponse>('awsAccounts', `/api/aws-accounts/organizations/hierarchy${qs({ managementConnectionId })}`);
+  }
+  getAwsBulkImportPreview(managementConnectionId: string) {
+    return this.get<{ total: number; active: number; inactive: number; alreadyConnected: number; importable: number; overLimit: number; sample: { id: string; name: string }[] }>('awsAccounts', `/api/aws-accounts/accounts/bulk-import/preview${qs({ managementConnectionId })}`);
+  }
+  bulkImportAwsFromOrg(data: { managementConnectionId: string; projectId?: string | null; environment?: string }) {
+    return this.post<{ imported: number; skippedAlreadyConnected: number; skippedInactive: number; connections: { id: string; awsAccountId: string }[] }>('awsAccounts', '/api/aws-accounts/accounts/bulk-import-from-organization', data);
+  }
+
   // Real AWS permission/connection validation (sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer probes)
   validateAccountPermissions(id: string) {
     return this.post<{ status: 'succeeded' | 'failed'; identity: IdentitySummary | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permissions/validate`);
@@ -1017,6 +1044,56 @@ export interface AwsAccountsDashboard {
   recentActivity: { id: string; action: string; targetId: string | null; occurredAt: string; actorEmail: string | null }[];
   recentAlerts: { id: string; alertName: string; severity: string; connectionId: string | null; triggeredAt: string }[];
 }
+
+// ── Cloud Accounts: explainable health (spec §8/§37) ──────────────────────
+// Mirrors each connector's src/lib/health.ts output shape exactly.
+export type HealthState = 'healthy' | 'warning' | 'critical' | 'unknown';
+export type HealthSignalStatus = 'ok' | 'warn' | 'fail' | 'unknown';
+export interface HealthSignal {
+  key: 'connection' | 'permissions' | 'discovery' | 'sync_freshness' | 'credentials';
+  label: string;
+  status: HealthSignalStatus;
+  detail: string;
+  weight: number;
+}
+export interface AccountHealth {
+  connectionId: string;
+  score: number;
+  state: HealthState;
+  signals: HealthSignal[];
+}
+export interface CloudAccountHealthRow extends AccountHealth {
+  connectionName: string;
+  provider: 'aws' | 'azure' | 'gcp';
+  identifier: string;
+  environment: string;
+}
+export interface CloudAccountsHealthResponse {
+  provider: 'aws' | 'azure' | 'gcp';
+  accounts: CloudAccountHealthRow[];
+  summary: { total: number; healthy: number; warning: number; critical: number; unknown: number; healthPercent: number | null };
+}
+
+// ── Cloud Accounts: AWS Organization hierarchy (spec §25) ─────────────────
+export interface AwsOrgHierarchyAccount {
+  id: string;
+  name: string;
+  email?: string;
+  status?: string;
+  connected: boolean;
+  connectionId: string | null;
+  environment: string | null;
+}
+export interface AwsOrgHierarchyNode {
+  type: 'root' | 'ou';
+  id: string;
+  name: string;
+  accounts: AwsOrgHierarchyAccount[];
+  children: AwsOrgHierarchyNode[];
+}
+export type AwsOrgHierarchyResponse =
+  | { mode: 'tree'; roots: AwsOrgHierarchyNode[] }
+  | { mode: 'flat'; awsAccounts: { awsAccountId: string; connections: { aws_account_id: string; connection_name: string; environment: string; status: string; id: string }[] }[] };
 
 export type CheckStatus = 'granted' | 'denied' | 'error' | 'not_applicable';
 export interface PermissionCheckResult { service: string; label: string; status: CheckStatus; detail: string; verified: boolean }
