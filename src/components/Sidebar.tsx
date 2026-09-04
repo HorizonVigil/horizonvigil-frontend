@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
-import { findActiveModule } from '../lib/navConfig';
-import { Icon, NAV_ICON_MAP } from './icons';
+import { Icon } from './icons';
+import { ScopePicker } from './ScopePicker';
 
 interface SidebarProps {
   /** Below `lg` (1024px) the sidebar is an off-canvas drawer, closed by
@@ -16,22 +15,19 @@ interface SidebarProps {
 }
 
 /**
- * This domain's OWN sidebar — the org + folder/project scope picker for
- * whichever module AppRail says is active. Module switching happens in
- * AppRail; tab switching within a module happens in that page's own tab bar
- * (the sidebar used to repeat every module's tab list here too, which was
- * the same navigation shown twice — removed).
+ * The org / folder / project scope selector for every module, plus the
+ * account footer. Module switching happens in AppRail; tab switching within
+ * a module happens in that page's own tab bar. This panel used to also
+ * render the module's tab list and an always-expanded folder tree — both
+ * removed: the tab list was the page's own tab bar shown twice, and the
+ * folder tree is now the single {@link ScopePicker} dropdown.
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
-  const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope } = useOrg();
   const { signOut, user } = useAuth();
   const location = useLocation();
-  const [search, setSearch] = useState('');
-  const [orgMenuOpen, setOrgMenuOpen] = useState(false);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
-  // Below `lg` the drawer should get out of the way the moment a nav link is
-  // actually followed (matches the standard off-canvas-drawer convention) --
+  // Below `lg` the drawer should get out of the way the moment navigation
+  // actually happens (matches the standard off-canvas-drawer convention) --
   // harmless above `lg`, where `open` is ignored by the responsive classes
   // on the <aside> below anyway.
   useEffect(() => { onClose(); }, [location.pathname, onClose]);
@@ -42,67 +38,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open, onClose]);
-
-  const activeModule = useMemo(() => findActiveModule(location.pathname), [location.pathname]);
-
-  const projectCountByFolder = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const p of projects) if (p.folder_id) counts.set(p.folder_id, (counts.get(p.folder_id) ?? 0) + 1);
-    return counts;
-  }, [projects]);
-
-  const filteredFolders = search ? folders.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : folders;
-  const filteredProjects = search ? projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase())) : projects;
-
-  const rootFolders = filteredFolders.filter(f => !f.parent_folder_id);
-  const rootProjects = filteredProjects.filter(p => !p.folder_id);
-
-  function toggleFolder(id: string) {
-    setCollapsedFolders(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  function renderFolder(folder: typeof folders[number]) {
-    const childFolders = filteredFolders.filter(f => f.parent_folder_id === folder.id);
-    const childProjects = filteredProjects.filter(p => p.folder_id === folder.id);
-    const isCollapsed = collapsedFolders.has(folder.id);
-    const isActive = scope?.type === 'folder' && scope.id === folder.id;
-    return (
-      <li key={folder.id}>
-        <div className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-sm cursor-pointer ${isActive ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-          <button onClick={() => toggleFolder(folder.id)} className="w-4 text-slate-400 dark:text-slate-500 flex justify-center">
-            <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
-          </button>
-          <button type="button" className="truncate flex-1 flex items-center gap-1.5 text-left" onClick={() => setScope({ type: 'folder', id: folder.id, name: folder.name })}>
-            <Icon name="folder" size={14} className="text-slate-400 dark:text-slate-500 shrink-0" />
-            {folder.name}
-          </button>
-          <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">{projectCountByFolder.get(folder.id) ?? 0}</span>
-        </div>
-        {!isCollapsed && (childFolders.length > 0 || childProjects.length > 0) && (
-          <ul className="ml-4 border-l border-slate-200 dark:border-slate-800 pl-2 flex flex-col gap-0.5 mt-0.5">
-            {childFolders.map(renderFolder)}
-            {childProjects.map(renderProject)}
-          </ul>
-        )}
-      </li>
-    );
-  }
-
-  function renderProject(project: typeof projects[number]) {
-    const isActive = scope?.type === 'project' && scope.id === project.id;
-    return (
-      <li key={project.id}>
-        <button onClick={() => setScope({ type: 'project', id: project.id, name: project.name })} className={`flex items-center gap-1.5 w-full rounded-md px-1.5 py-1 text-sm truncate ${isActive ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-          <span className="truncate">{project.name}</span>
-        </button>
-      </li>
-    );
-  }
 
   return (
     <>
@@ -127,72 +62,20 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <Icon name="x" size={16} />
             </button>
           </div>
-          <div className="relative">
-            <button onClick={() => setOrgMenuOpen(v => !v)} className="w-full flex items-center justify-between text-sm rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-              <span className="truncate flex items-center gap-1.5">
-                <Icon name="building" size={14} className="text-slate-400 shrink-0" />
-                {currentOrg?.name ?? 'Select organization'}
-              </span>
-              <Icon name="chevron-down" size={14} className="text-slate-400" />
-            </button>
-          {orgMenuOpen && (
-            <ul className="absolute z-20 mt-1 w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
-              {orgs.map(o => (
-                <li key={o.id}>
-                  <button onClick={() => { setCurrentOrg(o); setOrgMenuOpen(false); }} className="w-full text-left px-2 py-1.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">
-                    {o.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1">Scope</span>
+          <ScopePicker />
         </div>
-      </div>
 
-      {/* This module's own header — the "you are inside a separate app now" cue.
-          Switching to a different app happens in AppRail; switching tabs
-          within this module happens in the page's own tab bar. */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-        <span className="text-slate-500 dark:text-slate-400" aria-hidden="true">
-          <Icon name={NAV_ICON_MAP[activeModule.label] ?? 'overview'} size={16} />
-        </span>
-        <span className="font-semibold text-slate-900 dark:text-white truncate">{activeModule.label}</span>
-      </div>
+        <div className="flex-1" />
 
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
-        <div className="relative">
-          <Icon name="search" size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search folders & projects…"
-            className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-7 pr-2 py-1.5 text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
-          />
+        <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800 text-xs">
+          <div className="truncate text-slate-500 dark:text-slate-400">{user?.email}</div>
+          <button onClick={() => void signOut()} className="text-brand-600 dark:text-brand-400 hover:underline mt-1 flex items-center gap-1">
+            <Icon name="log-out" size={12} />
+            Sign out
+          </button>
         </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-2 py-2">
-        <ul className="flex flex-col gap-0.5">
-          {currentOrg && (
-            <li>
-              <button onClick={() => setScope({ type: 'org', id: currentOrg.id, name: currentOrg.name })} className={`flex items-center gap-1.5 w-full rounded-md px-1.5 py-1 text-sm ${scope?.type === 'org' ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                <Icon name="building" size={14} className="text-slate-400 shrink-0" />
-                <span className="truncate">{currentOrg.name}</span>
-              </button>
-            </li>
-          )}
-          {rootFolders.map(renderFolder)}
-          {rootProjects.map(renderProject)}
-        </ul>
-      </div>
-
-      <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800 text-xs">
-        <div className="truncate text-slate-500 dark:text-slate-400">{user?.email}</div>
-        <button onClick={() => void signOut()} className="text-brand-600 dark:text-brand-400 hover:underline mt-1 flex items-center gap-1">
-          <Icon name="log-out" size={12} />
-          Sign out
-        </button>
-      </div>
-    </aside>
+      </aside>
     </>
   );
 }
