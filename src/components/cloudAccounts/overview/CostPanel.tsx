@@ -25,7 +25,7 @@ export function CostPanel({
   const total = monthToDate ?? agg.totals.monthlyCost;
 
   return (
-    <SectionCard title="Cloud Cost" icon="cost" to="/cost-management" linkLabel="FinOps">
+    <SectionCard title="Cloud Cost" icon="cost" to="/finops" linkLabel="FinOps">
       {total === 0 && bars.length === 0 ? (
         <EmptyState icon="cost" title="No cost data" description="Connect cost ingestion (AWS CUR / Azure billing) to see spend here." />
       ) : (
@@ -36,7 +36,7 @@ export function CostPanel({
             {agg.perProvider.azure.monthlyCost > 0 && <MiniStat label="Azure" value={money(agg.perProvider.azure.monthlyCost)} />}
           </div>
           {bars.length > 0 && (
-            <BarChart data={bars} valueFormatter={(v) => money(v)} onBarClick={() => navigate('/cost-management')} />
+            <BarChart data={bars} valueFormatter={(v) => money(v)} onBarClick={() => navigate('/finops')} />
           )}
           {agg.perProvider.gcp.total > 0 && (
             <p className="text-[11px] text-slate-400 dark:text-slate-500">GCP spend isn’t ingested in this build.</p>

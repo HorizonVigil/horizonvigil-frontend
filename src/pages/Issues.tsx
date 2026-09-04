@@ -25,7 +25,7 @@ interface UnifiedIssue {
 }
 
 const SOURCE_LABEL: Record<IssueSource, string> = { cost: 'Cost', security: 'Security', alert: 'Alert' };
-const SOURCE_LINK: Record<IssueSource, string> = { cost: '/cost-optimization?tab=Recommendations', security: '/vulnerability-management', alert: '/alerts' };
+const SOURCE_LINK: Record<IssueSource, string> = { cost: '/finops?section=Cost+Optimization&tab=Recommendations', security: '/vulnerability-management', alert: '/alerts' };
 const SEVERITY_TONE: Record<UnifiedSeverity, 'critical' | 'serious' | 'warning' | 'good'> = { critical: 'critical', high: 'serious', medium: 'warning', low: 'good' };
 const STATUS_TONE: Record<UnifiedStatus, 'good' | 'warning' | 'neutral'> = { open: 'warning', in_progress: 'neutral', resolved: 'good' };
 

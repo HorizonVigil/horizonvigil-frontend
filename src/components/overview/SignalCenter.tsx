@@ -18,7 +18,7 @@ function buildSignals(s: ContextSignals): Signal[] {
   if (s.criticalVulns > 0) out.push({ key: 'vulns', icon: 'shield-alert', tone: 'critical', to: '/vulnerability-management?tab=Security Findings&preset=critical', text: `${s.criticalVulns} critical vulnerabilit${s.criticalVulns === 1 ? 'y' : 'ies'} open` });
   if (s.openAttackPaths > 0) out.push({ key: 'attack-paths', icon: 'target', tone: 'critical', to: '/vulnerability-management', text: `${s.openAttackPaths} attack path${s.openAttackPaths === 1 ? '' : 's'} detected` });
   if (s.failedDeployments > 0) out.push({ key: 'deploys', icon: 'automation', tone: 'warning', to: '/monitoring?tab=Health', text: `${s.failedDeployments} deployment${s.failedDeployments === 1 ? '' : 's'} failed recently` });
-  if (s.costAnomalies > 0) out.push({ key: 'cost', icon: 'trending-up', tone: 'warning', to: '/cost-optimization?tab=Cost Anomalies', text: `${s.costAnomalies} cost anomal${s.costAnomalies === 1 ? 'y' : 'ies'}${s.anomalyDollarImpact > 0 ? ` (~$${Math.round(s.anomalyDollarImpact).toLocaleString()} impact)` : ''}` });
+  if (s.costAnomalies > 0) out.push({ key: 'cost', icon: 'trending-up', tone: 'warning', to: '/finops?section=Cost+Optimization&tab=Cost+Anomalies', text: `${s.costAnomalies} cost anomal${s.costAnomalies === 1 ? 'y' : 'ies'}${s.anomalyDollarImpact > 0 ? ` (~$${Math.round(s.anomalyDollarImpact).toLocaleString()} impact)` : ''}` });
   if (s.investigatingIncidents > 0) out.push({ key: 'investigations', icon: 'search', tone: 'warning', to: '/incidents?tab=Investigating', text: `${s.investigatingIncidents} investigation${s.investigatingIncidents === 1 ? '' : 's'} in progress` });
   return out;
 }

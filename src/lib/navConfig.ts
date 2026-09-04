@@ -123,8 +123,7 @@ export interface NavModule {
 const OVERVIEW = '/overview';
 const ACCOUNTS = '/cloud-accounts';
 const RESOURCES = '/resources';
-const COST = '/cost-management';
-const OPT = '/cost-optimization';
+const FINOPS = '/finops';
 const VULN = '/vulnerability-management';
 const SOURCE_INV = '/source-inventory';
 const SCANNING = '/security-scanning';
@@ -147,6 +146,11 @@ const SETTINGS = '/settings';
 const DASHBOARDS = '/custom-dashboards';
 const AUTOMATION = '/automation';
 const SUBSCRIPTION = '/subscription';
+
+/** `${base}?section=<section>&tab=<value>` — FinOps is one module over two levels of tabs (spec: "do NOT create two separate top-level menus"); this is the two-param link between navConfig and FinOps.tsx's own section+tab state. */
+function sectionTabLink(base: string, section: string, tab: string): string {
+  return `${base}?section=${encodeURIComponent(section)}&tab=${encodeURIComponent(tab)}`;
+}
 
 /** `${base}?tab=<value>`, URL-encoded — the query-string half of the sidebar/in-page-tab link between navConfig and a tabbed page's useTabParam. */
 function tabLink(base: string, tab: string): string {
@@ -420,34 +424,32 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    label: 'Cost Management',
+    // Spec: "do NOT create two separate top-level menus" for FinOps — Cost
+    // Management and Cost Optimization (previously two modules) are now one,
+    // with Overview + those two as its groups. FinOps.tsx owns a `?section=`
+    // level above each's own `?tab=` (CostManagement.tsx / CostOptimization.tsx
+    // are unchanged internally, just no longer render their own FilterBar).
+    label: 'FinOps',
     icon: 'cost',
     section: 'Cloud Operations',
-    to: COST,
+    to: FINOPS,
     children: [
-      { label: 'Cost Explorer', to: COST, real: true },
-      { label: 'Cost Analytics', to: tabLink(COST, 'Cost Analytics'), real: true },
-      { label: 'Forecast', to: tabLink(COST, 'Forecast'), real: true },
-      { label: 'Budgets', to: tabLink(COST, 'Budgets'), real: true, minRole: 'editor' },
-      { label: 'Cost Allocation', to: tabLink(COST, 'Cost Allocation'), real: true },
-      { label: 'Chargeback', to: tabLink(COST, 'Chargeback'), real: true },
-      { label: 'Showback', to: tabLink(COST, 'Showback'), real: true },
-      { label: 'Cost Reports', to: tabLink(COST, 'Cost Reports'), real: true },
-    ],
-  },
-  {
-    label: 'Cost Optimization',
-    icon: 'optimization',
-    section: 'Cloud Operations',
-    to: OPT,
-    children: [
-      { label: 'Savings Opportunities', to: tabLink(OPT, 'Recommendations'), real: true },
-      { label: 'Rightsizing', to: tabLink(OPT, 'Rightsizing'), real: true },
-      { label: 'Idle Resources', to: tabLink(OPT, 'Idle Resources'), real: true },
-      { label: 'Reserved Instances', to: tabLink(OPT, 'Reserved Instances'), real: true },
-      { label: 'Savings Plans', to: tabLink(OPT, 'Savings Plans'), real: true },
-      { label: 'Cost Anomalies', to: tabLink(OPT, 'Cost Anomalies'), real: true },
-      { label: 'Optimization History', to: tabLink(OPT, 'History'), real: true },
+      { label: 'Overview', to: FINOPS, real: true, group: 'Overview' },
+      { label: 'Cost Explorer', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Explorer'), real: true, group: 'Cost Management' },
+      { label: 'Cost Analytics', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Analytics'), real: true, group: 'Cost Management' },
+      { label: 'Forecast', to: sectionTabLink(FINOPS, 'Cost Management', 'Forecast'), real: true, group: 'Cost Management' },
+      { label: 'Budgets', to: sectionTabLink(FINOPS, 'Cost Management', 'Budgets'), real: true, minRole: 'editor', group: 'Cost Management' },
+      { label: 'Cost Allocation', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Allocation'), real: true, group: 'Cost Management' },
+      { label: 'Chargeback', to: sectionTabLink(FINOPS, 'Cost Management', 'Chargeback'), real: true, group: 'Cost Management' },
+      { label: 'Showback', to: sectionTabLink(FINOPS, 'Cost Management', 'Showback'), real: true, group: 'Cost Management' },
+      { label: 'Cost Reports', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Reports'), real: true, group: 'Cost Management' },
+      { label: 'Savings Opportunities', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Recommendations'), real: true, group: 'Cost Optimization' },
+      { label: 'Rightsizing', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Rightsizing'), real: true, group: 'Cost Optimization' },
+      { label: 'Idle Resources', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Idle Resources'), real: true, group: 'Cost Optimization' },
+      { label: 'Reserved Instances', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Reserved Instances'), real: true, group: 'Cost Optimization' },
+      { label: 'Savings Plans', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Savings Plans'), real: true, group: 'Cost Optimization' },
+      { label: 'Cost Anomalies', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Cost Anomalies'), real: true, group: 'Cost Optimization' },
+      { label: 'Optimization History', to: sectionTabLink(FINOPS, 'Cost Optimization', 'History'), real: true, group: 'Cost Optimization' },
     ],
   },
   {

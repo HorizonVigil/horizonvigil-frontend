@@ -91,12 +91,12 @@ export const REGISTRY_META: WidgetMeta[] = [
   },
   {
     id: 'kpi-potential-savings', title: 'Potential Savings', description: 'Monthly savings from open recommendations.',
-    category: 'finops', kind: 'kpi', module: 'optimization', requires: ['cost.read'],
+    category: 'finops', kind: 'kpi', module: 'cost', requires: ['cost.read'],
     defaultSize: { w: 1, h: 2 }, basePriority: 14, integrated: true,
   },
   {
     id: 'kpi-cost-anomalies', title: 'Cost Anomalies', description: 'Open spend anomalies detected.',
-    category: 'finops', kind: 'kpi', module: 'optimization', requires: ['cost.read'],
+    category: 'finops', kind: 'kpi', module: 'cost', requires: ['cost.read'],
     defaultSize: { w: 1, h: 2 }, basePriority: 15, integrated: true, defaultEnabled: false,
     contextBoost: (s) => boostWhen(s.costAnomalies > 0, 30, `${s.costAnomalies} cost anomalies`),
   },
@@ -291,18 +291,18 @@ export const REGISTRY_META: WidgetMeta[] = [
   },
   {
     id: 'cost-anomalies', title: 'Cost Anomalies', description: 'Day-over-day spend spikes.',
-    category: 'finops', kind: 'panel', module: 'optimization', requires: ['cost.read'],
+    category: 'finops', kind: 'panel', module: 'cost', requires: ['cost.read'],
     defaultSize: { w: 1, h: 6 }, basePriority: 160, integrated: true, defaultEnabled: false,
     contextBoost: (s) => boostWhen(s.costAnomalies > 0, 155, `${s.costAnomalies} cost anomal${s.costAnomalies === 1 ? 'y' : 'ies'}`),
   },
   {
     id: 'optimization-opportunities', title: 'Optimization Opportunities', description: 'Open cost recommendations by impact.',
-    category: 'finops', kind: 'panel', module: 'optimization', requires: ['cost.read'],
+    category: 'finops', kind: 'panel', module: 'cost', requires: ['cost.read'],
     defaultSize: { w: 1, h: 6 }, basePriority: 162, integrated: true,
   },
   {
     id: 'potential-savings', title: 'Potential Savings', description: 'Realisable monthly savings and idle resources.',
-    category: 'finops', kind: 'panel', module: 'optimization', requires: ['cost.read'],
+    category: 'finops', kind: 'panel', module: 'cost', requires: ['cost.read'],
     defaultSize: { w: 1, h: 5 }, basePriority: 164, integrated: true, defaultEnabled: false,
   },
 

@@ -1,6 +1,4 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { FilterBar } from '../components/FilterBar';
-import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
 import { StatCardSkeleton, CardSkeleton } from '../components/Skeleton';
 import { Donut } from '../components/charts/Donut';
@@ -40,7 +38,8 @@ function aggregateDaily(rows: CostSnapshot[]): { date: string; cost: number }[] 
   return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, cost]) => ({ date, cost }));
 }
 
-export function CostManagement() {
+/** Cost Management section of FinOps — unchanged from when this was its own top-level page, minus its own FilterBar (FinOps.tsx renders one shared bar for all three sections now). */
+export function CostManagementBody() {
   // Account + Region filters live in the global FilterBar now.
   const { region, account, dateRange, refreshToken, connections } = useFilters();
   const { currentOrg, folders, projects } = useOrg();
@@ -378,7 +377,6 @@ export function CostManagement() {
   if (loading && !analytics && !forecast) {
     return (
       <div className="flex flex-col gap-5">
-        <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
       </div>
@@ -388,7 +386,6 @@ export function CostManagement() {
   if (loadError && !analytics && !forecast) {
     return (
       <div className="flex flex-col gap-4">
-        <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
         <div
           className="rounded-xl border border-red-200 dark:border-red-900
                      bg-red-50 dark:bg-red-900/20 p-5 text-center"
@@ -409,8 +406,6 @@ export function CostManagement() {
 
   return (
     <div>
-      <FilterBar title="Cost Management" breadcrumb={<Breadcrumb />} />
-
       {loading && <p className="text-xs text-slate-400 mb-2">Refreshing…</p>}
 
       {loadError && (

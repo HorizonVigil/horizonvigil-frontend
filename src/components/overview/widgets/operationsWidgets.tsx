@@ -182,7 +182,7 @@ export const RecommendedActionsWidget: WidgetComponent = ({ ctx }) => {
     const rows: Row[] = [];
     for (const i of v(incidents)?.items ?? []) rows.push({ key: `i-${i.id}`, label: i.title, sub: `Incident · ${i.severity}`, to: `/incidents/${i.id}`, tone: 'critical' });
     for (const f of v(findings)?.items ?? []) rows.push({ key: `f-${f.id}`, label: f.title, sub: 'Critical finding', to: `/vulnerability-management/findings/${f.id}`, tone: 'critical' });
-    for (const s of v(savings)?.items ?? []) rows.push({ key: `s-${s.id}`, label: s.issue, sub: `Save ${money(s.potential_monthly_savings)}/mo`, to: '/cost-optimization', tone: 'good' });
+    for (const s of v(savings)?.items ?? []) rows.push({ key: `s-${s.id}`, label: s.issue, sub: `Save ${money(s.potential_monthly_savings)}/mo`, to: '/finops?section=Cost+Optimization', tone: 'good' });
     return rows;
   });
 

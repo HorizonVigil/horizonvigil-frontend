@@ -33,7 +33,7 @@ export const CurrentCloudSpendWidget: WidgetComponent = ({ ctx }) => {
             <div className="text-xs text-slate-400">month to date</div>
           </div>
           <BarChart data={Object.entries(d.byRegion).sort(([, a], [, b]) => b - a).slice(0, 5).map(([label, value]) => ({ label, value }))} valueFormatter={money} />
-          <ViewAllLink to="/cost-management" label="Open Cost Management" />
+          <ViewAllLink to="/finops" label="Open FinOps" />
         </div>
       )}
     </WidgetBody>
@@ -127,7 +127,7 @@ export const CostAnomaliesWidget: WidgetComponent = ({ ctx }) => {
               <span className="text-xs font-medium text-red-600 dark:text-red-400 tabular-nums">+{money(a.dollar_impact)} ({Math.round(a.percent_change)}%)</span>
             </li>
           ))}
-          <li className="pt-2"><WidgetAction ctx={ctx} need="cost.optimize" label="Review anomalies" to="/cost-optimization?tab=Cost Anomalies" /></li>
+          <li className="pt-2"><WidgetAction ctx={ctx} need="cost.optimize" label="Review anomalies" to="/finops?section=Cost+Optimization&tab=Cost+Anomalies" /></li>
         </ul>
       )}
     </WidgetBody>
@@ -159,7 +159,7 @@ export const OptimizationOpportunitiesWidget: WidgetComponent = ({ ctx }) => {
               </li>
             ))}
           </ul>
-          <WidgetAction ctx={ctx} need="cost.optimize" label="Open Cost Optimization" to="/cost-optimization" />
+          <WidgetAction ctx={ctx} need="cost.optimize" label="Open Cost Optimization" to="/finops?section=Cost+Optimization" />
         </div>
       )}
     </WidgetBody>
@@ -193,27 +193,27 @@ export const PotentialSavingsWidget: WidgetComponent = ({ ctx }) => {
 export const CloudSpendKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-cloud-spend', ctx, () => api.getOverviewCost(scopedConnectionIds(ctx.scope)));
   return <KpiValue label="Cloud Spend" value={query.data ? money(query.data.monthToDate) : '—'} icon="cost"
-    caption="month to date" onClick={() => ctx.navigate('/cost-management')} />;
+    caption="month to date" onClick={() => ctx.navigate('/finops')} />;
 };
 
 export const MonthlyRunRateKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-monthly-run-rate', ctx, () => api.getCostForecast({ region: ctx.region }));
   return <KpiValue label="Monthly Run Rate" value={query.data ? money(query.data.projectedTotal) : '—'} icon="trending-up"
-    caption="projected" onClick={() => ctx.navigate('/cost-management?tab=Forecast')} />;
+    caption="projected" onClick={() => ctx.navigate('/finops?section=Cost+Management&tab=Forecast')} />;
 };
 
 export const PotentialSavingsKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-potential-savings', ctx, () => api.getCostOptimizationDashboard());
   return <KpiValue label="Potential Savings" value={query.data ? money(query.data.totalPotentialMonthlySavings) : '—'} icon="optimization"
-    tone="good" caption="per month" onClick={() => ctx.navigate('/cost-optimization')} />;
+    tone="good" caption="per month" onClick={() => ctx.navigate('/finops?section=Cost+Optimization')} />;
 };
 
 export const CostAnomaliesKpi: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('kpi-cost-anomalies', ctx, () => api.getCostAnomalies({ status: 'open', limit: 1 }));
+  const query = useWidgetQuery('kpi-cost-anomalies', ctx, () => api.getCostAnomalies({ status: 'open', limit: 1, connectionId: scopedConnectionId(ctx.scope) }));
   const n = query.data?.pagination.total ?? 0;
   return <KpiValue label="Cost Anomalies" value={query.data ? String(n) : '—'} icon="trending-up"
     tone={n > 0 ? 'warning' : 'good'} caption={n > 0 ? 'open' : 'none open'}
-    onClick={() => ctx.navigate('/cost-optimization?tab=Cost Anomalies')} />;
+    onClick={() => ctx.navigate('/finops?section=Cost+Optimization&tab=Cost+Anomalies')} />;
 };
 
 export const BudgetStatusKpi: WidgetComponent = ({ ctx }) => {
@@ -222,5 +222,5 @@ export const BudgetStatusKpi: WidgetComponent = ({ ctx }) => {
   const exceeded = query.data?.items.some((b) => b.status === 'exceeded');
   return <KpiValue label="Budget Status" value={query.data && query.data.items.length > 0 ? `${Math.round(worst)}%` : '—'} icon="target"
     tone={exceeded ? 'critical' : worst >= 80 ? 'warning' : 'good'}
-    caption={query.data?.items.length ? 'worst budget' : 'no budgets'} onClick={() => ctx.navigate('/cost-management?tab=Budgets')} />;
+    caption={query.data?.items.length ? 'worst budget' : 'no budgets'} onClick={() => ctx.navigate('/finops?section=Cost+Management&tab=Budgets')} />;
 };

@@ -1,6 +1,4 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { FilterBar } from '../components/FilterBar';
-import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
@@ -59,11 +57,12 @@ const TAB_TO_NAV_LABEL: Partial<Record<Tab, string>> = {
   History: 'Optimization History',
 };
 
-export function CostOptimization() {
+/** Cost Optimization section of FinOps — unchanged from when this was its own top-level page, minus its own FilterBar (FinOps.tsx renders one shared bar for all three sections now). Still keyed on navConfig icon 'cost' (FinOps' single merged icon) for RBAC lookups. */
+export function CostOptimizationBody() {
   const { account, refreshToken } = useFilters();
   const { toast } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const canSeeNavTab = useSubmenuAccess('optimization');
+  const canSeeNavTab = useSubmenuAccess('cost');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t] ?? t), [canSeeNavTab]);
   const visibleTabs = TABS.filter(canSeeTab);
   const [dashboard, setDashboard] = useState<Awaited<ReturnType<typeof api.getCostOptimizationDashboard>> | null>(null);
@@ -601,12 +600,6 @@ export function CostOptimization() {
   if (loadError && !dashboard) {
     return (
       <div className="flex flex-col gap-4">
-        <FilterBar
-          title="Cost Optimization"
-          breadcrumb={<Breadcrumb />}
-          showRegionFilter={false}
-          showDateFilter={false}
-        />
         <div
           className="rounded-xl border border-red-200 dark:border-red-900
                      bg-red-50 dark:bg-red-900/20 p-6 text-center"
@@ -627,8 +620,6 @@ export function CostOptimization() {
 
   return (
     <div>
-      <FilterBar title="Cost Optimization" breadcrumb={<Breadcrumb />} showRegionFilter={false} showDateFilter={false} />
-
       {loadError && (
         <div
           className="mb-4 rounded-md border border-amber-200 dark:border-amber-900/60

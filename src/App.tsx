@@ -25,8 +25,7 @@ import { CloudAccountDetail } from './pages/CloudAccountDetail';
 import { Resources } from './pages/Resources';
 import { ResourcesOverview } from './pages/resources/ResourcesOverview';
 import { ResourcesCategory } from './pages/resources/ResourcesCategory';
-import { CostManagement } from './pages/CostManagement';
-import { CostOptimization } from './pages/CostOptimization';
+import { FinOps } from './pages/FinOps';
 import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
 import { VulnerabilityDetail } from './pages/VulnerabilityDetail';
 import { SourceInventoryCategory } from './pages/SourceInventoryCategory';
@@ -149,8 +148,11 @@ export default function App() {
                           <Route path="/resources/all" element={<ProtectedRoute module="Asset Inventory"><Resources /></ProtectedRoute>} />
                           <Route path="/resources/:category" element={<ProtectedRoute module="Asset Inventory"><ResourcesCategory /></ProtectedRoute>} />
                           <Route path="/resources/:category/:service" element={<ProtectedRoute module="Asset Inventory"><Resources /></ProtectedRoute>} />
-                          <Route path="/cost-management" element={<ProtectedRoute module="Cost Management"><CostManagement /></ProtectedRoute>} />
-                          <Route path="/cost-optimization" element={<ProtectedRoute module="Cost Optimization"><CostOptimization /></ProtectedRoute>} />
+                          <Route path="/finops" element={<ProtectedRoute module="FinOps"><FinOps /></ProtectedRoute>} />
+                          {/* Legacy routes — Cost Management and Cost Optimization merged into
+                              one FinOps module (spec: no two separate top-level cost menus). */}
+                          <Route path="/cost-management" element={<Navigate to="/finops?section=Cost+Management" replace />} />
+                          <Route path="/cost-optimization" element={<Navigate to="/finops?section=Cost+Optimization" replace />} />
                           <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
                           <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
                           <Route path="/source-inventory/:category" element={<ProtectedRoute module="Vulnerability Management"><SourceInventoryCategory /></ProtectedRoute>} />
