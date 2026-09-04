@@ -51,7 +51,7 @@ export function Reports() {
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('cost');
-  const [format, setFormat] = useState<'pdf' | 'csv'>('pdf');
+  const [format, setFormat] = useState<'pdf' | 'csv' | 'xlsx'>('pdf');
   const [cadence, setCadence] = useState('one_time');
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -485,12 +485,13 @@ export function Reports() {
           <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Format</span>
             <select
               value={format}
-              onChange={e => setFormat(e.target.value as 'pdf' | 'csv')}
+              onChange={e => setFormat(e.target.value as 'pdf' | 'csv' | 'xlsx')}
               aria-label="Report format"
               disabled={creating}
               className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
               <option value="pdf">PDF</option>
               <option value="csv">CSV</option>
+              <option value="xlsx">Excel (.xlsx)</option>
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Schedule</span>

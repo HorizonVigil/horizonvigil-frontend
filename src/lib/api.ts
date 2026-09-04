@@ -674,7 +674,7 @@ class ApiClient {
 
   getReports(params: { category?: string; status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ReportRow>>('reports', `/api/reports/reports${qs(params)}`); }
   getReport(id: string) { return this.get<ReportRow>('reports', `/api/reports/reports/${id}`); }
-  createReport(data: { category: 'cost' | 'security' | 'resource' | 'operational' | 'compliance' | 'savings'; name: string; format?: 'pdf' | 'csv'; scope?: { connectionIds?: string[]; dateFrom?: string; dateTo?: string } }) {
+  createReport(data: { category: 'cost' | 'security' | 'resource' | 'operational' | 'compliance' | 'savings'; name: string; format?: 'pdf' | 'csv' | 'xlsx'; scope?: { connectionIds?: string[]; dateFrom?: string; dateTo?: string } }) {
     return this.post<ReportRow>('reports', '/api/reports/reports', data);
   }
   async downloadReport(id: string): Promise<{ blob: Blob; filename: string }> {

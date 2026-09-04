@@ -10,7 +10,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useFilters, dateRangeToDays, type DateRangePreset } from '../lib/filterContext';
 import { useOrg } from '../lib/orgContext';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
-import { api, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
+import { api, type ActivityEntry, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
 import { money } from '../lib/format';
 import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
@@ -102,6 +102,26 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
 
 
   useEffect(() => { void loadBudgets(); }, [loadBudgets, refreshToken]);
+
+  // Cost Reports' "Recent Cost Activity" — real audit_log entries already
+  // written by budgets.ts/recommendations.ts/anomalies.ts on every mutation
+  // (cost_management.budget_*, cost_optimization.recommendation_*,
+  // cost_optimization.anomaly_*), read through admin-api's existing
+  // org-wide audit log endpoint (no new backend route needed — same one
+  // Users & Groups' own Audit Logs tab uses, just filtered to the cost_
+  // action prefix). Only fetched while the tab is open.
+  const [costActivity, setCostActivity] = useState<ActivityEntry[]>([]);
+  const [costActivityLoading, setCostActivityLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== 'Cost Reports') return;
+    let cancelled = false;
+    setCostActivityLoading(true);
+    void api.getUserAuditLog({ action: 'cost_', limit: 20 })
+      .then((res) => { if (!cancelled) setCostActivity(res.items); })
+      .catch(() => { if (!cancelled) setCostActivity([]); })
+      .finally(() => { if (!cancelled) setCostActivityLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, refreshToken]);
 
   function scopeLabel(scopeType: BudgetScopeType, scopeId: string): string {
     if (scopeType === 'org') return currentOrg?.name ?? 'Entire organization';
@@ -676,6 +696,25 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
             {csvDownloading ? 'Preparing CSV…' : 'Export CSV Report'}
           </button>
           <p className="text-xs text-slate-400 mt-4">For PDF/scheduled cost reports, see Reports → Cost Reports.</p>
+        </div>
+      )}
+
+      {tab === 'Cost Reports' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 mt-4">
+          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Cost Activity</h3>
+          {costActivityLoading ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+              {costActivity.map((entry) => (
+                <li key={entry.id} className="py-2 text-sm flex justify-between gap-3">
+                  <span className="text-slate-700 dark:text-slate-200">{entry.action.replace(/_/g, ' ').replace(/\./g, ' — ')} <span className="text-slate-400">by {entry.actor?.email ?? 'system'}</span></span>
+                  <span className="text-xs text-slate-400 shrink-0">{new Date(entry.occurredAt).toLocaleString()}</span>
+                </li>
+              ))}
+              {costActivity.length === 0 && <li className="py-2 text-sm text-slate-400">No cost management or optimization activity recorded yet — budget changes, applied/excluded recommendations, and anomaly status changes will show up here.</li>}
+            </ul>
+          )}
         </div>
       )}
 
