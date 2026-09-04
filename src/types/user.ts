@@ -8,8 +8,6 @@
 export type {
   Role,
   Member,
-  PendingInvite,
-  PendingInviteRow,
   UserGroup,
   ApiKeySummary,
   ActivityEntry,
@@ -37,12 +35,18 @@ export interface MyPermissions {
 
 export interface MembersResponse {
   members: import('../lib/api').Member[];
-  pendingInvites: import('../lib/api').PendingInvite[];
 }
 
 export interface InvitePayload {
   email: string;
   role: Role;
+}
+
+export interface InviteResult {
+  userId: string;
+  /** true when a new account was created (password emailed); false when an existing account was added to the org. */
+  accountCreated: boolean;
+  emailSent: boolean;
 }
 
 export interface SetMenuPermissionPayload {

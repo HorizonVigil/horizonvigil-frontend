@@ -1,136 +1,136 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import type { User } from '@supabase/supabase-js';
-import { supabase } from './supabase';
-
-export type OAuthProvider = 'google' | 'azure' | 'github';
 
 /**
- * signIn resolves as soon as the password itself is correct, even for a
- * user enrolled in MFA -- Supabase issues a real session at 'aal1'
- * (password-only) and expects the caller to separately check whether
- * stepping up to 'aal2' (password + TOTP) is required before treating the
- * user as fully signed in. Login.tsx checks this and routes to the MFA
- * challenge screen instead of the app when it's true.
+ * Email/password auth against horizonvigil-admin's /api/auth/* endpoints.
+ * The session token is a Supabase-JWT-shaped HS256 token minted by the admin
+ * service; it's stored in localStorage and sent as the bearer on every API
+ * call (see lib/api.ts). No Supabase Auth SDK, no MFA, no OAuth/SSO.
  */
-export async function mfaStepUpRequired(): Promise<boolean> {
-  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (error) throw error;
-  return data.nextLevel === 'aal2' && data.nextLevel !== data.currentLevel;
+
+const AUTH_BASE = `${import.meta.env.VITE_USERS_API_URL || ''}/api/auth`;
+const TOKEN_KEY = 'hv_auth_token';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  fullName: string | null;
 }
 
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setToken(token: string | null) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* private mode / storage disabled — session just won't persist */
+  }
+}
+
+/** Decodes a JWT payload without verifying — server verifies on every request. */
+function decodeJwt(token: string): { sub?: string; email?: string; exp?: number } | null {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '=')));
+  } catch {
+    return null;
+  }
+}
+
+function isExpired(token: string): boolean {
+  const exp = decodeJwt(token)?.exp;
+  return typeof exp === 'number' && exp * 1000 < Date.now();
+}
+
+async function authFetch(path: string, body: unknown, token?: string): Promise<unknown> {
+  const res = await fetch(`${AUTH_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; data?: unknown; error?: string } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || 'Request failed');
+  return json.data;
+}
+
+interface LoginResult { token: string; user: AuthUser }
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  /**
-   * Calls Supabase's real OAuth flow -- this redirects to the provider and
-   * back, it isn't simulated. It only succeeds end-to-end once the
-   * corresponding provider is turned on with real client credentials under
-   * Authentication > Providers in the Supabase dashboard; until then,
-   * Supabase itself returns a real "provider is not enabled" error rather
-   * than this silently pretending to work.
-   */
-  signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
-  /**
-   * Calls Supabase's real Enterprise SSO API (SAML 2.0 federation with a
-   * customer's own IdP -- Okta/Entra ID/Ping, not the consumer OAuth
-   * providers above). Same honest-failure shape as signInWithOAuth: this
-   * redirects for real once a provider is registered for the given email
-   * domain, and Supabase itself returns a real "no SSO provider found for
-   * this domain" error until one is. Registering a domain's provider is a
-   * one-time setup step done per enterprise customer (via Supabase's
-   * project-level SSO configuration, which itself requires a paid add-on
-   * tier) -- this function only calls the login API, it doesn't configure
-   * anything.
-   */
-  signInWithSSO: (domain: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-/**
- * Creates the public.profiles row the first time we see an authenticated
- * user. This is also what triggers handle_new_profile() in
- * 001_init.sql, which converts any pending email invites into real
- * role_grants — so "invite by email" only resolves once this has run at
- * least once for the invited user.
- */
-async function ensureProfile(user: User) {
-  await supabase.from('profiles').upsert(
-    { id: user.id, email: user.email, full_name: (user.user_metadata?.full_name as string) ?? null },
-    { onConflict: 'id', ignoreDuplicates: true },
-  );
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+    const token = getToken();
+    if (!token || isExpired(token)) {
+      setToken(null);
       setIsLoading(false);
-      if (session?.user) void ensureProfile(session.user);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) void ensureProfile(session.user);
-    });
-    return () => listener.subscription.unsubscribe();
+      return;
+    }
+    const claims = decodeJwt(token);
+    // Optimistic: trust the local claims for id/email, fill fullName from /me.
+    setUser({ id: claims?.sub ?? '', email: claims?.email ?? '', fullName: null });
+
+    (async () => {
+      try {
+        const me = (await (await fetch(`${AUTH_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { ok?: boolean; data?: AuthUser };
+        if (me?.ok && me.data) setUser(me.data);
+        // Silently extend a session with <2 days left.
+        const exp = claims?.exp ?? 0;
+        if (exp * 1000 - Date.now() < 2 * 24 * 60 * 60 * 1000) {
+          const refreshed = (await authFetch('/refresh', {}, token)) as { token: string };
+          setToken(refreshed.token);
+        }
+      } catch {
+        // /me failed (revoked, network) — drop the session.
+        setToken(null);
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const { token, user } = (await authFetch('/login', { email, password })) as LoginResult;
+    setToken(token);
+    setUser(user);
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) throw error;
+    const { token, user } = (await authFetch('/signup', { email, password, fullName })) as LoginResult;
+    setToken(token);
+    setUser(user);
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    setToken(null);
+    setUser(null);
   }, []);
 
   const resetPassword = useCallback(async (email: string) => {
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login/reset`,
-    });
-  }, []);
-
-  const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}/overview` },
-    });
-    if (error) throw error;
-    // On success the browser navigates away to the provider immediately --
-    // there's no local state to set here, execution doesn't continue.
-  }, []);
-
-  const signInWithSSO = useCallback(async (domain: string) => {
-    const { data, error } = await supabase.auth.signInWithSSO({
-      domain,
-      options: { redirectTo: `${window.location.origin}/overview` },
-    });
-    if (error) throw error;
-    // Unlike signInWithOAuth (which always redirects on success),
-    // signInWithSSO returns a url to navigate to rather than redirecting
-    // itself -- Supabase's own API shape, not a choice made here.
-    if (data?.url) window.location.href = data.url;
+    await authFetch('/forgot-password', { email });
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword, signInWithOAuth, signInWithSSO }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

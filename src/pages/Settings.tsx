@@ -2,11 +2,9 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Badge } from '../components/Badge';
-import { MfaSettings } from '../components/MfaSettings';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { useOrg } from '../lib/orgContext';
-import { supabase } from '../lib/supabase';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Role, type RecommendationRules, type GitInstallation, type GitRepo } from '../lib/api';
@@ -91,26 +89,12 @@ export function Settings() {
 
     let active = true;
 
-    void supabase
-      .from('profiles')
-      .select('full_name,timezone,date_format')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => {
-        if (!active || !data) return;
-
-        setFullName(data.full_name ?? '');
-        setTimezone(
-          TIMEZONES.includes(data.timezone ?? '')
-            ? (data.timezone ?? 'UTC')
-            : 'UTC',
-        );
-        setDateFormat(
-          DATE_FORMATS.includes(data.date_format ?? '')
-            ? (data.date_format ?? 'YYYY-MM-DD')
-            : 'YYYY-MM-DD',
-        );
-      });
+    void api.getMyProfile().then((data) => {
+      if (!active) return;
+      setFullName(data.fullName ?? '');
+      setTimezone(TIMEZONES.includes(data.timezone ?? '') ? (data.timezone ?? 'UTC') : 'UTC');
+      setDateFormat(DATE_FORMATS.includes(data.dateFormat ?? '') ? (data.dateFormat ?? 'YYYY-MM-DD') : 'YYYY-MM-DD');
+    }).catch(() => { /* keep defaults */ });
 
     return () => {
       active = false;
@@ -128,17 +112,10 @@ export function Settings() {
       return;
     }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        full_name: fullName.trim(),
-        timezone,
-        date_format: dateFormat,
-      })
-      .eq('id', user.id);
-
-    if (error) {
-      setProfileError(error.message);
+    try {
+      await api.updateMyProfile({ fullName: fullName.trim(), timezone, dateFormat });
+    } catch (err) {
+      setProfileError((err as Error).message);
       return;
     }
 
@@ -651,8 +628,6 @@ export function Settings() {
                 <button type="button" onClick={toggleTheme} className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300">{theme === 'dark' ? 'Dark' : 'Light'} — switch</button>
               </div>
             </div>
-
-            <MfaSettings />
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
               <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Session</h3>

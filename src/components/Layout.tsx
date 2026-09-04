@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AppRail } from './AppRail';
-import { Sidebar } from './Sidebar';
 import { ChatWidget } from './ChatWidget';
 import { TopBar } from './TopBar';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -42,7 +41,7 @@ export function Layout() {
         Skip to content
       </a>
       <AppRail />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
       <div className="flex-1 min-w-0">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
         <main id="main-content" tabIndex={-1} className="px-4 sm:px-6 pb-10 max-w-[1400px] outline-none">

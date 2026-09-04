@@ -1,17 +1,18 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthLayout, FormField } from './AuthLayout';
 
+const AUTH_BASE = `${import.meta.env.VITE_USERS_API_URL || ''}/api/auth`;
+
 /**
- * Reached from the password-reset email link (Supabase redirects here with a
- * recovery token in the URL hash). The user supplies a new password, which is
- * applied to their account via supabase.auth.updateUser(). The session is
- * already established by Supabase's client when the recovery link is followed,
- * so no explicit session exchange is needed here.
+ * Reached from the password-reset email link (/login/reset?token=…). The
+ * token is a 30-minute signed token minted by /api/auth/forgot-password;
+ * this posts it plus the new password to /api/auth/reset-password.
  */
 export function ResetPassword() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +22,10 @@ export function ResetPassword() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!token) {
+      setError('This reset link is missing its token. Request a new one.');
+      return;
+    }
     if (password.length < 8) {
       setError('Password must be at least 8 characters.');
       return;
@@ -31,8 +36,13 @@ export function ResetPassword() {
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
+      const res = await fetch(`${AUTH_BASE}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || 'Could not reset password');
       setDone(true);
       // Allow the success state to render before redirecting.
       setTimeout(() => navigate('/login'), 2500);

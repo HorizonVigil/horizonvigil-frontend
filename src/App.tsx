@@ -17,8 +17,6 @@ import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { ResetPassword } from './pages/auth/ResetPassword';
-import { MfaChallenge } from './pages/auth/MfaChallenge';
-import { AcceptInvite } from './pages/auth/AcceptInvite';
 import { Overview } from './pages/Overview';
 import { CloudAccounts } from './pages/CloudAccounts';
 import { CloudAccountDetail } from './pages/CloudAccountDetail';
@@ -117,19 +115,9 @@ export default function App() {
                     <Route path="/signup" element={<RedirectIfAuthenticated><Signup /></RedirectIfAuthenticated>} />
                     <Route path="/forgot-password" element={<RedirectIfAuthenticated><ForgotPassword /></RedirectIfAuthenticated>} />
                     {/* Not behind RedirectIfAuthenticated on purpose — the reset email
-                        carries a recovery token in the URL hash; an already-signed-in
-                        user who clicks it should still be able to set a new password. */}
+                        carries a reset token in the URL; an already-signed-in user who
+                        clicks it should still be able to set a new password. */}
                     <Route path="/login/reset" element={<ResetPassword />} />
-                    {/* Not behind RequireAuth/RequireOrg on purpose — reached mid-login,
-                        with a real aal1 session that hasn't reached aal2 yet. Fetching
-                        org-scoped data before that step-up completes isn't appropriate. */}
-                    <Route path="/login/mfa" element={<MfaChallenge />} />
-                    {/* Not behind RequireAuth/RequireOrg on purpose -- reachable
-                        logged-out (shows a preview + sign-in/signup prompt) or
-                        logged-in with zero orgs (RequireOrg would otherwise force
-                        a brand-new invitee into CreateFirstOrg before they can
-                        ever reach this page). */}
-                    <Route path="/accept-invite" element={<AcceptInvite />} />
 
                     <Route element={<RequireAuth />}>
                       <Route element={<RequireOrg />}>

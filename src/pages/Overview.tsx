@@ -126,7 +126,7 @@ export function Overview() {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            {greeting()}{user?.user_metadata?.full_name ? `, ${String(user.user_metadata.full_name).split(' ')[0]}` : ''}
+            {greeting()}{user?.fullName ? `, ${user.fullName.split(' ')[0]}` : ''}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Here's what matters across the environments you can access, right now.

@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/auth': { target: 'https://admin-153395452624.us-central1.run.app', changeOrigin: true },
       '/api/users': { target: 'https://admin-153395452624.us-central1.run.app', changeOrigin: true },
       '/api/organization-management': { target: 'https://admin-153395452624.us-central1.run.app', changeOrigin: true },
       '/api/settings': { target: 'https://admin-153395452624.us-central1.run.app', changeOrigin: true },

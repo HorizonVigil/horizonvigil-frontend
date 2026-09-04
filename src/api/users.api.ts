@@ -47,7 +47,6 @@ export const usersApi = {
   // ── members & invites ──────────────────────────────────────────────────
   getMembers: () => api.getMembers(),
   invite: ({ email, role }: InvitePayload) => api.inviteMember(email, role),
-  cancelInvite: (inviteId: string) => api.cancelInvite(inviteId),
   updateRole: (roleGrantId: string, role: InvitePayload['role']) =>
     api.updateRoleGrant(roleGrantId, role),
   removeMember: (roleGrantId: string) => api.deleteRoleGrant(roleGrantId),

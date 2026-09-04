@@ -8,7 +8,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
 import { useAuth } from '../lib/auth';
-import { api, type Member, type PendingInvite, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow, type AbacPolicyRow, type AbacCondition, type AbacTestResult, type ScimTokenSummary } from '../lib/api';
+import { api, type Member, type UserGroup, type Role, type ApiKeySummary, type ActivityEntry, type MenuPermissionRow, type MenuPermissionLevel, type ResourceGrantRow, type AbacPolicyRow, type AbacCondition, type AbacTestResult, type ScimTokenSummary } from '../lib/api';
 import { fetchAllPages } from '../lib/fetchAllPages';
 import { MenuAccessTree } from '../components/MenuAccessTree';
 
@@ -105,7 +105,6 @@ export function UsersGroups() {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [groups, setGroups] = useState<UserGroup[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [abacPolicies, setAbacPolicies] = useState<AbacPolicyRow[]>([]);
@@ -210,7 +209,6 @@ export function UsersGroups() {
 
     if (membersResult.status === 'fulfilled') {
       setMembers(membersResult.value.members ?? []);
-      setPendingInvites(membersResult.value.pendingInvites ?? []);
     } else {
       failures.push('members');
     }
@@ -577,38 +575,25 @@ export function UsersGroups() {
     try {
       const result = await api.inviteMember(email, inviteRole);
       const roleLabel = ENTERPRISE_ROLES.find(r => r.value === inviteRole)?.label ?? inviteRole;
+      const what = result.accountCreated
+        ? `Account created for ${email} (role "${roleLabel}")`
+        : `${email} added to the organization (role "${roleLabel}")`;
       toast(
         result.emailSent
-          ? `Invitation emailed to ${email} with role "${roleLabel}".`
-          : `Invitation created for ${email} with role "${roleLabel}", but the invite email could not be sent.`,
+          ? result.accountCreated
+            ? `${what} — login credentials emailed.`
+            : `${what} — notification emailed.`
+          : `${what}, but the email could not be sent${result.accountCreated ? ' — reset their password so they can sign in' : ''}.`,
         result.emailSent ? 'success' : 'info',
       );
       setInviteEmail('');
       await load();
     } catch (err) {
-      const message = normalizeError(err, 'Could not send this invite.');
+      const message = normalizeError(err, 'Could not add this member.');
       setError(message);
       toast(message, 'error');
     } finally {
       endMutation(`invite:${email}:${inviteRole}`);
-    }
-  }
-
-  async function handleCancelInvite(inviteId: string, email: string) {
-    if (!(await confirm(`Cancel the pending invite for ${email}? The invite link will stop working.`))) return;
-    if (!beginMutation(`invite-cancel:${inviteId}`)) return;
-
-    setError(null);
-    try {
-      await api.cancelInvite(inviteId);
-      toast(`Invite for ${email} cancelled.`, 'success');
-      await load();
-    } catch (err) {
-      const message = normalizeError(err, 'Could not cancel this invite.');
-      setError(message);
-      toast(message, 'error');
-    } finally {
-      endMutation(`invite-cancel:${inviteId}`);
     }
   }
 
@@ -1120,21 +1105,6 @@ export function UsersGroups() {
               </table>
             </div>
           </div>
-
-          {/* Pending Invites */}
-          {pendingInvites.length > 0 && (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-              <h4 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Pending Invites</h4>
-              <ul className="flex flex-col gap-1">
-                {pendingInvites.map(pi => (
-                  <li key={pi.id} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                    <Badge tone="warning">pending</Badge> {pi.email} <span className="text-xs text-slate-400">({ENTERPRISE_ROLES.find(r => r.value === pi.role)?.label ?? pi.role})</span>
-                    <button type="button" onClick={() => void handleCancelInvite(pi.id, pi.email)} className="text-xs text-red-500 hover:underline">Remove</button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {/* Invite Form with Project Access */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">

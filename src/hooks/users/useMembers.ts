@@ -25,14 +25,6 @@ export function useInviteMember() {
   });
 }
 
-export function useCancelInvite() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (inviteId: string) => usersApi.cancelInvite(inviteId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: userKeys.members() }),
-  });
-}
-
 export function useUpdateMemberRole() {
   const qc = useQueryClient();
   return useMutation({

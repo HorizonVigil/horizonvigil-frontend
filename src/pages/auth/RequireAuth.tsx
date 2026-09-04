@@ -8,8 +8,8 @@ export function RequireAuth() {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
   if (isLoading) return <FullScreenSpinner />;
-  // Preserves the URL the user was headed to so Login/Signup/MfaChallenge
-  // can send them back there instead of always landing on /overview.
+  // Preserves the URL the user was headed to so Login/Signup can send them
+  // back there instead of always landing on /overview.
   if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: location }} />;
   return <Outlet />;
 }

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { getToken } from './auth';
 
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'azureAccounts' | 'resources' | 'customDashboards' | 'costManagement'
@@ -84,6 +84,7 @@ export function friendlyErrorMessage(err: unknown, fallback = 'Something went wr
 export interface Pagination { page: number; limit: number; total: number; totalPages: number }
 export interface Paginated<T> { items: T[]; pagination: Pagination }
 export interface NotIntegrated { items: []; notIntegrated: true; reason: string }
+export interface UserProfile { id: string; email: string | null; fullName: string | null; timezone: string | null; dateFormat: string | null }
 
 function qs(params: Record<string, string | number | boolean | undefined>): string {
   const usp = new URLSearchParams();
@@ -108,8 +109,8 @@ class ApiClient {
   }
 
   private async authHeaders(): Promise<Record<string, string>> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
+    const token = getToken();
+    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
     if (this.currentOrgId) headers['X-Org-Id'] = this.currentOrgId;
     return headers;
   }
@@ -650,13 +651,16 @@ class ApiClient {
   deleteScheduledReport(id: string) { return this.delete<{ deleted: string }>('reports', `/api/reports/scheduled/${id}`); }
   getExportCenter(params: { category?: string; status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ReportRow>>('reports', `/api/reports/export-center${qs(params)}`); }
 
+  // ── auth (horizonvigil-admin /api/auth) ─────────────────────────────────
+
+  getMyProfile() { return this.get<UserProfile>('users', '/api/auth/me'); }
+  updateMyProfile(patch: { fullName?: string; timezone?: string; dateFormat?: string }) { return this.patch<UserProfile>('users', '/api/auth/me', patch); }
+
   // ── users-api ────────────────────────────────────────────────────────────
 
-  getMembers() { return this.get<{ members: Member[]; pendingInvites: PendingInvite[] }>('users', '/api/users/members'); }
-  inviteMember(email: string, role: Role) { return this.post<PendingInviteRow & { emailSent: boolean }>('users', '/api/users/invite', { email, role }); }
-  getInvitePreview(token: string) { return this.get<{ orgName: string; inviterName: string; role: Role; email: string }>('users', `/api/users/invites/${token}`); }
-  acceptInvite(token: string) { return this.post<{ orgId: string; role: Role }>('users', `/api/users/invites/${token}/accept`); }
-  cancelInvite(id: string) { return this.delete<{ removed: string }>('users', `/api/users/invites/${id}`); }
+  getMembers() { return this.get<{ members: Member[] }>('users', '/api/users/members'); }
+  /** Provisions the member directly: creates a confirmed account with a generated password (emailed to them) for an unknown email, or grants membership on their existing account. */
+  inviteMember(email: string, role: Role) { return this.post<{ userId: string; accountCreated: boolean; emailSent: boolean }>('users', '/api/users/invite', { email, role }); }
   updateRoleGrant(id: string, role: Role) { return this.put<{ id: string; role: Role }>('users', `/api/users/role-grants/${id}`, { role }); }
   deleteRoleGrant(id: string) { return this.delete<{ removed: string }>('users', `/api/users/role-grants/${id}`); }
   transferOwnership(newOwnerUserId: string) { return this.post<{ newOwnerUserId: string; previousOwnerRole: Role }>('users', '/api/users/transfer-ownership', { newOwnerUserId }); }
@@ -1161,8 +1165,6 @@ export interface ReportRow { id: string; org_id: string; category: string; name:
 export interface ScheduledReport { id: string; org_id: string; report_category: string; name: string; scope: unknown; cadence: string; recipients: string[]; format: string; next_run_at: string | null; enabled: boolean; created_at: string }
 
 export interface Member { roleGrantId: string; userId: string; role: Role; email: string | null; fullName: string | null; mfaEnabled: boolean; attributes: Record<string, unknown> }
-export interface PendingInvite { id: string; email: string; role: Role; invitedBy: string | null; createdAt: string }
-export interface PendingInviteRow { id: string; org_id: string; email: string; role: Role; invited_by: string; accepted_at: string | null; created_at: string }
 export interface UserGroup { id: string; name: string; createdAt: string; memberIds: string[] }
 export interface ApiKeySummary { id: string; name: string; key_prefix: string; last_used_at: string | null; revoked_at: string | null; created_at: string; user_id: string }
 
