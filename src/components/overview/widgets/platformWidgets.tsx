@@ -13,7 +13,7 @@ import { LineChart } from '../../charts/LineChart';
 import { api } from '../../../lib/api';
 import { daysAgoISO, healthTier } from '../../../lib/format';
 import { dateRangeToDays } from '../../../lib/filterContext';
-import { scopedConnectionId } from '../../../lib/overview/scope';
+import { scopedConnectionId, scopeMonitoringHealth } from '../../../lib/overview/scope';
 import type { WidgetComponent } from '../../../lib/overview/types';
 import { EmptyState, KpiValue, ViewAllLink, WidgetBody, useWidgetQuery } from './shared';
 
@@ -188,7 +188,7 @@ export const EnvironmentHealthWidget: WidgetComponent = ({ ctx }) => {
 };
 
 const HealthRollup: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('infrastructure-health', ctx, () => api.getMonitoringHealth());
+  const query = useWidgetQuery('infrastructure-health', ctx, async () => scopeMonitoringHealth(await api.getMonitoringHealth(), ctx.scope));
   return (
     <WidgetBody query={query} errorLabel="Health couldn't be loaded." emptyTitle="No health data yet"
       emptyIcon="gauge" isEmpty={(d) => (d.total ?? 0) === 0}>

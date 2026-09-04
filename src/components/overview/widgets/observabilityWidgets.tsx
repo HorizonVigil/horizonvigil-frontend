@@ -8,11 +8,12 @@
 import { api } from '../../../lib/api';
 import { daysAgoISO, formatActivityAction, formatDate } from '../../../lib/format';
 import { dateRangeToDays } from '../../../lib/filterContext';
+import { scopedConnectionId, scopeMonitoringHealth } from '../../../lib/overview/scope';
 import type { WidgetComponent } from '../../../lib/overview/types';
 import { KpiValue, PendingBody, ViewAllLink, WidgetBody, useWidgetQuery } from './shared';
 
 export const AlertsPanelWidget: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('alerts-panel', ctx, () => api.getActiveAlerts({ limit: 8 }));
+  const query = useWidgetQuery('alerts-panel', ctx, () => api.getActiveAlerts({ limit: 8, connection_id: scopedConnectionId(ctx.scope) }));
   return (
     <WidgetBody query={query} errorLabel="Alerts couldn't be loaded." emptyTitle="No alerts firing"
       emptyIcon="alerts" isEmpty={(d) => d.items.length === 0}>
@@ -65,7 +66,7 @@ export const SaturationWidget: WidgetComponent = () => <PendingBody icon="cpu" n
 // ── KPIs ──────────────────────────────────────────────────────────────────
 
 export const ServiceHealthKpi: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('kpi-service-health', ctx, () => api.getMonitoringHealth());
+  const query = useWidgetQuery('kpi-service-health', ctx, async () => scopeMonitoringHealth(await api.getMonitoringHealth(), ctx.scope));
   const d = query.data;
   const healthy = d ? (d.overallByStatus?.healthy ?? d.overallByState?.OK ?? 0) : 0;
   const pct = d && d.total > 0 ? Math.round((healthy / d.total) * 100) : null;

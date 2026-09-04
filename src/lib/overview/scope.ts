@@ -5,6 +5,7 @@
  *
  * Composes:
  *   - org / folders / projects / resource grants  → useOrg()
+ *   - the org/folder/project <ScopePicker> pick    → useOrg().scope
  *   - the app-wide Account + Region filter         → useFilters()
  *   - personalization defaults (project / env)     → passed in by the page
  *
@@ -12,22 +13,30 @@
  * `region` on every query. The frontend never fetches an org-wide set and
  * hides rows; endpoints that lack a scope parameter today are called out in
  * the individual widget files as a backend follow-up.
+ *
+ * The pure resolution logic (testable from vitest) lives in scopeLogic.ts;
+ * re-exported here so existing `from '.../lib/overview/scope'` imports keep
+ * working unchanged.
  */
 import { useMemo } from 'react';
 import { useOrg } from '../orgContext';
 import { useFilters } from '../filterContext';
 import type { EffectiveScope } from './types';
+import { resolveConnectionScope } from './scopeLogic';
+
+export { resolveConnectionScope, scopedConnectionId, scopedConnectionIds, scopeMonitoringHealth } from './scopeLogic';
 
 export function useEffectiveScope(defaults?: { projectId?: string; environment?: string }): EffectiveScope {
-  const { currentOrg, folders, projects, resourceGrants } = useOrg();
+  const { currentOrg, folders, projects, resourceGrants, scope } = useOrg();
+  // `connections` is already narrowed to `scope` by filterContext.tsx (see
+  // lib/scope.ts) — reusing it here means a folder/project pick narrows
+  // `connectionIds` the same way it narrows everything else, without this
+  // hook re-deriving folder membership itself.
   const { connections, account, region } = useFilters();
 
   return useMemo(() => {
-    const knownConnectionIds = new Set(connections.map((c) => c.id));
-    const restricted = resourceGrants?.restricted ?? false;
-    const connectionIds: string[] | 'all' = restricted
-      ? (resourceGrants?.connectionIds ?? []).filter((id) => knownConnectionIds.size === 0 || knownConnectionIds.has(id))
-      : 'all';
+    const scopeNarrowed = Boolean(scope && scope.type !== 'org');
+    const { restricted, connectionIds } = resolveConnectionScope(connections.map((c) => c.id), scopeNarrowed, resourceGrants);
 
     return {
       orgId: currentOrg?.id ?? '',
@@ -41,26 +50,5 @@ export function useEffectiveScope(defaults?: { projectId?: string; environment?:
       activeEnvironment: defaults?.environment,
       region,
     };
-  }, [currentOrg, folders, projects, resourceGrants, connections, account, region, defaults?.projectId, defaults?.environment]);
-}
-
-/**
- * The `connectionId` a scoped single-account query should use, or undefined
- * for "all in scope". Priority: an explicit FilterBar account selection wins;
- * otherwise a restricted user with exactly one granted connection is pinned
- * to it; otherwise undefined (the widget queries across the whole scope).
- */
-export function scopedConnectionId(scope: EffectiveScope): string | undefined {
-  if (scope.activeConnectionId) return scope.activeConnectionId;
-  if (scope.restricted && Array.isArray(scope.connectionIds) && scope.connectionIds.length === 1) {
-    return scope.connectionIds[0];
-  }
-  return undefined;
-}
-
-/** `connection_ids` CSV for endpoints that accept a multi-account filter, or undefined for unrestricted. */
-export function scopedConnectionIds(scope: EffectiveScope): string[] | undefined {
-  if (scope.activeConnectionId) return [scope.activeConnectionId];
-  if (scope.restricted && Array.isArray(scope.connectionIds)) return scope.connectionIds;
-  return undefined;
+  }, [currentOrg, folders, projects, resourceGrants, scope, connections, account, region, defaults?.projectId, defaults?.environment]);
 }

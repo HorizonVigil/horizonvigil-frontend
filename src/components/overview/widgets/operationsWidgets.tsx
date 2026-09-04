@@ -59,7 +59,7 @@ export const ActiveIncidentsWidget: WidgetComponent = ({ ctx }) => {
 };
 
 export const CriticalAlertsWidget: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('critical-alerts', ctx, () => api.getActiveAlerts({ severity: 'critical', limit: 8 }));
+  const query = useWidgetQuery('critical-alerts', ctx, () => api.getActiveAlerts({ severity: 'critical', limit: 8, connection_id: scopedConnectionId(ctx.scope) }));
   return (
     <WidgetBody query={query} errorLabel="Critical alerts couldn't be loaded." emptyTitle="No critical alerts"
       emptyIcon="check-circle" isEmpty={(d) => d.items.length === 0}>
@@ -78,7 +78,7 @@ export const CriticalAlertsWidget: WidgetComponent = ({ ctx }) => {
 };
 
 export const InvestigationsWidget: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('investigations', ctx, () => api.getIncidents({ status: 'investigating', limit: 8 }));
+  const query = useWidgetQuery('investigations', ctx, () => api.getIncidents({ status: 'investigating', limit: 8, connectionId: scopedConnectionId(ctx.scope) }));
   return (
     <WidgetBody query={query} errorLabel="Investigations couldn't be loaded." emptyTitle="No active investigations"
       emptyIcon="search" isEmpty={(d) => d.items.length === 0}>
@@ -173,9 +173,9 @@ export const FavoritesWidget: WidgetComponent = ({ ctx }) => {
 export const RecommendedActionsWidget: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('recommended-actions', ctx, async () => {
     const [savings, findings, incidents] = await Promise.allSettled([
-      ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 3 }) : Promise.resolve(null),
-      ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3 }) : Promise.resolve(null),
-      ctx.can.has('incident.read') ? api.getIncidents({ status: 'open', limit: 3 }) : Promise.resolve(null),
+      ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      ctx.can.has('incident.read') ? api.getIncidents({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
     ]);
     const v = <T,>(r: PromiseSettledResult<T | null>) => (r.status === 'fulfilled' ? r.value : null);
     type Row = { key: string; label: string; sub: string; to: string; tone: 'critical' | 'warning' | 'good' };
@@ -208,14 +208,14 @@ export const RecommendedActionsWidget: WidgetComponent = ({ ctx }) => {
 // ── KPIs ──────────────────────────────────────────────────────────────────
 
 export const ActiveIncidentsKpi: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('kpi-active-incidents', ctx, () => api.getIncidents({ status: 'open', limit: 1 }));
+  const query = useWidgetQuery('kpi-active-incidents', ctx, () => api.getIncidents({ status: 'open', limit: 1, connectionId: scopedConnectionId(ctx.scope) }));
   const n = query.data?.pagination.total ?? 0;
   return <KpiValue label="Active Incidents" value={query.data ? String(n) : '—'} icon="incidents"
     tone={n > 0 ? 'critical' : 'good'} caption={n > 0 ? 'open' : 'all clear'} onClick={() => ctx.navigate('/incidents')} />;
 };
 
 export const OpenInvestigationsKpi: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('kpi-open-investigations', ctx, () => api.getIncidents({ status: 'investigating', limit: 1 }));
+  const query = useWidgetQuery('kpi-open-investigations', ctx, () => api.getIncidents({ status: 'investigating', limit: 1, connectionId: scopedConnectionId(ctx.scope) }));
   const n = query.data?.pagination.total ?? 0;
   return <KpiValue label="Open Investigations" value={query.data ? String(n) : '—'} icon="search"
     tone={n > 0 ? 'warning' : 'good'} onClick={() => ctx.navigate('/incidents?tab=Investigating')} />;
@@ -223,7 +223,7 @@ export const OpenInvestigationsKpi: WidgetComponent = ({ ctx }) => {
 
 export const MttrKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-mttr', ctx, async () => {
-    const { items } = await api.getIncidents({ status: 'resolved', limit: 50 });
+    const { items } = await api.getIncidents({ status: 'resolved', limit: 50, connectionId: scopedConnectionId(ctx.scope) });
     const durations = items
       .filter((i) => i.resolved_at)
       .map((i) => new Date(i.resolved_at as string).getTime() - new Date(i.created_at).getTime())
@@ -239,9 +239,9 @@ export const MttrKpi: WidgetComponent = ({ ctx }) => {
 export const OpenIssuesKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-open-issues', ctx, async () => {
     const [recs, findings, alerts] = await Promise.allSettled([
-      ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 1 }) : Promise.resolve(null),
-      ctx.can.has('security.read') ? api.getFindings({ status: 'open', limit: 1 }) : Promise.resolve(null),
-      ctx.can.has('observability.read') ? api.getActiveAlerts({ limit: 1 }) : Promise.resolve(null),
+      ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 1, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      ctx.can.has('security.read') ? api.getFindings({ status: 'open', limit: 1, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      ctx.can.has('observability.read') ? api.getActiveAlerts({ limit: 1, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
     ]);
     const t = (r: PromiseSettledResult<{ pagination: { total: number } } | null>) => (r.status === 'fulfilled' && r.value ? r.value.pagination.total : 0);
     return t(recs) + t(findings) + t(alerts);

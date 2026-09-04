@@ -170,7 +170,7 @@ export const PotentialSavingsWidget: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('potential-savings', ctx, async () => {
     const [dash, idle] = await Promise.all([
       api.getCostOptimizationDashboard(),
-      api.getIdleResources({ status: 'open', limit: 1 }),
+      api.getIdleResources({ status: 'open', limit: 1, connectionId: scopedConnectionId(ctx.scope) }),
     ]);
     return { savings: dash.totalPotentialMonthlySavings, idle: idle.pagination.total };
   });
