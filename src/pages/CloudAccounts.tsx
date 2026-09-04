@@ -690,12 +690,7 @@ export function CloudAccounts() {
         </div>
       </div>
 
-      {tab === 'Overview' && (
-        <OverviewPanel
-          refreshToken={refreshToken}
-          onProviderClick={(p) => { setProviderFilter(p); setTab('Inventory'); }}
-        />
-      )}
+      {tab === 'Overview' && <OverviewPanel refreshToken={refreshToken} />}
       {tab === 'Connections' && (
         <ConnectionsPanel rows={allConnectionRows} onAddConnection={() => setChooserOpen(true)} />
       )}

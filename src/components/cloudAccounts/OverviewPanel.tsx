@@ -1,52 +1,105 @@
 /**
- * Cloud Accounts — Overview tab (spec §5–12). A per-user, high-level view of
- * every connected cloud environment: KPIs, unified provider summary +
- * health %, attention-required, recent activity, and (permission-gated)
- * top-risk + cost summaries that link into the Security and FinOps modules.
+ * Cloud Accounts → Overview — a dynamic cloud command center (spec §1–§26,
+ * §44). Composed on the frontend from endpoints that already exist (each
+ * connector's `/dashboard` + `/health/detailed`, plus the resources / cost /
+ * security / containers dashboards). Every section renders permission- and
+ * scope-gated, degrades independently on error (spec §33), and drills through
+ * to the relevant tab or module (spec §31).
+ *
+ * Deferred (agreed): drag/resize/save-layout customization (§27) and
+ * context-aware widget promotion (§30). Organization / folder / account
+ * filters (§6) need the §39–40 aggregation API and are out of scope here.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { StatCard } from '../StatCard';
-import { Badge } from '../Badge';
 import { Icon } from '../icons';
+import { StatCard } from '../StatCard';
 import { StatCardSkeleton, CardSkeleton } from '../Skeleton';
 import { useOrg } from '../../lib/orgContext';
 import { deriveCapabilities } from '../../lib/overview/capabilities';
-import { combineHealth, healthTierClass } from '../../lib/cloudAccounts/health';
-import { api, type Role, type AwsAccountsDashboard } from '../../lib/api';
+import { api, type Role } from '../../lib/api';
 import { money } from '../../lib/format';
+import {
+  aggregateOverview,
+  buildAttentionItems,
+  mergeActivity,
+  narrowToProvider,
+  topProblemAccounts,
+  EMPTY_DASHBOARD,
+  PROVIDERS,
+  type ProviderDashes,
+  type ProviderHealth,
+} from '../../lib/cloudAccounts/overview';
+import {
+  OverviewFilters,
+  DEFAULT_OVERVIEW_FILTERS,
+  TIME_DAYS,
+  type OverviewFilterState,
+} from './overview/OverviewFilters';
+import { ProviderCards } from './overview/ProviderCards';
+import { CloudHealthDonut, ProviderHealthComparison } from './overview/HealthPanels';
+import { AttentionRequired } from './overview/AttentionRequired';
+import { ResourceDistribution, ResourceGrowth, DistributionPanel } from './overview/ResourcePanels';
+import { CostPanel } from './overview/CostPanel';
+import { SecurityPanel } from './overview/SecurityPanel';
+import { ConnectivityHealth, KubernetesSummary } from './overview/InfraPanels';
+import { SyncPanel } from './overview/SyncPanel';
+import { ActivityTimeline } from './overview/ActivityTimeline';
+import { TopProblemAccounts } from './overview/TopProblemAccounts';
+import { LockedSection } from './overview/primitives';
 
-const EMPTY_DASH: AwsAccountsDashboard = {
-  totalAccounts: 0, healthyAccounts: 0, failedAccounts: 0, disconnectedAccounts: 0, accountsNeedingAttention: 0,
-  resourcesDiscovered: 0, regionsCovered: 0, lastDiscovery: null, nextScheduledDiscovery: null, discoverySuccessRate: null,
-  accountsNeedingAttentionList: [], permissionErrors: 0, syncFailures: 0, monthlyCost: 0, topCostAccounts: [],
-  topGrowingAccounts: [], openRecommendations: 0, potentialMonthlySavings: 0, rotationDue: 0, recentActivity: [], recentAlerts: [],
-};
+const val = <T,>(r: PromiseSettledResult<T>, fallback: T): T => (r.status === 'fulfilled' ? r.value : fallback);
+const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
 
-export function OverviewPanel({ refreshToken, onProviderClick }: { refreshToken: number; onProviderClick: (p: 'aws' | 'azure' | 'gcp') => void }) {
+export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
   const navigate = useNavigate();
   const { currentOrg, menuPermissions } = useOrg();
   const role = (currentOrg?.myRole as Role) ?? 'viewer';
   const can = useMemo(() => deriveCapabilities(role, menuPermissions), [role, menuPermissions]);
+  const canCost = can.has('cost.read');
+  const canSecurity = can.has('security.read');
+  const canK8s = can.has('kubernetes.read');
+
+  const [filters, setFilters] = useState<OverviewFilterState>(DEFAULT_OVERVIEW_FILTERS);
+  const days = TIME_DAYS[filters.time];
+  const region = filters.region === 'all' ? undefined : filters.region;
 
   const query = useQuery({
-    queryKey: ['cloud-accounts', 'overview', refreshToken, can.has('security.read'), can.has('cost.read')],
+    queryKey: ['cloud-accounts', 'overview-cc', refreshToken, region ?? 'all', days, canCost, canSecurity, canK8s],
     queryFn: async () => {
-      const [aws, azure, gcp, hAws, hAzure, hGcp, sec, cost] = await Promise.allSettled([
-        api.getAwsAccountsDashboard(), api.getAzureAccountsDashboard(), api.getGcpAccountsDashboard(),
-        api.getAwsHealthDetailed(), api.getAzureHealthDetailed(), api.getGcpHealthDetailed(),
-        can.has('security.read') ? api.getVulnerabilityDashboard() : Promise.resolve(null),
-        can.has('cost.read') ? api.getOverviewCost() : Promise.resolve(null),
+      const [aws, azure, gcp, hAws, hAzure, hGcp, res, containers, sec, cost, envs] = await Promise.allSettled([
+        api.getAwsAccountsDashboard(),
+        api.getAzureAccountsDashboard(),
+        api.getGcpAccountsDashboard(),
+        api.getAwsHealthDetailed(),
+        api.getAzureHealthDetailed(),
+        api.getGcpHealthDetailed(),
+        api.getResourcesDashboard({ region, days }),
+        canK8s ? api.getContainersDashboard() : Promise.resolve(null),
+        canSecurity ? api.getVulnerabilityDashboard() : Promise.resolve(null),
+        canCost ? api.getOverviewCost() : Promise.resolve(null),
+        api.getEnvironments(),
       ]);
-      const val = <T,>(r: PromiseSettledResult<T>, fallback: T): T => (r.status === 'fulfilled' ? r.value : fallback);
-      const dashes = { aws: val(aws, EMPTY_DASH), azure: val(azure, EMPTY_DASH), gcp: val(gcp, EMPTY_DASH) };
-      const health = combineHealth([
-        hAws.status === 'fulfilled' ? hAws.value : null,
-        hAzure.status === 'fulfilled' ? hAzure.value : null,
-        hGcp.status === 'fulfilled' ? hGcp.value : null,
-      ]);
-      return { dashes, health, security: val(sec, null), cost: val(cost, null) };
+
+      const dashes: ProviderDashes = {
+        aws: val(aws, EMPTY_DASHBOARD),
+        azure: val(azure, EMPTY_DASHBOARD),
+        gcp: val(gcp, EMPTY_DASHBOARD),
+      };
+      const health: ProviderHealth = { aws: ok(hAws), azure: ok(hAzure), gcp: ok(hGcp) };
+
+      return {
+        dashes,
+        health,
+        resources: ok(res),
+        resourcesError: res.status === 'rejected',
+        containers: ok(containers),
+        security: ok(sec),
+        cost: ok(cost),
+        environments: ok(envs)?.environments ?? null,
+        fetchedAt: Date.now(),
+      };
     },
     staleTime: 60_000,
   });
@@ -55,149 +108,135 @@ export function OverviewPanel({ refreshToken, onProviderClick }: { refreshToken:
     return (
       <div className="flex flex-col gap-5">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Array.from({ length: 8 }).map((_, i) => <StatCardSkeleton key={i} />)}</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)}</div>
       </div>
     );
   }
 
-  const d = query.data!;
-  const totals = (['aws', 'azure', 'gcp'] as const).reduce(
-    (acc, p) => {
-      acc.total += d.dashes[p].totalAccounts;
-      acc.healthy += d.dashes[p].healthyAccounts;
-      acc.failed += d.dashes[p].failedAccounts;
-      acc.attention += d.dashes[p].accountsNeedingAttention;
-      acc.resources += d.dashes[p].resourcesDiscovered;
-      acc.cost += d.dashes[p].monthlyCost;
-      return acc;
-    },
-    { total: 0, healthy: 0, failed: 0, attention: 0, resources: 0, cost: 0 },
-  );
-  const lastDiscovery = [d.dashes.aws.lastDiscovery, d.dashes.azure.lastDiscovery, d.dashes.gcp.lastDiscovery].filter(Boolean).sort().at(-1) ?? null;
-  const attentionList = [...d.dashes.aws.accountsNeedingAttentionList, ...d.dashes.azure.accountsNeedingAttentionList, ...d.dashes.gcp.accountsNeedingAttentionList];
-  const recentActivity = [...d.dashes.aws.recentActivity, ...d.dashes.azure.recentActivity, ...d.dashes.gcp.recentActivity]
-    .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1)).slice(0, 8);
-
-  if (totals.total === 0) {
+  if (query.isError || !query.data) {
     return (
-      <div className="flex flex-col items-center text-center gap-3 py-16">
+      <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-6 text-center">
+        <Icon name="alert-triangle" size={20} className="mx-auto text-red-500 mb-2" />
+        <p className="text-sm text-red-700 dark:text-red-300">Couldn’t load the cloud overview.</p>
+        <button onClick={() => query.refetch()} className="mt-3 text-xs font-medium text-red-700 dark:text-red-300 underline">Retry</button>
+      </div>
+    );
+  }
+
+  const d = query.data;
+  const fullAgg = aggregateOverview(d.dashes, d.health);
+
+  // Empty state — nothing connected at all (spec §8, §35).
+  if (fullAgg.totals.total === 0) {
+    return (
+      <div className="flex flex-col items-center text-center gap-3 py-20">
         <div className="h-14 w-14 rounded-full bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center">
           <Icon name="cloud" size={24} className="text-brand-600 dark:text-brand-400" />
         </div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">No cloud environments connected</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">Connect an AWS account, Azure subscription or GCP project to see your unified cloud control plane here.</p>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">No cloud accounts</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm">
+          Connect AWS, Azure or GCP to start discovering your cloud environment.
+        </p>
       </div>
     );
+  }
+
+  // Cloud filter — narrow every provider-derived section to one provider.
+  const narrowed = narrowToProvider(d.dashes, d.health, filters.provider);
+  const agg = aggregateOverview(narrowed.dashes, narrowed.health);
+  const attention = buildAttentionItems(agg, narrowed.dashes, { security: d.security });
+  const activity = mergeActivity(narrowed.dashes);
+  const problems = topProblemAccounts(narrowed.dashes);
+  const potentialSavings = PROVIDERS.reduce((n, p) => n + narrowed.dashes[p].potentialMonthlySavings, 0);
+
+  const healthPct = agg.totals.healthPercent;
+
+  function drillHealth(state: string) {
+    // 'aws'/'azure'/'gcp' from the provider-comparison chart set the Cloud filter;
+    // 'healthy'/'warning'/'critical' jump to the Health tab.
+    const asProvider = PROVIDERS.find((p) => p === state);
+    if (asProvider) setFilters((f) => ({ ...f, provider: asProvider }));
+    else navigate('/cloud-accounts?tab=Health');
   }
 
   return (
     <div className="flex flex-col gap-5">
-      {/* KPIs */}
+      <OverviewFilters
+        value={filters}
+        onChange={setFilters}
+        updatedAt={d.fetchedAt}
+        onRefresh={() => query.refetch()}
+        refreshing={query.isFetching}
+      />
+
+      {/* Executive KPI strip (spec §44.1) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Total Environments" value={totals.total.toLocaleString()} icon="cloud" />
-        <StatCard label="Healthy" value={totals.healthy.toLocaleString()} icon="check-circle" iconTone="good" />
-        <StatCard label="Failed" value={totals.failed.toLocaleString()} icon="shield-alert" iconTone={totals.failed > 0 ? 'critical' : 'neutral'} />
-        <StatCard label="Needs Attention" value={totals.attention.toLocaleString()} icon="alert-triangle" iconTone={totals.attention > 0 ? 'warning' : 'neutral'} />
-        <StatCard label="Total Resources" value={totals.resources.toLocaleString()} icon="resources" />
-        <StatCard label="Overall Health" value={d.health.healthPercent === null ? '—' : `${d.health.healthPercent}%`} icon="gauge"
-          iconTone={d.health.healthPercent !== null && d.health.healthPercent >= 85 ? 'good' : d.health.healthPercent !== null && d.health.healthPercent >= 60 ? 'warning' : 'critical'} />
-        {can.has('cost.read') && <StatCard label="Cloud Cost (MTD)" value={money(d.cost?.monthToDate ?? totals.cost)} icon="cost" />}
-        <StatCard label="Last Discovery" value={lastDiscovery ? new Date(lastDiscovery).toLocaleDateString() : 'Never'} icon="clock" />
+        <StatCard label="Environments" value={agg.totals.total.toLocaleString()} icon="cloud" />
+        <StatCard label="Healthy" value={agg.totals.healthy.toLocaleString()} icon="check-circle" iconTone="good" />
+        <StatCard label="Failed" value={agg.totals.critical.toLocaleString()} icon="shield-alert" iconTone={agg.totals.critical > 0 ? 'critical' : 'neutral'} />
+        <StatCard label="Needs Attention" value={agg.totals.attention.toLocaleString()} icon="alert-triangle" iconTone={agg.totals.attention > 0 ? 'warning' : 'neutral'} />
+        <StatCard label="Resources" value={agg.totals.resources.toLocaleString()} icon="resources" />
+        <StatCard
+          label="Overall Health"
+          value={healthPct === null ? '—' : `${healthPct}%`}
+          icon="gauge"
+          iconTone={healthPct === null ? 'neutral' : healthPct >= 85 ? 'good' : healthPct >= 60 ? 'warning' : 'critical'}
+        />
+        {canCost
+          ? <StatCard label="Cloud Cost (MTD)" value={money(d.cost?.monthToDate ?? agg.totals.monthlyCost)} icon="cost" />
+          : <StatCard label="Regions" value={(d.resources ? Object.keys(d.resources.byRegion).length : 0).toLocaleString()} icon="map-pin" />}
+        <StatCard
+          label="Last Discovery"
+          value={fullAgg.lastDiscovery ? new Date(fullAgg.lastDiscovery).toLocaleDateString() : 'Never'}
+          icon="clock"
+        />
       </div>
 
-      {/* Provider summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {(['aws', 'azure', 'gcp'] as const).map((p) => {
-          const dash = d.dashes[p];
-          const ph = d.health.perProvider.find((x) => x.provider === p);
-          const providerLabel = p === 'aws' ? 'AWS' : p === 'azure' ? 'Azure' : 'GCP';
-          const unit = p === 'aws' ? 'accounts' : p === 'azure' ? 'subscriptions' : 'projects';
-          return (
-            <button key={p} type="button" onClick={() => onProviderClick(p)}
-              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 text-left hover:border-brand-300 dark:hover:border-brand-700 transition-colors">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{providerLabel}</span>
-                <span className={`text-sm font-semibold tabular-nums ${healthTierClass(ph?.healthPercent ?? null)}`}>{ph?.healthPercent === null || ph === undefined ? '—' : `${ph.healthPercent}%`}</span>
-              </div>
-              <div className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{dash.totalAccounts.toLocaleString()}</div>
-              <div className="text-xs text-slate-400 mb-2">{unit}</div>
-              <div className="flex flex-wrap gap-1.5">
-                <Badge tone="good">{dash.healthyAccounts} healthy</Badge>
-                {dash.accountsNeedingAttention > 0 && <Badge tone="warning">{dash.accountsNeedingAttention} attention</Badge>}
-                {dash.failedAccounts > 0 && <Badge tone="critical">{dash.failedAccounts} failed</Badge>}
-              </div>
-            </button>
-          );
-        })}
+      {/* Provider cards (spec §7) */}
+      <ProviderCards agg={fullAgg} activeFilter={filters.provider} onSelect={(p) => setFilters((f) => ({ ...f, provider: p }))} />
+
+      {/* Attention required (spec §20) — high in the flow, before the charts */}
+      <AttentionRequired items={attention} />
+
+      {/* Health (spec §9, §10) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CloudHealthDonut agg={agg} onDrill={drillHealth} />
+        <ProviderHealthComparison agg={agg} onDrill={drillHealth} />
       </div>
 
-      {/* Attention required */}
-      {attentionList.length > 0 && (
-        <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 p-4">
-          <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-3 flex items-center gap-1.5"><Icon name="alert-triangle" size={14} /> Attention Required</h3>
-          <ul className="flex flex-col divide-y divide-amber-100 dark:divide-amber-900/40">
-            {attentionList.slice(0, 8).map((a) => (
-              <li key={a.connectionId} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <button onClick={() => navigate(`/cloud-accounts/${a.connectionId}`)} className="text-slate-700 dark:text-slate-200 hover:underline font-medium truncate">{a.connectionName}</button>
-                <span className="text-slate-500 dark:text-slate-400 text-xs shrink-0">{a.reason}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Risk + Cost + Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {can.has('security.read') && d.security && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3 flex items-center justify-between">
-              Top Risk Summary
-              <button onClick={() => navigate('/vulnerability-management')} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">Security →</button>
-            </h3>
-            <dl className="text-sm flex flex-col gap-2">
-              <Row label="Critical" value={d.security.bySeverity?.critical ?? 0} />
-              <Row label="High" value={d.security.bySeverity?.high ?? 0} />
-              <Row label="Open findings" value={d.security.openFindings} />
-              <Row label="Risk score" value={d.security.riskScore} />
-            </dl>
-          </div>
-        )}
-        {can.has('cost.read') && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3 flex items-center justify-between">
-              Cost Summary
-              <button onClick={() => navigate('/cost-management')} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">FinOps →</button>
-            </h3>
-            <dl className="text-sm flex flex-col gap-2">
-              <Row label="AWS" value={money(d.dashes.aws.monthlyCost)} />
-              <Row label="Azure" value={money(d.dashes.azure.monthlyCost)} />
-              <Row label="GCP" value="not tracked" />
-              <Row label="Potential savings/mo" value={money(d.dashes.aws.potentialMonthlySavings + d.dashes.azure.potentialMonthlySavings)} />
-            </dl>
-          </div>
-        )}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-          <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Recent Cloud Activity</h3>
-          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
-            {recentActivity.map((e) => (
-              <li key={e.id} className="py-2 text-sm flex justify-between gap-2">
-                <span className="text-slate-700 dark:text-slate-200 truncate">{e.action.replace(/_/g, ' ').replace(/\./g, ' — ')}</span>
-                <span className="text-xs text-slate-400 shrink-0">{new Date(e.occurredAt).toLocaleDateString()}</span>
-              </li>
-            ))}
-            {recentActivity.length === 0 && <li className="py-2 text-sm text-slate-400">No activity yet.</li>}
-          </ul>
-        </div>
+      {/* Resources (spec §11, §13) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ResourceDistribution res={d.resources} error={d.resourcesError} />
+        <ResourceGrowth res={d.resources} days={days} error={d.resourcesError} />
       </div>
-    </div>
-  );
-}
 
-function Row({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex justify-between">
-      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
-      <dd className="text-slate-800 dark:text-slate-100 tabular-nums">{value}</dd>
+      {/* Cost + Security (spec §14–16) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {canCost
+          ? <CostPanel agg={agg} monthToDate={d.cost?.monthToDate ?? null} potentialSavings={potentialSavings} />
+          : <LockedSection title="Cloud Cost" reason="You don’t have cost access for this organization." />}
+        {canSecurity
+          ? <SecurityPanel security={d.security} />
+          : <LockedSection title="Security & Risk" reason="You don’t have security access for this organization." />}
+      </div>
+
+      {/* Infra health + Kubernetes (spec §17, §18) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ConnectivityHealth health={narrowed.health} />
+        {canK8s && <KubernetesSummary containers={d.containers} />}
+      </div>
+
+      {/* Sync health (spec §19) */}
+      <SyncPanel agg={agg} dashes={narrowed.dashes} onDrill={() => navigate('/cloud-accounts?tab=Sync+Center')} />
+
+      {/* Distribution — regions + environments (spec §23, §24) */}
+      <DistributionPanel res={d.resources} environments={d.environments} error={d.resourcesError} />
+
+      {/* Activity timeline + top problem accounts (spec §21, §26) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ActivityTimeline entries={activity} />
+        <TopProblemAccounts rows={problems} />
+      </div>
     </div>
   );
 }
