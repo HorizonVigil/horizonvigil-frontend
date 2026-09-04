@@ -61,9 +61,9 @@ export function KubernetesSummary({ containers }: { containers: ContainersDash |
       </div>
       {types.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-1.5">
-          {types.slice(0, 6).map((t) => (
-            <li key={t.key} className="text-[11px] rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-slate-500 dark:text-slate-400">
-              {t.displayName} · {n(t.count).toLocaleString()}
+          {types.slice(0, 6).map((t, i) => (
+            <li key={t.key || `type-${i}`} className="text-[11px] rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-slate-500 dark:text-slate-400">
+              {String(t.displayName ?? t.key ?? 'type')} · {n(t.count).toLocaleString()}
             </li>
           ))}
         </ul>

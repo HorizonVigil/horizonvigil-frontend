@@ -27,8 +27,8 @@ export function TopProblemAccounts({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {rows.map((r) => (
-              <tr key={r.connectionId}>
+            {rows.map((r, i) => (
+              <tr key={r.connectionId || `row-${i}`}>
                 <td className="py-2 pr-3">
                   <button
                     type="button"

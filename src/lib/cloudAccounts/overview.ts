@@ -85,8 +85,8 @@ export function normalizeDashboard(raw: Partial<AwsAccountsDashboard> | null | u
     rotationDue: num(d.rotationDue),
     recentActivity: arr<AwsAccountsDashboard['recentActivity'][number]>(d.recentActivity)
       .filter((e) => e && typeof e === 'object')
-      .map((e) => ({
-        id: String(e.id ?? Math.random()),
+      .map((e, i) => ({
+        id: String(e.id ?? `act-${i}`),
         action: String(e.action ?? 'activity'),
         targetId: e.targetId ?? null,
         occurredAt: typeof e.occurredAt === 'string' ? e.occurredAt : new Date(0).toISOString(),
@@ -534,16 +534,16 @@ export interface TimelineEntry {
 export function mergeActivity(dashes: ProviderDashes, limit = 12): TimelineEntry[] {
   const all: TimelineEntry[] = [];
   for (const p of PROVIDERS) {
-    for (const e of arr<AwsAccountsDashboard['recentActivity'][number]>(dashes[p]?.recentActivity)) {
-      if (!e) continue;
+    arr<AwsAccountsDashboard['recentActivity'][number]>(dashes[p]?.recentActivity).forEach((e, i) => {
+      if (!e) return;
       all.push({
-        id: `${p}-${e.id ?? Math.random()}`,
+        id: `${p}-${e.id ?? `i${i}`}`,
         provider: p,
         action: String(e.action ?? 'activity'),
         occurredAt: typeof e.occurredAt === 'string' ? e.occurredAt : '',
         actorEmail: typeof e.actorEmail === 'string' ? e.actorEmail : null,
       });
-    }
+    });
   }
   return all.sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1)).slice(0, limit);
 }
