@@ -5,7 +5,7 @@
  * on error (spec §50) and the whole tab has an honest empty state when
  * nothing is connected yet (spec §51).
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { StatCard } from '../StatCard';
 import { StatCardSkeleton, CardSkeleton } from '../Skeleton';
@@ -24,8 +24,8 @@ import {
   summarizeBudgets,
   optimizationByCategory,
   biggestChanges,
-  type Provider,
 } from '../../lib/finops/overview';
+import type { Provider, ResolvedGroupFilter } from '../../lib/finops/groupFilter';
 import {
   CostTrendPanel, CostByCloudPanel, CostByAccountPanel, CostByServicePanel, CostByRegionPanel, CostByEnvironmentPanel,
   BudgetForecastPanel, AnomaliesPanel, OptimizationPanel, CostChangesPanel,
@@ -33,12 +33,15 @@ import {
 
 const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
 
-export function FinOpsOverviewTab() {
-  const { region, account, dateRange, refreshToken, connections } = useFilters();
-  const [provider, setProvider] = useState<Provider | null>(null);
-  const [environment, setEnvironment] = useState<string>('all');
+interface FinOpsOverviewTabProps {
+  /** Owned by FinOps.tsx now — shared with Cost Management/Cost Optimization, not private to this tab. The Environment dropdown itself is rendered once in FinOps.tsx, not here — only the Cloud filter has an in-tab control (clicking a CostByCloudPanel card), so only that setter is needed. */
+  groupFilter: ResolvedGroupFilter;
+  onProviderChange: (p: Provider | null) => void;
+}
 
-  const environments = useMemo(() => [...new Set(connections.map((c) => c.environment))].sort(), [connections]);
+export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverviewTabProps) {
+  const { region, account, dateRange, refreshToken, connections } = useFilters();
+  const { provider, environment, connectionIds: filteredConnectionIds } = groupFilter;
 
   // getCostAnalytics accepts a `connectionIds` list, so the Cloud + Environment
   // filters can properly scope service/account/region breakdowns to a whole
@@ -46,11 +49,6 @@ export function FinOpsOverviewTab() {
   // getCostAnomalies and getSavingsOpportunities only take one connectionId
   // each, so neither filter can narrow the trend/anomalies/savings panels the
   // same way -- those stay at whatever the Account filter picked.
-  const filteredConnectionIds = useMemo(() => {
-    if (!provider && environment === 'all') return undefined;
-    const ids = connections.filter((c) => (!provider || c.provider === provider) && (environment === 'all' || c.environment === environment)).map((c) => c.id);
-    return ids;
-  }, [provider, environment, connections]);
 
   const query = useQuery({
     queryKey: ['finops', 'overview', refreshToken, region, account, dateRange, provider, environment],
@@ -164,20 +162,6 @@ export function FinOpsOverviewTab() {
         </div>
       )}
 
-      {environments.length > 1 && (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Environment</span>
-          <select
-            value={environment}
-            onChange={(e) => setEnvironment(e.target.value)}
-            className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${environment !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}
-          >
-            <option value="all">All environments</option>
-            {environments.map((e) => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
-      )}
-
       {/* KPI strip (spec §9) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard
@@ -200,7 +184,7 @@ export function FinOpsOverviewTab() {
       </div>
 
       <SectionBoundary name="cost by cloud">
-        <CostByCloudPanel bars={providerBars} activeFilter={provider} onSelect={setProvider} />
+        <CostByCloudPanel bars={providerBars} activeFilter={provider} onSelect={onProviderChange} />
       </SectionBoundary>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

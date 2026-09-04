@@ -12,6 +12,8 @@ import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
 import { money as formatMoney } from '../lib/format';
+import { filterByGroup, type ResolvedGroupFilter } from '../lib/finops/groupFilter';
+import { PROVIDER_LABEL } from '../lib/finops/overview';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -58,9 +60,16 @@ const TAB_TO_NAV_LABEL: Partial<Record<Tab, string>> = {
 };
 
 /** Cost Optimization section of FinOps — unchanged from when this was its own top-level page, minus its own FilterBar (FinOps.tsx renders one shared bar for all three sections now). Still keyed on navConfig icon 'cost' (FinOps' single merged icon) for RBAC lookups. */
-export function CostOptimizationBody() {
+export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGroupFilter }) {
   const { account, refreshToken } = useFilters();
   const { toast } = useToast();
+  // Every one of this page's endpoints only accepts a single connectionId,
+  // not a list -- so the Cloud/Environment group filter can't be sent as a
+  // request param the way the single-account FilterBar selection is. Instead,
+  // when Account is "all" and the group filter is active, rows are fetched
+  // unscoped and narrowed client-side by their own connection_id.
+  const groupIds = account === 'all' ? groupFilter.connectionIds : undefined;
+  const groupFilterActive = Boolean(groupFilter.provider || groupFilter.environment !== 'all');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const canSeeNavTab = useSubmenuAccess('cost');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t] ?? t), [canSeeNavTab]);
@@ -219,7 +228,7 @@ export function CostOptimizationBody() {
       if (requestId !== loadRequestRef.current) return;
 
       setDashboard(dash);
-      setSavingsOpportunities(opportunities.items);
+      setSavingsOpportunities(filterByGroup(opportunities.items, groupIds));
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
 
@@ -229,7 +238,7 @@ export function CostOptimizationBody() {
           : 'Could not load cost optimization data.',
       );
     }
-  }, [account]);
+  }, [account, groupIds]);
 
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -275,7 +284,7 @@ export function CostOptimizationBody() {
     void call
       .then(res => {
         if (cancelled || requestId !== tabRequestRef.current) return;
-        setTabRows(res.items);
+        setTabRows(filterByGroup(res.items, groupIds));
       })
       .catch(err => {
         if (cancelled || requestId !== tabRequestRef.current) return;
@@ -295,7 +304,7 @@ export function CostOptimizationBody() {
     return () => {
       cancelled = true;
     };
-  }, [tab, account, refreshToken]);
+  }, [tab, account, refreshToken, groupIds]);
 
 
   useEffect(() => {
@@ -312,7 +321,7 @@ export function CostOptimizationBody() {
       .getCostAnomalies({ connectionId, limit: 200 })
       .then(res => {
         if (cancelled || requestId !== anomalyRequestRef.current) return;
-        setAnomalies(res.items);
+        setAnomalies(filterByGroup(res.items, groupIds));
       })
       .catch(err => {
         if (cancelled || requestId !== anomalyRequestRef.current) return;
@@ -327,7 +336,7 @@ export function CostOptimizationBody() {
     return () => {
       cancelled = true;
     };
-  }, [tab, account, refreshToken]);
+  }, [tab, account, refreshToken, groupIds]);
 
 
   async function handleAnomalyStatus(
@@ -348,7 +357,7 @@ export function CostOptimizationBody() {
         limit: 200,
       });
 
-      setAnomalies(res.items);
+      setAnomalies(filterByGroup(res.items, groupIds));
     } catch (err) {
       setAnomalyError(
         err instanceof Error
@@ -361,8 +370,16 @@ export function CostOptimizationBody() {
   }
 
 
-  const potentialMonthly = dashboard?.totalPotentialMonthlySavings ?? 0;
+  // dashboard.totalPotentialMonthlySavings/openRecommendations come from a
+  // whole-org endpoint with no connectionId/group param at all -- so they
+  // can't respect the Account or Cloud/Environment filter. savingsOpportunities
+  // is already fetched scoped by both (server-side connectionId, then
+  // client-side group filtering above), so these three are derived from it
+  // instead -- real numbers that actually track the active filters, rather
+  // than an org-wide total silently ignoring them.
+  const potentialMonthly = useMemo(() => savingsOpportunities.reduce((s, r) => s + r.potential_monthly_savings, 0), [savingsOpportunities]);
   const potentialAnnual = potentialMonthly * 12;
+  const openRecommendationsCount = savingsOpportunities.length;
 
   async function markDone(
     id: string,
@@ -439,7 +456,7 @@ export function CostOptimizationBody() {
         tab === 'Savings Plans' ? api.getSavingsPlans({ ...params, status: 'open' }) :
         api.getOptimizationHistory(params);
       const res = await call;
-      setTabRows(res.items);
+      setTabRows(filterByGroup(res.items, groupIds));
     }
   }
 
@@ -637,7 +654,7 @@ export function CostOptimizationBody() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <StatCard label="Potential Monthly Savings" value={money(potentialMonthly)} />
         <StatCard label="Annualized Savings" value={money(potentialAnnual)} />
-        <StatCard label="Open Opportunities" value={String(dashboard?.openRecommendations ?? 0)} />
+        <StatCard label="Open Opportunities" value={String(openRecommendationsCount)} />
         <StatCard label="High Priority" value={String(highPriorityCount)} />
       </div>
 
@@ -656,13 +673,19 @@ export function CostOptimizationBody() {
         ))}
       </div>
 
+      {groupFilterActive && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-3">
+          Scoped to {groupFilter.provider ? PROVIDER_LABEL[groupFilter.provider] : 'all clouds'}{groupFilter.environment !== 'all' ? ` · ${groupFilter.environment}` : ''}.
+        </p>
+      )}
+
       {tab === 'Overview' ? (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-          <p>{dashboard?.openRecommendations ?? 0} open recommendation{dashboard?.openRecommendations === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
+          <p>{openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account — from your discovered resource inventory (idle instances, unattached volumes, unreleased IPs, stale snapshots), and from AWS Cost Explorer's own Reserved Instance and Savings Plan recommendation APIs. RI/Savings Plan recommendations only appear once an account has 30 days of steady enough on-demand usage for AWS to have something to recommend — a new or low-usage account legitimately shows none yet, which is expected, not a bug.</p>
           <p className="mt-2">HorizonVigil only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you its details so you can action it yourself.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
-            <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection on the Cost Management page.</p>
+            <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} org-wide — see Cost Anomaly Detection below (this count itself isn't scoped by the Cloud/Environment filter; the list below is).</p>
           )}
         </div>
       ) : tab === 'Cost Anomalies' ? (

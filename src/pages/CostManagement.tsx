@@ -12,6 +12,8 @@ import { useOrg } from '../lib/orgContext';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
 import { money } from '../lib/format';
+import { filterByGroup, type ResolvedGroupFilter } from '../lib/finops/groupFilter';
+import { PROVIDER_LABEL } from '../lib/finops/overview';
 
 const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as const;
 
@@ -39,9 +41,16 @@ function aggregateDaily(rows: CostSnapshot[]): { date: string; cost: number }[] 
 }
 
 /** Cost Management section of FinOps — unchanged from when this was its own top-level page, minus its own FilterBar (FinOps.tsx renders one shared bar for all three sections now). */
-export function CostManagementBody() {
+export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroupFilter }) {
   // Account + Region filters live in the global FilterBar now.
   const { region, account, dateRange, refreshToken, connections } = useFilters();
+  // The single-account FilterBar selection takes precedence when set; the
+  // Cloud/Environment group filter only narrows anything when Account is
+  // "all". getCostAnalytics takes a real connectionIds list, so that one is
+  // scoped server-side; getCostExplorer only takes a single connectionId, so
+  // its rows are fetched unscoped and filtered client-side by connection_id.
+  const groupIds = account === 'all' ? groupFilter.connectionIds : undefined;
+  const groupFilterActive = Boolean(groupFilter.provider || groupFilter.environment !== 'all');
   const { currentOrg, folders, projects } = useOrg();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const canSeeTab = useSubmenuAccess('cost');
@@ -297,7 +306,7 @@ export function CostManagementBody() {
           from,
           to,
           region: regionParam,
-          connectionIds: connectionId ? [connectionId] : undefined,
+          connectionIds: connectionId ? [connectionId] : groupIds,
         }),
         api.getCostForecast({ region: regionParam }),
         api.getCostExplorer({
@@ -313,7 +322,7 @@ export function CostManagementBody() {
 
       setAnalytics(analyticsRes);
       setForecast(forecastRes);
-      setDaily(aggregateDaily(explorerRes.items));
+      setDaily(aggregateDaily(filterByGroup(explorerRes.items, groupIds)));
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
       setLoadError(
@@ -324,7 +333,7 @@ export function CostManagementBody() {
         setLoading(false);
       }
     }
-  }, [dateRange, region, account]);
+  }, [dateRange, region, account, groupIds]);
 
 
   useEffect(() => { void load(); }, [load, refreshToken]);
@@ -453,6 +462,12 @@ export function CostManagementBody() {
           </button>
         ))}
       </div>
+
+      {groupFilterActive && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-3">
+          Scoped to {groupFilter.provider ? PROVIDER_LABEL[groupFilter.provider] : 'all clouds'}{groupFilter.environment !== 'all' ? ` · ${groupFilter.environment}` : ''} — applies to Cost Explorer and Cost Analytics. Forecast, Budgets, Cost Allocation/Chargeback/Showback, and the CSV export aren't scoped by this filter (their endpoints don't support per-connection grouping).
+        </p>
+      )}
 
       {tab === 'Cost Explorer' && (
         <>
