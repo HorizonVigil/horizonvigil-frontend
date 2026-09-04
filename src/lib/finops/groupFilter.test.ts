@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupConnectionIds, filterByGroup } from './groupFilter';
+import { groupConnectionIds } from './groupFilter';
 
 function conn(id: string, provider: 'aws' | 'azure' | 'gcp', environment = 'production') {
   return { id, provider, environment };
@@ -30,21 +30,5 @@ describe('groupConnectionIds', () => {
 
   it('returns [] when nothing matches, not undefined (still an active filter)', () => {
     expect(groupConnectionIds({ provider: 'gcp', environment: 'all' }, connections)).toEqual([]);
-  });
-});
-
-describe('filterByGroup', () => {
-  const rows = [{ connection_id: 'c1', v: 1 }, { connection_id: 'c2', v: 2 }, { connection_id: 'c3', v: 3 }];
-
-  it('is a no-op when connectionIds is undefined', () => {
-    expect(filterByGroup(rows, undefined)).toBe(rows);
-  });
-
-  it('keeps only rows whose connection_id is in the list', () => {
-    expect(filterByGroup(rows, ['c1', 'c3'])).toEqual([{ connection_id: 'c1', v: 1 }, { connection_id: 'c3', v: 3 }]);
-  });
-
-  it('returns [] when the filter matches no connections at all', () => {
-    expect(filterByGroup(rows, [])).toEqual([]);
   });
 });

@@ -12,7 +12,7 @@ import { useOrg } from '../lib/orgContext';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
 import { money } from '../lib/format';
-import { filterByGroup, type ResolvedGroupFilter } from '../lib/finops/groupFilter';
+import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
 
 const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as const;
@@ -236,8 +236,7 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
   // product meaning (Allocation: neutral breakdown; Chargeback: "amount
   // owed" per cost center; Showback: visibility-only, non-billing). There's
   // no backend endpoint that lists which tag keys exist, so this is a
-  // typeahead over common ones rather than a populated dropdown, and none of
-  // the three are scoped by the Account filter (none take a connectionId).
+  // typeahead over common ones rather than a populated dropdown.
   const allocationMode: 'allocation' | 'chargeback' | 'showback' = tab === 'Chargeback' ? 'chargeback' : tab === 'Showback' ? 'showback' : 'allocation';
   const [tagKey, setTagKey] = useState('CostCenter');
   const [allocation, setAllocation] = useState<CostAllocation | null>(null);
@@ -263,13 +262,14 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
     setAllocationError(null);
 
     const { from, to } = rangeToFromTo(dateRange);
+    const connectionIds = account === 'all' ? groupIds : [account];
 
     const call =
       allocationMode === 'chargeback'
-        ? api.getChargeback({ tagKey: key, from, to })
+        ? api.getChargeback({ tagKey: key, from, to, connectionIds })
         : allocationMode === 'showback'
-          ? api.getShowback({ tagKey: key, from, to })
-          : api.getCostAllocation({ tagKey: key, from, to });
+          ? api.getShowback({ tagKey: key, from, to, connectionIds })
+          : api.getCostAllocation({ tagKey: key, from, to, connectionIds });
 
     void call
       .then(result => {
@@ -288,7 +288,7 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
           setAllocationLoading(false);
         }
       });
-  }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken, allocationRetryToken]);
+  }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken, allocationRetryToken, account, groupIds]);
 
 
   const load = useCallback(async () => {
@@ -308,9 +308,10 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
           region: regionParam,
           connectionIds: connectionId ? [connectionId] : groupIds,
         }),
-        api.getCostForecast({ region: regionParam }),
+        api.getCostForecast({ region: regionParam, connectionIds: groupIds }),
         api.getCostExplorer({
           connectionId,
+          connectionIds: groupIds,
           region: regionParam,
           from,
           to,
@@ -322,7 +323,7 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
 
       setAnalytics(analyticsRes);
       setForecast(forecastRes);
-      setDaily(aggregateDaily(filterByGroup(explorerRes.items, groupIds)));
+      setDaily(aggregateDaily(explorerRes.items));
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
       setLoadError(
@@ -345,7 +346,9 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
 
     try {
       const { from, to } = rangeToFromTo(dateRange);
-      const { blob, filename } = await api.downloadCostReportCsv({ from, to });
+      const connectionId = account === 'all' ? undefined : account;
+      const regionParam = region === 'all' ? undefined : region;
+      const { blob, filename } = await api.downloadCostReportCsv({ from, to, region: regionParam, connectionIds: connectionId ? [connectionId] : groupIds });
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -465,7 +468,7 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
 
       {groupFilterActive && (
         <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-3">
-          Scoped to {groupFilter.provider ? PROVIDER_LABEL[groupFilter.provider] : 'all clouds'}{groupFilter.environment !== 'all' ? ` · ${groupFilter.environment}` : ''} — applies to Cost Explorer and Cost Analytics. Forecast, Budgets, Cost Allocation/Chargeback/Showback, and the CSV export aren't scoped by this filter (their endpoints don't support per-connection grouping).
+          Scoped to {groupFilter.provider ? PROVIDER_LABEL[groupFilter.provider] : 'all clouds'}{groupFilter.environment !== 'all' ? ` · ${groupFilter.environment}` : ''} — applies everywhere on this page except Budgets (budgets have their own org/folder/project/account scope, a different dimension from Cloud/Environment).
         </p>
       )}
 

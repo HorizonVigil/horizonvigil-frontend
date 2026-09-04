@@ -95,6 +95,12 @@ function qs(params: Record<string, string | number | boolean | undefined>): stri
   return s ? `?${s}` : '';
 }
 
+/** RecommendationListParams' one array field (connectionIds — the FinOps Cloud/Environment group filter) can't go through qs() directly, so it's joined into the same connection_ids convention getCostAnalytics/getCostExplorer/etc. use. */
+function recQs(params: RecommendationListParams): string {
+  const { connectionIds, ...rest } = params;
+  return qs({ ...rest, connection_ids: connectionIds?.join(',') });
+}
+
 class ApiClient {
   private currentOrgId: string | null = localStorage.getItem(CURRENT_ORG_STORAGE_KEY);
 
@@ -499,9 +505,9 @@ class ApiClient {
 
   // ── cost-management-api ──────────────────────────────────────────────────
 
-  getCostAllocation(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation>('costManagement', `/api/cost-management/allocation${qs(params)}`); }
-  getChargeback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { currency: string; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/chargeback${qs(params)}`); }
-  getShowback(params: { tagKey?: string; from?: string; to?: string } = {}) { return this.get<CostAllocation & { billable: false; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/showback${qs(params)}`); }
+  getCostAllocation(params: { tagKey?: string; from?: string; to?: string; connectionIds?: string[] } = {}) { return this.get<CostAllocation>('costManagement', `/api/cost-management/allocation${qs({ tagKey: params.tagKey, from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`); }
+  getChargeback(params: { tagKey?: string; from?: string; to?: string; connectionIds?: string[] } = {}) { return this.get<CostAllocation & { currency: string; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/chargeback${qs({ tagKey: params.tagKey, from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`); }
+  getShowback(params: { tagKey?: string; from?: string; to?: string; connectionIds?: string[] } = {}) { return this.get<CostAllocation & { billable: false; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/showback${qs({ tagKey: params.tagKey, from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`); }
   getCostAnalytics(params: { from?: string; to?: string; region?: string; connectionIds?: string[] } = {}) {
     return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`);
   }
@@ -513,25 +519,25 @@ class ApiClient {
     return this.put<Budget>('costManagement', `/api/cost-management/budgets/${id}`, data);
   }
   deleteBudget(id: string) { return this.delete<{ deleted: string }>('costManagement', `/api/cost-management/budgets/${id}`); }
-  getCostExplorer(params: { connectionId?: string; from?: string; to?: string; service?: string; region?: string; page?: number; limit?: number } = {}) {
-    return this.get<Paginated<CostSnapshot>>('costManagement', `/api/cost-management/explorer${qs(params)}`);
+  getCostExplorer(params: { connectionId?: string; connectionIds?: string[]; from?: string; to?: string; service?: string; region?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<CostSnapshot>>('costManagement', `/api/cost-management/explorer${qs({ connectionId: params.connectionId, connection_ids: params.connectionIds?.join(','), from: params.from, to: params.to, service: params.service, region: params.region, page: params.page, limit: params.limit })}`);
   }
-  getCostForecast(params: { region?: string } = {}) {
-    return this.get<{ method: string; mtdSpend: number; dailyRate: number; daysElapsed: number; daysInMonth: number; projectedTotal: number; currency: string }>('costManagement', `/api/cost-management/forecast${qs(params)}`);
+  getCostForecast(params: { region?: string; connectionIds?: string[] } = {}) {
+    return this.get<{ method: string; mtdSpend: number; dailyRate: number; daysElapsed: number; daysInMonth: number; projectedTotal: number; currency: string }>('costManagement', `/api/cost-management/forecast${qs({ region: params.region, connection_ids: params.connectionIds?.join(',') })}`);
   }
-  async downloadCostReportCsv(params: { from?: string; to?: string } = {}) {
-    return this.downloadRaw('costManagement', `/api/cost-management/reports/export${qs({ format: 'csv', ...params })}`, 'cost-report.csv');
+  async downloadCostReportCsv(params: { from?: string; to?: string; region?: string; connectionIds?: string[] } = {}) {
+    return this.downloadRaw('costManagement', `/api/cost-management/reports/export${qs({ format: 'csv', from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`, 'cost-report.csv');
   }
 
   // ── cost-optimization-api ────────────────────────────────────────────────
 
-  getCostOptimizationDashboard() { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number; openAnomalies: number }>('costOptimization', '/api/cost-optimization/dashboard'); }
-  getSavingsOpportunities(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-opportunities${qs(params)}`); }
-  getRightsizing(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/rightsizing${qs(params)}`); }
-  getIdleResources(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/idle-resources${qs(params)}`); }
-  getReservedInstances(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/reserved-instances${qs(params)}`); }
-  getSavingsPlans(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-plans${qs(params)}`); }
-  getOptimizationHistory(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/optimization-history${qs(params)}`); }
+  getCostOptimizationDashboard(connectionIds?: string[]) { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number; openAnomalies: number }>('costOptimization', `/api/cost-optimization/dashboard${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  getSavingsOpportunities(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-opportunities${recQs(params)}`); }
+  getRightsizing(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/rightsizing${recQs(params)}`); }
+  getIdleResources(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/idle-resources${recQs(params)}`); }
+  getReservedInstances(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/reserved-instances${recQs(params)}`); }
+  getSavingsPlans(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-plans${recQs(params)}`); }
+  getOptimizationHistory(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/optimization-history${recQs(params)}`); }
   updateSavingsOpportunity(id: string, status: 'applied' | 'dismissed') { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}`, { status }); }
   /** Skips a recommendation from the "open" views for a stated reason/duration without dismissing it outright — it re-surfaces on its own once excluded_until passes (or never, for a permanent exclusion). */
   excludeSavingsOpportunity(id: string, data: { reason: ExclusionReason; justification?: string; duration: ExclusionDuration; until?: string }) {
@@ -550,8 +556,8 @@ class ApiClient {
   generateRecommendations(connectionId?: string) {
     return this.post<{ connectionsScanned: number; flagged: number; cleared: number }>('costOptimization', '/api/cost-optimization/generate', connectionId ? { connectionId } : {});
   }
-  getCostAnomalies(params: { connectionId?: string; status?: string; service?: string; page?: number; limit?: number } = {}) {
-    return this.get<Paginated<CostAnomaly>>('costOptimization', `/api/cost-optimization/anomalies${qs(params)}`);
+  getCostAnomalies(params: { connectionId?: string; connectionIds?: string[]; status?: string; service?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<CostAnomaly>>('costOptimization', `/api/cost-optimization/anomalies${qs({ connectionId: params.connectionId, connection_ids: params.connectionIds?.join(','), status: params.status, service: params.service, page: params.page, limit: params.limit })}`);
   }
   updateCostAnomaly(id: string, status: 'acknowledged' | 'resolved') { return this.patch<CostAnomaly>('costOptimization', `/api/cost-optimization/anomalies/${id}`, { status }); }
   // Re-runs day-over-day spike detection over cost_snapshots — called automatically after a cost sync completes (see AwsAccountDetail.tsx's syncCost).
@@ -1188,7 +1194,7 @@ export interface CostRecommendation {
   excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
   assigned_to: string | null; last_notified_at: string | null; last_notified_by: string | null;
 }
-export type RecommendationListParams = { connectionId?: string; category?: string; priority?: string; status?: string; page?: number; limit?: number }
+export type RecommendationListParams = { connectionId?: string; connectionIds?: string[]; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
 
 export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume' | 'delete_snapshot' | 'deregister_ami' | 'resize_instance';

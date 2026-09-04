@@ -5,7 +5,8 @@
  * on error (spec §50) and the whole tab has an honest empty state when
  * nothing is connected yet (spec §51).
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { StatCard } from '../StatCard';
 import { StatCardSkeleton, CardSkeleton } from '../Skeleton';
@@ -28,7 +29,7 @@ import {
 import type { Provider, ResolvedGroupFilter } from '../../lib/finops/groupFilter';
 import {
   CostTrendPanel, CostByCloudPanel, CostByAccountPanel, CostByServicePanel, CostByRegionPanel, CostByEnvironmentPanel,
-  BudgetForecastPanel, AnomaliesPanel, OptimizationPanel, CostChangesPanel,
+  BudgetForecastPanel, AnomaliesPanel, OptimizationPanel, CostChangesPanel, AccountDrilldownDrawer,
 } from './finopsPanels';
 
 const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
@@ -40,15 +41,34 @@ interface FinOpsOverviewTabProps {
 }
 
 export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverviewTabProps) {
-  const { region, account, dateRange, refreshToken, connections } = useFilters();
+  const { region, account, dateRange, refreshToken, connections, setAccount } = useFilters();
   const { provider, environment, connectionIds: filteredConnectionIds } = groupFilter;
+  const navigate = useNavigate();
 
-  // getCostAnalytics accepts a `connectionIds` list, so the Cloud + Environment
-  // filters can properly scope service/account/region breakdowns to a whole
-  // group (not just the single-account FilterBar selection). getCostExplorer,
-  // getCostAnomalies and getSavingsOpportunities only take one connectionId
-  // each, so neither filter can narrow the trend/anomalies/savings panels the
-  // same way -- those stay at whatever the Account filter picked.
+  // Cloud→Account→Service drill-down (spec's click-through beyond the
+  // always-visible panels): clicking a Cost by Account bar fetches just that
+  // one connection's Cost by Service breakdown in a side drawer. Doesn't go
+  // one level further to Resource — cost_snapshots has no resource_id to
+  // drill into (service+account+date grain only), so that stop honestly
+  // isn't offered rather than faked.
+  const [drilldownAccountId, setDrilldownAccountId] = useState<string | null>(null);
+  const drilldown = useQuery({
+    queryKey: ['finops', 'overview', 'drilldown', drilldownAccountId, dateRange, region],
+    queryFn: async () => {
+      const regionParam = region === 'all' ? undefined : region;
+      const { from, to } = rangeToFromTo(dateRange);
+      return api.getCostAnalytics({ from, to, region: regionParam, connectionIds: [drilldownAccountId!] });
+    },
+    enabled: drilldownAccountId !== null,
+    staleTime: 60_000,
+  });
+  const drilldownAccountName = connections.find((c) => c.id === drilldownAccountId)?.name ?? '';
+
+  // Every endpoint here now accepts a `connectionIds` group alongside the
+  // single `connectionId` (horizonvigil-cost's connectionScopeFilter/
+  // resolveConnectionIds) -- the single-account FilterBar selection wins
+  // when set; the Cloud/Environment group filter only applies when Account
+  // is "all".
 
   const query = useQuery({
     queryKey: ['finops', 'overview', refreshToken, region, account, dateRange, provider, environment],
@@ -69,12 +89,12 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverv
         // provider's total visible at once so clicking a *different* one
         // still shows a number.
         filterActive ? api.getCostAnalytics({ from, to, region: regionParam }) : Promise.resolve(null),
-        api.getCostForecast({ region: regionParam }),
-        api.getCostExplorer({ connectionId, region: regionParam, from, to, limit: 200 }),
+        api.getCostForecast({ region: regionParam, connectionIds: analyticsConnectionIds }),
+        api.getCostExplorer({ connectionId, connectionIds: filteredConnectionIds, region: regionParam, from, to, limit: 200 }),
         api.getBudgets({ limit: 200 }),
-        api.getCostOptimizationDashboard(),
-        api.getCostAnomalies({ connectionId, limit: 200 }),
-        api.getSavingsOpportunities({ connectionId, status: 'open', limit: 200 }),
+        api.getCostOptimizationDashboard(analyticsConnectionIds),
+        api.getCostAnomalies({ connectionId, connectionIds: filteredConnectionIds, limit: 200 }),
+        api.getSavingsOpportunities({ connectionId, connectionIds: filteredConnectionIds, status: 'open', limit: 200 }),
       ]);
 
       const scopedAnalytics = ok(analytics);
@@ -193,7 +213,7 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverv
       </div>
 
       <SectionBoundary name="cost by account">
-        <CostByAccountPanel byAccount={d.analytics?.byAccount ?? {}} connections={connections} />
+        <CostByAccountPanel byAccount={d.analytics?.byAccount ?? {}} connections={connections} onSelectAccount={setDrilldownAccountId} />
       </SectionBoundary>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -223,6 +243,18 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverv
         {provider ? ` · ${provider.toUpperCase()}` : ''}
         {environment !== 'all' ? ` · ${environment}` : ''}
       </p>
+
+      <AccountDrilldownDrawer
+        open={drilldownAccountId !== null}
+        onClose={() => setDrilldownAccountId(null)}
+        accountId={drilldownAccountId}
+        accountName={drilldownAccountName}
+        loading={drilldown.isLoading}
+        error={drilldown.isError}
+        byService={drilldown.data?.byService ?? {}}
+        totalCost={drilldown.data?.totalCost ?? 0}
+        onViewSecurity={(id) => { setAccount(id); navigate('/vulnerability-management'); }}
+      />
     </div>
   );
 }

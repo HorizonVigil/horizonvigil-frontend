@@ -3,6 +3,7 @@ import { Donut } from '../charts/Donut';
 import { BarChart } from '../charts/BarChart';
 import { LineChart } from '../charts/LineChart';
 import { Badge } from '../Badge';
+import { Drawer } from '../Drawer';
 import { EmptyState } from '../EmptyState';
 import { Icon } from '../icons';
 import { money } from '../../lib/format';
@@ -80,13 +81,90 @@ export function CostByCloudPanel({
   );
 }
 
-/** Spec §13 — cost by account/subscription/project, top 10. */
-export function CostByAccountPanel({ byAccount, connections }: { byAccount: Record<string, number>; connections: UnifiedAccountRow[] }) {
+/** Spec §13 — cost by account/subscription/project, top 10. Clicking a bar drills into that one account's own Cost by Service breakdown (spec's Cloud→Account→Service flow) when `onSelectAccount` is given. */
+export function CostByAccountPanel({ byAccount, connections, onSelectAccount }: { byAccount: Record<string, number>; connections: UnifiedAccountRow[]; onSelectAccount?: (connectionId: string) => void }) {
   const bars = costByAccountBars(byAccount, connections, 10);
+  // costByAccountBars resolves each bar's label to a connection's display
+  // name (falling back to the raw key when unresolved) — reversed here by
+  // name so a bar click can drill into that connection. A resolved bar
+  // always has a connection; only the raw-key fallback wouldn't, and
+  // clicking it is a no-op below rather than drilling into nothing.
+  const byName = new Map(connections.map((c) => [c.name, c]));
   return (
     <SectionCard title="Cost by Account" icon="building">
-      {bars.length === 0 ? <EmptyState icon="building" title="No cost data yet" /> : <BarChart data={bars} valueFormatter={money} />}
+      {bars.length === 0 ? (
+        <EmptyState icon="building" title="No cost data yet" />
+      ) : (
+        <BarChart
+          data={bars}
+          valueFormatter={money}
+          onBarClick={onSelectAccount ? (label) => { const conn = byName.get(label); if (conn) onSelectAccount(conn.id); } : undefined}
+        />
+      )}
     </SectionCard>
+  );
+}
+
+/**
+ * Cloud→Account→Service drill-down (spec's requested click-through, one
+ * level past what the always-visible panels show): opens when a Cost by
+ * Account bar is clicked, fetching that one connection's own Cost by
+ * Service breakdown. Resource-level drill isn't offered here — cost_snapshots
+ * is service+account+date grain, with no resource_id to drill into further.
+ */
+export function AccountDrilldownDrawer({
+  open,
+  onClose,
+  accountId,
+  accountName,
+  loading,
+  error,
+  byService,
+  totalCost,
+  onViewSecurity,
+}: {
+  open: boolean;
+  onClose: () => void;
+  accountId: string | null;
+  accountName: string;
+  loading: boolean;
+  error: boolean;
+  byService: Record<string, number>;
+  totalCost: number;
+  /** Sets the shared Account filter to this connection and navigates to Vulnerability Management — real cross-module scoping (same global filter every module reads), not just a bare link. */
+  onViewSecurity: (connectionId: string) => void;
+}) {
+  const bars = recordToBars(byService, 10);
+  return (
+    <Drawer open={open} onClose={onClose} title={`Cost by Service — ${accountName}`}>
+      {loading ? (
+        <p className="text-sm text-slate-400">Loading…</p>
+      ) : error ? (
+        <p className="text-sm text-amber-600 dark:text-amber-400">Couldn't load this account's cost breakdown.</p>
+      ) : bars.length === 0 ? (
+        <EmptyState icon="chart-bar" title="No cost data yet" description="This account has no synced cost for the selected date range." />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="text-sm text-slate-500 dark:text-slate-400">Total: <span className="font-semibold text-slate-900 dark:text-white">{money(totalCost)}</span> for the selected range</div>
+          <Donut data={bars} showPercent size={150} />
+          <ul className="flex flex-col gap-2 text-sm">
+            {bars.map((b) => (
+              <li key={b.label} className="flex justify-between"><span className="text-slate-600 dark:text-slate-300">{b.label}</span><span className="tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(b.value)}</span></li>
+            ))}
+          </ul>
+          <p className="text-xs text-slate-400">Resource-level cost isn't available — cost data is tracked per service/account/day, not per resource.</p>
+        </div>
+      )}
+      {accountId && !loading && (
+        <button
+          type="button"
+          onClick={() => onViewSecurity(accountId)}
+          className="mt-4 text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+        >
+          View security posture for this account →
+        </button>
+      )}
+    </Drawer>
   );
 }
 
