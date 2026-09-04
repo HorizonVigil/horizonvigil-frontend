@@ -1,33 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useOrg } from '../lib/orgContext';
 import { useAuth } from '../lib/auth';
-import { findActiveModule, isChildActive, canSeeChild, canSeeModule, type Role } from '../lib/navConfig';
+import { findActiveModule } from '../lib/navConfig';
 import { Icon, NAV_ICON_MAP } from './icons';
-
-/** Fixed display order for Sidebar's group dividers within one module's
- * children list -- purely cosmetic, mirrors AppRail's SECTION_ORDER for the
- * same reason: unrelated to NavChild array order or RBAC. Currently only
- * Vulnerability Management's ~100 children use `group`; every other
- * module's children have no `group` and render in one unlabeled bucket,
- * unchanged from before this existed. */
-const GROUP_ORDER = [
-  'Overview', 'Vulnerabilities', 'Assets', 'Source Inventory', 'Security Scanning',
-  'Cloud Security', 'Application Security', 'Code Security',
-  'Container & Kubernetes', 'Infrastructure',
-  'AWS-Native Sources',
-];
-
-function groupByGroup<T extends { group?: string }>(children: T[]): { group: string; children: T[] }[] {
-  const buckets = new Map<string, T[]>();
-  for (const c of children) {
-    const key = c.group ?? '';
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key)!.push(c);
-  }
-  const order = [...GROUP_ORDER, ...[...buckets.keys()].filter(k => k && !GROUP_ORDER.includes(k)), ''];
-  return order.filter(k => buckets.has(k)).map(k => ({ group: k, children: buckets.get(k)! }));
-}
 
 interface SidebarProps {
   /** Below `lg` (1024px) the sidebar is an off-canvas drawer, closed by
@@ -40,21 +16,19 @@ interface SidebarProps {
 }
 
 /**
- * This domain's OWN sidebar — scoped to whichever module AppRail says is
- * active, nothing else. It used to render all 15 modules' full trees at
- * once (an accordion you had to expand/collapse to find anything); now it
- * only ever shows one module's sub-nav, the way a real separate app would.
- * Switching domains happens in AppRail, not here.
+ * This domain's OWN sidebar — the org + folder/project scope picker for
+ * whichever module AppRail says is active. Module switching happens in
+ * AppRail; tab switching within a module happens in that page's own tab bar
+ * (the sidebar used to repeat every module's tab list here too, which was
+ * the same navigation shown twice — removed).
  */
 export function Sidebar({ open, onClose }: SidebarProps) {
-  const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope, menuPermissions } = useOrg();
+  const { orgs, currentOrg, folders, projects, scope, setCurrentOrg, setScope } = useOrg();
   const { signOut, user } = useAuth();
   const location = useLocation();
   const [search, setSearch] = useState('');
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-
-  const role = (currentOrg?.myRole as Role) ?? 'owner';
 
   // Below `lg` the drawer should get out of the way the moment a nav link is
   // actually followed (matches the standard off-canvas-drawer convention) --
@@ -70,16 +44,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }, [open, onClose]);
 
   const activeModule = useMemo(() => findActiveModule(location.pathname), [location.pathname]);
-  const filteredChildren = useMemo(() => {
-    if (!activeModule) return [];
-    // findActiveModule matches on the URL alone, regardless of whether this
-    // user can actually see the module -- landing on a denied route (e.g.
-    // typing /reports directly) must not leak that module's submenu list
-    // into the sidebar even though ProtectedRoute correctly blocks the main
-    // content with AccessDenied.
-    if (!canSeeModule(activeModule, role, menuPermissions)) return [];
-    return activeModule.children.filter(child => canSeeChild(child, role, activeModule.icon, menuPermissions));
-  }, [activeModule, role, menuPermissions]);
 
   const projectCountByFolder = useMemo(() => {
     const counts = new Map<string, number>();
@@ -186,51 +150,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       </div>
 
       {/* This module's own header — the "you are inside a separate app now" cue.
-          Switching to a different app happens in AppRail, not here. */}
+          Switching to a different app happens in AppRail; switching tabs
+          within this module happens in the page's own tab bar. */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <span className="text-slate-500 dark:text-slate-400" aria-hidden="true">
           <Icon name={NAV_ICON_MAP[activeModule.label] ?? 'overview'} size={16} />
         </span>
         <span className="font-semibold text-slate-900 dark:text-white truncate">{activeModule.label}</span>
       </div>
-
-      {filteredChildren.length > 0 && (
-      <nav className="px-2 py-2 flex flex-col gap-0.5 border-b border-slate-200 dark:border-slate-800 max-h-[38vh] overflow-y-auto">
-        {groupByGroup(filteredChildren).map(({ group, children: groupChildren }, i) => (
-          <div key={group || '_ungrouped'} className={i > 0 ? 'mt-2' : ''}>
-            {group && (
-              <div className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                {group}
-              </div>
-            )}
-            {groupChildren.map(child => (
-              <div key={child.label}>
-                {child.action === 'open-chat' ? (
-                  <button
-                    onClick={() => window.dispatchEvent(new CustomEvent('horizonvigil:open-chat'))}
-                    className="w-full text-left truncate rounded-md px-2 py-1.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  >
-                    {child.label}
-                  </button>
-                ) : child.real && child.to ? (
-                  <NavLink
-                    to={child.to}
-                    className={`block truncate rounded-md px-2 py-1.5 text-sm ${isChildActive(child, activeModule.children, location.pathname, location.search, location.hash) ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-                  >
-                    {child.label}
-                  </NavLink>
-                ) : (
-                  <div className="flex items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-sm cursor-default" title="Planned capability">
-                    <span className="truncate text-slate-400 dark:text-slate-600">{child.label}</span>
-                    <span className="shrink-0 text-[9px] uppercase tracking-wide rounded-full px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800/60 text-slate-400 dark:text-slate-600">Planned</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
-      </nav>
-      )}
 
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="relative">

@@ -58,9 +58,9 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     <>
       <div className="flex items-center justify-between gap-3 px-4 sm:px-6 pt-3 pb-1">
         <div className="flex items-center gap-2 min-w-0 flex-1 sm:flex-initial">
-          {/* Sidebar's own nav (module submenu, folders/projects) has no
-              other entry point below `lg` once it's an off-canvas drawer --
-              this button is that entry point, not decorative. */}
+          {/* Sidebar (org switcher + folder/project scope tree) has no other
+              entry point below `lg` once it's an off-canvas drawer -- this
+              button is that entry point, not decorative. */}
           <button
             onClick={onMenuClick}
             className="lg:hidden shrink-0 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
