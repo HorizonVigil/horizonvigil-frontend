@@ -15,6 +15,7 @@ import { EmptyState } from '../EmptyState';
 import { api, friendlyErrorMessage, type AwsOrgHierarchyNode, type ProviderHierarchyNode } from '../../lib/api';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
 import { buildHierarchy, type HierNode } from '../../lib/cloudAccounts/hierarchy';
+import { ProviderChips, type ProviderValue } from './ProviderChips';
 
 function TreeNode({ node, depth, onOpenAccount }: { node: HierNode; depth: number; onOpenAccount: (id: string) => void }) {
   const [open, setOpen] = useState(depth < 2);
@@ -114,6 +115,15 @@ function GenericNode({ node, depth, onOpenAccount }: { node: ProviderHierarchyNo
 export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedAccountRow[]; orgName: string; refreshToken: number }) {
   const navigate = useNavigate();
   const openAccount = (id: string) => navigate(`/cloud-accounts/${id}`);
+  const [provider, setProvider] = useState<ProviderValue | null>(null);
+
+  const counts = useMemo(() => {
+    const c: Partial<Record<ProviderValue, number>> = {};
+    for (const r of rows) c[r.provider] = (c[r.provider] ?? 0) + 1;
+    return c;
+  }, [rows]);
+  const scopedRows = useMemo(() => (provider ? rows.filter((r) => r.provider === provider) : rows), [rows, provider]);
+  const show = (p: ProviderValue) => provider === null || provider === p;
 
   const hier = useQuery({
     queryKey: ['cloud-accounts', 'org-hierarchy', refreshToken],
@@ -141,10 +151,12 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
     enabled: rows.some((r) => r.provider === 'gcp'),
   });
 
-  const tree = useMemo(() => buildHierarchy(orgName, hier.data ?? null, rows), [orgName, hier.data, rows]);
+  const tree = useMemo(() => buildHierarchy(orgName, hier.data ?? null, scopedRows), [orgName, hier.data, scopedRows]);
 
   return (
     <div className="flex flex-col gap-4">
+      <ProviderChips value={provider} onChange={setProvider} counts={counts} />
+
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Organization → Folders → Projects → Accounts</h3>
         {hier.isLoading ? <CardSkeleton lines={5} /> : tree.accountTotal === 0 && tree.children.length === 0 ? (
@@ -154,6 +166,7 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
         )}
       </div>
 
+      {show('aws') && (
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
         <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">AWS Organizations (OU tree)</h3>
         {awsOu.isLoading ? <CardSkeleton lines={4} /> : awsOu.isError ? (
@@ -164,8 +177,9 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
           <p className="text-xs text-slate-400">No live OU tree — connect your AWS Organizations management account and pass it to this view.</p>
         )}
       </div>
+      )}
 
-      {rows.some((r) => r.provider === 'azure') && (
+      {show('azure') && rows.some((r) => r.provider === 'azure') && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">Azure Management Groups</h3>
           {azureH.isLoading ? <CardSkeleton lines={3} /> : azureH.isError ? (
@@ -178,7 +192,7 @@ export function HierarchyPanel({ rows, orgName, refreshToken }: { rows: UnifiedA
         </div>
       )}
 
-      {rows.some((r) => r.provider === 'gcp') && (
+      {show('gcp') && rows.some((r) => r.provider === 'gcp') && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
           <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2">GCP Organization &amp; Folders</h3>
           {gcpH.isLoading ? <CardSkeleton lines={3} /> : gcpH.isError ? (

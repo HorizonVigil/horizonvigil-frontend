@@ -10,16 +10,25 @@ import { EmptyState } from '../EmptyState';
 import { Icon } from '../icons';
 import { api, friendlyErrorMessage } from '../../lib/api';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
+import { ProviderChips, type ProviderValue } from './ProviderChips';
 
 interface Change { id: string; when: string | null; who: string; operation: string; status: string | null; resource: string | null; extra: string | null }
 
 export function ChangesPanel({ rows }: { rows: UnifiedAccountRow[] }) {
+  const [provider, setProvider] = useState<ProviderValue | null>(null);
   const [selected, setSelected] = useState<string>('');
-  const row = useMemo(() => rows.find((r) => r.id === selected), [rows, selected]);
+
+  const counts = useMemo(() => {
+    const c: Partial<Record<ProviderValue, number>> = {};
+    for (const r of rows) c[r.provider] = (c[r.provider] ?? 0) + 1;
+    return c;
+  }, [rows]);
+  const visibleRows = useMemo(() => (provider ? rows.filter((r) => r.provider === provider) : rows), [rows, provider]);
+  const row = useMemo(() => visibleRows.find((r) => r.id === selected), [visibleRows, selected]);
 
   useEffect(() => {
-    if (!selected && rows.length > 0) setSelected(rows[0].id);
-  }, [rows, selected]);
+    if (visibleRows.length > 0 && !visibleRows.some((r) => r.id === selected)) setSelected(visibleRows[0].id);
+  }, [visibleRows, selected]);
 
   const query = useQuery({
     queryKey: ['cloud-accounts', 'changes', selected, row?.provider],
@@ -50,11 +59,12 @@ export function ChangesPanel({ rows }: { rows: UnifiedAccountRow[] }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <ProviderChips value={provider} onChange={setProvider} counts={counts} />
       <div className="flex items-center gap-2 flex-wrap">
         <label className="text-xs text-slate-500 dark:text-slate-400">Environment</label>
         <select value={selected} onChange={(e) => setSelected(e.target.value)}
           className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
-          {rows.map((r) => <option key={r.id} value={r.id}>{r.provider.toUpperCase()} — {r.name}</option>)}
+          {visibleRows.map((r) => <option key={r.id} value={r.id}>{r.provider.toUpperCase()} — {r.name}</option>)}
         </select>
         <span className="text-xs text-slate-400 ml-auto">
           {row?.provider === 'aws' ? 'CloudTrail management events' : row?.provider === 'azure' ? 'Activity Log (control plane)' : 'Admin Activity audit logs'} — last 30 days

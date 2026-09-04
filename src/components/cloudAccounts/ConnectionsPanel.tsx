@@ -4,21 +4,31 @@
  * environments. HorizonVigil has no first-class Connection entity yet, so
  * this is a derived, honest grouping (see lib/cloudAccounts/connections.ts).
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '../Badge';
 import { EmptyState } from '../EmptyState';
 import { Icon } from '../icons';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
 import { deriveConnections, connectionState } from '../../lib/cloudAccounts/connections';
+import { ProviderChips, type ProviderValue } from './ProviderChips';
 
 const STATE_TONE = { connected: 'good', warning: 'warning', error: 'critical', pending: 'neutral' } as const;
 
 export function ConnectionsPanel({ rows, onAddConnection }: { rows: UnifiedAccountRow[]; onAddConnection: () => void }) {
   const navigate = useNavigate();
-  const connections = useMemo(() => deriveConnections(rows), [rows]);
+  const [provider, setProvider] = useState<ProviderValue | null>(null);
 
-  if (connections.length === 0) {
+  const counts = useMemo(() => {
+    const c: Partial<Record<ProviderValue, number>> = {};
+    for (const r of rows) c[r.provider] = (c[r.provider] ?? 0) + 1;
+    return c;
+  }, [rows]);
+
+  const visibleRows = useMemo(() => (provider ? rows.filter((r) => r.provider === provider) : rows), [rows, provider]);
+  const connections = useMemo(() => deriveConnections(visibleRows), [visibleRows]);
+
+  if (rows.length === 0) {
     return (
       <EmptyState icon="cloud" title="No cloud connections yet"
         description="A connection is how HorizonVigil establishes trust with AWS, Azure or GCP — one connection can bring in many accounts."
@@ -28,10 +38,14 @@ export function ConnectionsPanel({ rows, onAddConnection }: { rows: UnifiedAccou
 
   return (
     <div className="flex flex-col gap-3">
+      <ProviderChips value={provider} onChange={setProvider} counts={counts} />
       <p className="text-xs text-slate-400">
         Grouped by how trust was established. An "Organization" connection is a set of AWS cross-account roles sharing one external ID —
         what bulk onboarding from an AWS Organization produces.
       </p>
+      {connections.length === 0 && (
+        <EmptyState icon="cloud" title={`No ${provider?.toUpperCase()} connections`} description="Nothing connected for this provider yet." />
+      )}
       {connections.map((conn) => {
         const state = connectionState(conn);
         return (

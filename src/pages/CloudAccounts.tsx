@@ -18,6 +18,7 @@ import { ChangesPanel } from '../components/cloudAccounts/ChangesPanel';
 import { ActivityPanel } from '../components/cloudAccounts/ActivityPanel';
 import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { BulkOnboardingModal } from '../components/cloudAccounts/BulkOnboardingModal';
+import { ProviderChips } from '../components/cloudAccounts/ProviderChips';
 import { Modal } from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import { TableSkeleton } from '../components/Skeleton';
@@ -803,6 +804,8 @@ export function CloudAccounts() {
       )}
 
       {tab === 'Regions' && (
+        <div className="flex flex-col gap-3">
+        <ProviderChips lockedTo="aws" lockedReason="Azure/GCP scanners operate at subscription/project level, not per region" />
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           <p className="text-xs text-slate-400 px-3 pt-3">Regional coverage for AWS accounts. GCP scanners operate at project level.</p>
           <table className="w-full text-sm">
@@ -827,10 +830,12 @@ export function CloudAccounts() {
             </tbody>
           </table>
         </div>
+        </div>
       )}
 
       {tab === 'Sync Center' && (
         <div className="flex flex-col gap-4">
+          <ProviderChips lockedTo="aws" lockedReason="No permission-validation endpoint for Azure/GCP yet — use Sync Now on the Inventory row" />
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">Is discovery and validation working?</h3>
             <p className="text-xs text-slate-400">

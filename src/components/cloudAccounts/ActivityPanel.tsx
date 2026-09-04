@@ -11,6 +11,7 @@ import { DataTable, type Column } from '../DataTable';
 import { TableSkeleton } from '../Skeleton';
 import { api, friendlyErrorMessage, type ActivityEntry } from '../../lib/api';
 import { formatActivityAction, formatDate } from '../../lib/format';
+import { ProviderChips } from './ProviderChips';
 
 export function ActivityPanel({ refreshToken }: { refreshToken: number }) {
   const navigate = useNavigate();
@@ -39,6 +40,11 @@ export function ActivityPanel({ refreshToken }: { refreshToken: number }) {
 
   return (
     <div className="flex flex-col gap-2">
+      <ProviderChips
+        lockedTo="aws"
+        lockedReason="Per-account only — open the account's own Activity tab"
+        className="mb-1"
+      />
       <p className="text-xs text-slate-400">Connection, discovery, validation and bulk-operation events across AWS accounts. Azure and GCP activity is on each account's own Activity tab.</p>
       <DataTable
         columns={columns}
