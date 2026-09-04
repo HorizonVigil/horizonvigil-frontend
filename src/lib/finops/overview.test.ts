@@ -5,17 +5,21 @@ import {
   aggregateDaily,
   costByCloudBars,
   costByAccountBars,
+  costByEnvironmentBars,
   recordToBars,
   summarizeBudgets,
   optimizationByCategory,
   anomalySeverity,
   sortAnomalies,
   periodOverPeriod,
+  previousRange,
+  percentChange,
+  biggestChanges,
 } from './overview';
 
-function conn(id: string, provider: 'aws' | 'azure' | 'gcp', identifier: string, name = id): UnifiedAccountRow {
+function conn(id: string, provider: 'aws' | 'azure' | 'gcp', identifier: string, name = id, environment = 'production'): UnifiedAccountRow {
   return {
-    id, provider, name, identifier, environment: 'production', status: 'connected', errorMessage: null,
+    id, provider, name, identifier, environment, status: 'connected', errorMessage: null,
     connectionMethod: 'access_key', connectionMethodLabel: 'Access key', region: 'us-east-1', resources: 0, lastSync: null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     raw: {} as any,
@@ -143,5 +147,66 @@ describe('periodOverPeriod', () => {
   it('handles fewer than 2 points without dividing by zero', () => {
     expect(periodOverPeriod([])).toEqual({ current: 0, previous: 0, changePercent: null });
     expect(periodOverPeriod([{ date: '1', cost: 5 }])).toEqual({ current: 5, previous: 0, changePercent: null });
+  });
+});
+
+describe('costByEnvironmentBars', () => {
+  it('sums cost per connection environment', () => {
+    const connections = [conn('c1', 'aws', 'a1', 'A', 'production'), conn('c2', 'aws', 'a2', 'B', 'production'), conn('c3', 'aws', 'a3', 'C', 'staging')];
+    const bars = costByEnvironmentBars({ a1: 30, a2: 20, a3: 10 }, connections);
+    expect(bars).toEqual([{ label: 'production', value: 50 }, { label: 'staging', value: 10 }]);
+  });
+
+  it('drops unresolvable keys', () => {
+    expect(costByEnvironmentBars({ ghost: 100 }, [])).toEqual([]);
+  });
+});
+
+describe('previousRange', () => {
+  it('returns the immediately preceding, equal-length window', () => {
+    expect(previousRange({ from: '2026-09-11', to: '2026-09-20' })).toEqual({ from: '2026-09-01', to: '2026-09-10' });
+  });
+
+  it('handles a single-day range', () => {
+    expect(previousRange({ from: '2026-09-10', to: '2026-09-10' })).toEqual({ from: '2026-09-09', to: '2026-09-09' });
+  });
+
+  it('crosses a month boundary correctly', () => {
+    expect(previousRange({ from: '2026-09-01', to: '2026-09-05' })).toEqual({ from: '2026-08-27', to: '2026-08-31' });
+  });
+});
+
+describe('percentChange', () => {
+  it('computes rounded % change', () => {
+    expect(percentChange(120, 100)).toBe(20);
+    expect(percentChange(80, 100)).toBe(-20);
+  });
+
+  it('is null when there is no previous baseline to compare against', () => {
+    expect(percentChange(50, 0)).toBeNull();
+    expect(percentChange(50, -10)).toBeNull();
+  });
+});
+
+describe('biggestChanges', () => {
+  it('splits services into increases and decreases sorted by dollar impact', () => {
+    const current = { EC2: 200, S3: 40, RDS: 10 };
+    const previous = { EC2: 100, S3: 90, RDS: 10 };
+    const { increases, decreases } = biggestChanges(current, previous);
+    expect(increases).toEqual([{ label: 'EC2', current: 200, previous: 100, delta: 100 }]);
+    expect(decreases).toEqual([{ label: 'S3', current: 40, previous: 90, delta: -50 }]);
+  });
+
+  it('treats a service only present in one period as a full increase or decrease', () => {
+    const { increases, decreases } = biggestChanges({ Lambda: 30 }, { EBS: 15 });
+    expect(increases).toEqual([{ label: 'Lambda', current: 30, previous: 0, delta: 30 }]);
+    expect(decreases).toEqual([{ label: 'EBS', current: 0, previous: 15, delta: -15 }]);
+  });
+
+  it('caps each list at the limit', () => {
+    const current = { a: 10, b: 20, c: 30 };
+    const { increases } = biggestChanges(current, {}, 2);
+    expect(increases).toHaveLength(2);
+    expect(increases[0].label).toBe('c');
   });
 });

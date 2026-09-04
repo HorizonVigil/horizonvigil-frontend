@@ -16,46 +16,61 @@ import { money } from '../../lib/format';
 import { SectionBoundary } from '../cloudAccounts/overview/primitives';
 import {
   rangeToFromTo,
+  previousRange,
+  percentChange,
   aggregateDaily,
   costByCloudBars,
+  costByEnvironmentBars,
   summarizeBudgets,
   optimizationByCategory,
+  biggestChanges,
   type Provider,
 } from '../../lib/finops/overview';
-import { CostTrendPanel, CostByCloudPanel, CostByAccountPanel, CostByServicePanel, BudgetForecastPanel, AnomaliesPanel, OptimizationPanel } from './finopsPanels';
+import {
+  CostTrendPanel, CostByCloudPanel, CostByAccountPanel, CostByServicePanel, CostByRegionPanel, CostByEnvironmentPanel,
+  BudgetForecastPanel, AnomaliesPanel, OptimizationPanel, CostChangesPanel,
+} from './finopsPanels';
 
 const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
 
 export function FinOpsOverviewTab() {
   const { region, account, dateRange, refreshToken, connections } = useFilters();
   const [provider, setProvider] = useState<Provider | null>(null);
+  const [environment, setEnvironment] = useState<string>('all');
 
-  // getCostAnalytics accepts a `connectionIds` list, so the Cloud filter can
-  // properly scope service/account/region breakdowns to a whole provider
-  // (not just the single-account FilterBar selection). getCostExplorer,
+  const environments = useMemo(() => [...new Set(connections.map((c) => c.environment))].sort(), [connections]);
+
+  // getCostAnalytics accepts a `connectionIds` list, so the Cloud + Environment
+  // filters can properly scope service/account/region breakdowns to a whole
+  // group (not just the single-account FilterBar selection). getCostExplorer,
   // getCostAnomalies and getSavingsOpportunities only take one connectionId
-  // each, so the Cloud filter can't narrow the trend/anomalies/savings
-  // panels the same way -- those stay at whatever the Account filter picked.
-  const providerConnectionIds = useMemo(
-    () => (provider ? connections.filter((c) => c.provider === provider).map((c) => c.id) : undefined),
-    [provider, connections],
-  );
+  // each, so neither filter can narrow the trend/anomalies/savings panels the
+  // same way -- those stay at whatever the Account filter picked.
+  const filteredConnectionIds = useMemo(() => {
+    if (!provider && environment === 'all') return undefined;
+    const ids = connections.filter((c) => (!provider || c.provider === provider) && (environment === 'all' || c.environment === environment)).map((c) => c.id);
+    return ids;
+  }, [provider, environment, connections]);
 
   const query = useQuery({
-    queryKey: ['finops', 'overview', refreshToken, region, account, dateRange, provider],
+    queryKey: ['finops', 'overview', refreshToken, region, account, dateRange, provider, environment],
     queryFn: async () => {
       const connectionId = account === 'all' ? undefined : account;
       const regionParam = region === 'all' ? undefined : region;
       const { from, to } = rangeToFromTo(dateRange);
-      const analyticsConnectionIds = connectionId ? [connectionId] : providerConnectionIds;
+      const prev = previousRange({ from, to });
+      const analyticsConnectionIds = connectionId ? [connectionId] : filteredConnectionIds;
+      const filterActive = Boolean(provider || environment !== 'all');
 
-      const [cost, analytics, allProvidersAnalytics, forecast, explorer, budgets, optDash, anomalies, savings] = await Promise.allSettled([
+      const [cost, analytics, previousAnalytics, allProvidersAnalytics, forecast, explorer, budgets, optDash, anomalies, savings] = await Promise.allSettled([
         api.getOverviewCost(analyticsConnectionIds),
         api.getCostAnalytics({ from, to, region: regionParam, connectionIds: analyticsConnectionIds }),
-        // Always org-wide (ignores the Cloud filter) -- this is the one feeding
-        // the provider-comparison cards, which need every provider's total
-        // visible at once so clicking a *different* one still shows a number.
-        provider ? api.getCostAnalytics({ from, to, region: regionParam }) : Promise.resolve(null),
+        api.getCostAnalytics({ from: prev.from, to: prev.to, region: regionParam, connectionIds: analyticsConnectionIds }),
+        // Always org-wide (ignores the Cloud/Environment filters) -- this is the
+        // one feeding the provider-comparison cards, which need every
+        // provider's total visible at once so clicking a *different* one
+        // still shows a number.
+        filterActive ? api.getCostAnalytics({ from, to, region: regionParam }) : Promise.resolve(null),
         api.getCostForecast({ region: regionParam }),
         api.getCostExplorer({ connectionId, region: regionParam, from, to, limit: 200 }),
         api.getBudgets({ limit: 200 }),
@@ -69,9 +84,10 @@ export function FinOpsOverviewTab() {
         cost: ok(cost),
         analytics: scopedAnalytics,
         analyticsError: analytics.status === 'rejected',
-        // When no Cloud filter is active, the scoped call already is the
-        // all-providers view -- no need for a second request.
-        allProvidersByAccount: (provider ? ok(allProvidersAnalytics) : scopedAnalytics)?.byAccount ?? {},
+        previousAnalytics: ok(previousAnalytics),
+        // When no Cloud/Environment filter is active, the scoped call already
+        // is the all-providers view -- no need for a second request.
+        allProvidersByAccount: (filterActive ? ok(allProvidersAnalytics) : scopedAnalytics)?.byAccount ?? {},
         forecast: ok(forecast),
         daily: ok(explorer) ? aggregateDaily(ok(explorer)!.items) : [],
         dailyError: explorer.status === 'rejected',
@@ -89,8 +105,16 @@ export function FinOpsOverviewTab() {
     () => costByCloudBars(query.data?.allProvidersByAccount ?? {}, connections),
     [query.data?.allProvidersByAccount, connections],
   );
+  const environmentBars = useMemo(
+    () => costByEnvironmentBars(query.data?.analytics?.byAccount ?? {}, connections),
+    [query.data?.analytics?.byAccount, connections],
+  );
   const budgetRollup = useMemo(() => summarizeBudgets(query.data?.budgets ?? []), [query.data?.budgets]);
   const optCategoryBars = useMemo(() => optimizationByCategory(query.data?.savings ?? []), [query.data?.savings]);
+  const changes = useMemo(
+    () => biggestChanges(query.data?.analytics?.byService ?? {}, query.data?.previousAnalytics?.byService ?? {}),
+    [query.data?.analytics?.byService, query.data?.previousAnalytics?.byService],
+  );
 
   if (query.isLoading) {
     return (
@@ -129,6 +153,7 @@ export function FinOpsOverviewTab() {
   const hasAnyBilling = totalCost > 0 || d.budgets.length > 0 || (d.cost?.monthToDate ?? 0) > 0;
   const dailyLast = d.daily.at(-1)?.cost ?? 0;
   const anomalyCount = d.anomalies.filter((a) => a.status === 'open').length;
+  const spendChange = d.previousAnalytics ? percentChange(totalCost, d.previousAnalytics.totalCost) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -139,9 +164,29 @@ export function FinOpsOverviewTab() {
         </div>
       )}
 
+      {environments.length > 1 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Environment</span>
+          <select
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value)}
+            className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${environment !== 'all' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}
+          >
+            <option value="all">All environments</option>
+            {environments.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+      )}
+
       {/* KPI strip (spec §9) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="Total Spend (MTD)" value={money(d.cost?.monthToDate ?? d.forecast?.mtdSpend ?? 0)} icon="cost" />
+        <StatCard
+          label="Total Spend"
+          value={money(d.cost?.monthToDate ?? totalCost)}
+          icon="cost"
+          caption={dateRangeToDays(dateRange) === new Date().getDate() ? 'month to date' : `last ${dateRangeToDays(dateRange)}d`}
+          delta={spendChange === null ? undefined : { value: `${spendChange > 0 ? '+' : ''}${spendChange}%`, direction: spendChange > 0 ? 'up' : spendChange < 0 ? 'down' : 'flat', goodDirection: 'down' }}
+        />
         <StatCard label="Daily Spend" value={money(dailyLast)} icon="chart-line" caption="most recent day" />
         <StatCard label="Forecast" value={money(d.forecast?.projectedTotal ?? 0)} icon="trending-up" caption="month-end estimate" />
         <StatCard
@@ -168,6 +213,15 @@ export function FinOpsOverviewTab() {
       </SectionBoundary>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectionBoundary name="cost by region"><CostByRegionPanel byRegion={d.analytics?.byRegion ?? {}} /></SectionBoundary>
+        <SectionBoundary name="cost by environment"><CostByEnvironmentPanel bars={environmentBars} /></SectionBoundary>
+      </div>
+
+      <SectionBoundary name="cost changes">
+        <CostChangesPanel increases={changes.increases} decreases={changes.decreases} hasPrevious={Boolean(d.previousAnalytics && d.previousAnalytics.totalCost > 0)} />
+      </SectionBoundary>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionBoundary name="budget and forecast">
           <BudgetForecastPanel rollup={budgetRollup} budgets={d.budgets} forecast={d.forecast} />
         </SectionBoundary>
@@ -182,7 +236,8 @@ export function FinOpsOverviewTab() {
 
       <p className="text-[11px] text-slate-400 dark:text-slate-500 text-right">
         Updated {new Date(d.fetchedAt).toLocaleTimeString()} · {dateRangeToDays(dateRange)}-day window
-        {provider ? ` · filtered to ${provider.toUpperCase()}` : ''}
+        {provider ? ` · ${provider.toUpperCase()}` : ''}
+        {environment !== 'all' ? ` · ${environment}` : ''}
       </p>
     </div>
   );

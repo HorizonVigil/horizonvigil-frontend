@@ -10,7 +10,6 @@ import { SectionCard, MiniStat } from '../cloudAccounts/overview/primitives';
 import { ProviderMark } from '../cloudAccounts/overview/ProviderMark';
 import type { Provider } from '../../lib/finops/overview';
 import {
-  costByCloudBars,
   costByAccountBars,
   recordToBars,
   summarizeBudgets,
@@ -18,6 +17,7 @@ import {
   anomalySeverity,
   sortAnomalies,
   type BudgetRollup,
+  type CostChange,
 } from '../../lib/finops/overview';
 import type { Budget, CostAnomaly, CostRecommendation } from '../../lib/api';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
@@ -222,6 +222,65 @@ export function OptimizationPanel({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Spec §16 — cost by region. */
+export function CostByRegionPanel({ byRegion }: { byRegion: Record<string, number> }) {
+  const bars = recordToBars(byRegion, 8);
+  return (
+    <SectionCard title="Cost by Region" icon="map-pin">
+      {bars.length === 0 ? <EmptyState icon="map-pin" title="No cost data yet" /> : <BarChart data={bars} valueFormatter={money} />}
+    </SectionCard>
+  );
+}
+
+/** Spec §17 — cost by environment, so non-production spend is visible at a glance. */
+export function CostByEnvironmentPanel({ bars }: { bars: BarDatum[] }) {
+  return (
+    <SectionCard title="Cost by Environment" icon="layers">
+      {bars.length === 0 ? <EmptyState icon="layers" title="No cost data yet" /> : <BarChart data={bars} valueFormatter={money} />}
+    </SectionCard>
+  );
+}
+
+/** Spec §29 — biggest cost increases/decreases vs. the immediately preceding period. */
+export function CostChangesPanel({
+  increases,
+  decreases,
+  hasPrevious,
+}: {
+  increases: CostChange[];
+  decreases: CostChange[];
+  hasPrevious: boolean;
+}) {
+  const row = (c: CostChange, tone: 'up' | 'down') => (
+    <li key={c.label} className="flex items-center justify-between gap-2 py-1.5 text-xs">
+      <span className="text-slate-600 dark:text-slate-300 truncate">{c.label}</span>
+      <span className={`tabular-nums font-medium shrink-0 ${tone === 'up' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+        {tone === 'up' ? '+' : ''}{money(c.delta)}
+      </span>
+    </li>
+  );
+  return (
+    <SectionCard title="Cost Increase / Decrease" icon="trending-up">
+      {!hasPrevious ? (
+        <EmptyState icon="chart-line" title="Not enough history yet" description="Needs a full previous period of cost data to compare against." />
+      ) : increases.length === 0 && decreases.length === 0 ? (
+        <EmptyState icon="check-circle" title="No material change" description="Cost by service is flat vs. the previous period." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1"><Icon name="trending-up" size={12} className="text-red-500" /> Biggest increases</p>
+            {increases.length === 0 ? <p className="text-xs text-slate-400">None</p> : <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">{increases.map((c) => row(c, 'up'))}</ul>}
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1"><Icon name="trending-down" size={12} className="text-emerald-500" /> Biggest decreases</p>
+            {decreases.length === 0 ? <p className="text-xs text-slate-400">None</p> : <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">{decreases.map((c) => row(c, 'down'))}</ul>}
+          </div>
         </div>
       )}
     </SectionCard>
