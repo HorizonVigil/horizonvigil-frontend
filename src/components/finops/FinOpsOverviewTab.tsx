@@ -13,7 +13,6 @@ import { StatCardSkeleton, CardSkeleton } from '../Skeleton';
 import { Icon } from '../icons';
 import { useFilters, dateRangeToDays } from '../../lib/filterContext';
 import { api } from '../../lib/api';
-import { money } from '../../lib/format';
 import { SectionBoundary } from '../cloudAccounts/overview/primitives';
 import {
   rangeToFromTo,
@@ -27,6 +26,7 @@ import {
   biggestChanges,
 } from '../../lib/finops/overview';
 import type { Provider, ResolvedGroupFilter } from '../../lib/finops/groupFilter';
+import { formatMoney } from '../../lib/finops/fx';
 import {
   CostTrendPanel, CostByCloudPanel, CostByAccountPanel, CostByServicePanel, CostByRegionPanel, CostByEnvironmentPanel,
   BudgetForecastPanel, AnomaliesPanel, OptimizationPanel, CostChangesPanel, AccountDrilldownDrawer,
@@ -38,9 +38,13 @@ interface FinOpsOverviewTabProps {
   /** Owned by FinOps.tsx now — shared with Cost Management/Cost Optimization, not private to this tab. The Environment dropdown itself is rendered once in FinOps.tsx, not here — only the Cloud filter has an in-tab control (clicking a CostByCloudPanel card), so only that setter is needed. */
   groupFilter: ResolvedGroupFilter;
   onProviderChange: (p: Provider | null) => void;
+  /** Display currency for the KPI strip's dollar figures only (see lib/finops/fx.ts) — every chart below it, and the rest of FinOps, stays USD. `fxRates`/`fxDate` are undefined while still loading; formatMoney degrades to unconverted USD in that case rather than showing a wrong number. */
+  currency: string;
+  fxRates: Record<string, number> | undefined;
+  fxDate: string | undefined;
 }
 
-export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverviewTabProps) {
+export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxRates, fxDate }: FinOpsOverviewTabProps) {
   const { region, account, dateRange, refreshToken, connections, setAccount } = useFilters();
   const { provider, environment, connectionIds: filteredConnectionIds } = groupFilter;
   const navigate = useNavigate();
@@ -182,26 +186,32 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange }: FinOpsOverv
         </div>
       )}
 
-      {/* KPI strip (spec §9) */}
+      {/* KPI strip (spec §9) — dollar figures convert to `currency` when set; every other section stays USD (see this component's prop doc comment). */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard
           label="Total Spend"
-          value={money(d.cost?.monthToDate ?? totalCost)}
+          value={formatMoney(d.cost?.monthToDate ?? totalCost, currency, fxRates)}
           icon="cost"
           caption={dateRangeToDays(dateRange) === new Date().getDate() ? 'month to date' : `last ${dateRangeToDays(dateRange)}d`}
           delta={spendChange === null ? undefined : { value: `${spendChange > 0 ? '+' : ''}${spendChange}%`, direction: spendChange > 0 ? 'up' : spendChange < 0 ? 'down' : 'flat', goodDirection: 'down' }}
         />
-        <StatCard label="Daily Spend" value={money(dailyLast)} icon="chart-line" caption="most recent day" />
-        <StatCard label="Forecast" value={money(d.forecast?.projectedTotal ?? 0)} icon="trending-up" caption="month-end estimate" />
+        <StatCard label="Daily Spend" value={formatMoney(dailyLast, currency, fxRates)} icon="chart-line" caption="most recent day" />
+        <StatCard label="Forecast" value={formatMoney(d.forecast?.projectedTotal ?? 0, currency, fxRates)} icon="trending-up" caption="month-end estimate" />
         <StatCard
           label="Budget Used"
           value={budgetRollup.usedPercent === null ? '—' : `${budgetRollup.usedPercent}%`}
           icon="target"
           iconTone={budgetRollup.worst === 'exceeded' ? 'critical' : budgetRollup.worst === 'warning' ? 'warning' : budgetRollup.worst === 'ok' ? 'good' : 'neutral'}
         />
-        <StatCard label="Potential Savings" value={money(d.optDash?.totalPotentialMonthlySavings ?? 0)} icon="optimization" caption="per month" />
+        <StatCard label="Potential Savings" value={formatMoney(d.optDash?.totalPotentialMonthlySavings ?? 0, currency, fxRates)} icon="optimization" caption="per month" />
         <StatCard label="Cost Anomalies" value={anomalyCount.toLocaleString()} icon="alert-triangle" iconTone={anomalyCount > 0 ? 'warning' : 'neutral'} caption="active" />
       </div>
+
+      {currency !== 'USD' && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 -mt-3">
+          KPI figures above converted to {currency} at the {fxDate ?? "today's"} ECB reference rate{fxRates ? '' : ' (loading — showing USD until rates arrive)'}. Every chart below, and the rest of FinOps, stays in USD.
+        </p>
+      )}
 
       <SectionBoundary name="cost by cloud">
         <CostByCloudPanel bars={providerBars} activeFilter={provider} onSelect={onProviderChange} />

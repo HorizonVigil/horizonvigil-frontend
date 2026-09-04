@@ -12,17 +12,32 @@
  * lib/finops/groupFilter.ts for why some endpoints can only honor this via
  * client-side row filtering rather than a request parameter.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
+import { api } from '../lib/api';
 import { CostManagementBody } from './CostManagement';
 import { CostOptimizationBody } from './CostOptimization';
 import { FinOpsOverviewTab } from '../components/finops/FinOpsOverviewTab';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
 import { groupConnectionIds, type Provider, type ResolvedGroupFilter } from '../lib/finops/groupFilter';
+import { SUPPORTED_CURRENCIES, CURRENCY_LABEL, type Currency } from '../lib/finops/fx';
+
+const CURRENCY_STORAGE_KEY = 'horizonvigil_finops_display_currency';
+
+function getInitialCurrency(): Currency {
+  try {
+    const stored = localStorage.getItem(CURRENCY_STORAGE_KEY);
+    if ((SUPPORTED_CURRENCIES as readonly string[]).includes(stored ?? '')) return stored as Currency;
+  } catch {
+    // localStorage unavailable (private browsing, blocked site data) — fall through to the default
+  }
+  return 'USD';
+}
 
 const SECTIONS = ['Overview', 'Cost Management', 'Cost Optimization'] as const;
 type Section = typeof SECTIONS[number];
@@ -56,6 +71,20 @@ export function FinOps() {
     [provider, environment, connections],
   );
 
+  // Display currency — Overview's KPI strip only (see FinOpsOverviewTab.tsx
+  // and lib/finops/fx.ts); Cost Management/Optimization stay USD, so the
+  // selector itself is only shown while Overview is the active section
+  // rather than implying a control that silently does nothing elsewhere.
+  const [currency, setCurrency] = useState<Currency>(getInitialCurrency);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CURRENCY_STORAGE_KEY, currency);
+    } catch {
+      // best-effort — a missed save just means it doesn't persist across visits
+    }
+  }, [currency]);
+  const fxQuery = useQuery({ queryKey: ['finops', 'fx-rates'], queryFn: () => api.getFxRates(), staleTime: 6 * 60 * 60 * 1000 });
+
   function setSection(next: Section) {
     setSearchParams((prev) => {
       const params = new URLSearchParams(prev);
@@ -71,8 +100,20 @@ export function FinOps() {
       {/* Cost Optimization's endpoints don't take a date-range or region param (each recommendation category is its own "currently open" list) — same conditional hide the standalone page used. */}
       <FilterBar title="FinOps" subtitle="Multi-cloud cost management & optimization" breadcrumb={<Breadcrumb />} showRegionFilter={section !== 'Cost Optimization'} showDateFilter={section !== 'Cost Optimization'} />
 
-      {(providers.length > 1 || environments.length > 1) && (
+      {(providers.length > 1 || environments.length > 1 || section === 'Overview') && (
         <div className="flex flex-wrap items-center gap-3 mb-4">
+          {section === 'Overview' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Currency</span>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as Currency)}
+                className={`text-sm rounded-md border bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5 ${currency !== 'USD' ? 'border-brand-400 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-800' : 'border-slate-200 dark:border-slate-700'}`}
+              >
+                {SUPPORTED_CURRENCIES.map((c) => <option key={c} value={c}>{CURRENCY_LABEL[c]}</option>)}
+              </select>
+            </div>
+          )}
           {providers.length > 1 && (
             <div className="flex items-center gap-2">
               <span className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Cloud</span>
@@ -117,7 +158,7 @@ export function FinOps() {
         ))}
       </div>
 
-      {section === 'Overview' && <FinOpsOverviewTab groupFilter={groupFilter} onProviderChange={setProvider} />}
+      {section === 'Overview' && <FinOpsOverviewTab groupFilter={groupFilter} onProviderChange={setProvider} currency={currency} fxRates={fxQuery.data?.rates} fxDate={fxQuery.data?.date} />}
       {section === 'Cost Management' && <CostManagementBody groupFilter={groupFilter} />}
       {section === 'Cost Optimization' && <CostOptimizationBody groupFilter={groupFilter} />}
     </div>

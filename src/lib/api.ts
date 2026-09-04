@@ -528,6 +528,8 @@ class ApiClient {
   async downloadCostReportCsv(params: { from?: string; to?: string; region?: string; connectionIds?: string[] } = {}) {
     return this.downloadRaw('costManagement', `/api/cost-management/reports/export${qs({ format: 'csv', from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`, 'cost-report.csv');
   }
+  /** Real USD-based exchange rates (frankfurter.dev, cached server-side ~6h) for FinOps' optional display currency — see lib/finops/fx.ts. */
+  getFxRates() { return this.get<{ base: 'USD'; date: string; rates: Record<string, number> }>('costManagement', '/api/cost-management/fx-rates'); }
 
   // ── cost-optimization-api ────────────────────────────────────────────────
 
