@@ -45,7 +45,7 @@ type Section = typeof SECTIONS[number];
 /** FinOps' three sections are visible if the user can see ANY child grouped under them — Overview has no sidebar entry of its own (default landing), same convention as Cost Optimization's old Overview tab. */
 function useSectionAccess() {
   const canSeeChild = useSubmenuAccess('cost');
-  const costManagementLabels = ['Cost Explorer', 'Cost Analytics', 'Forecast', 'Budgets', 'Cost Allocation', 'Chargeback', 'Showback', 'Cost Reports'];
+  const costManagementLabels = ['Cost Explorer', 'Cost Analytics', 'Forecast', 'Budgets', 'Cost Allocation', 'Cost by Resource', 'Chargeback', 'Showback', 'Cost Reports'];
   const costOptimizationLabels = ['Savings Opportunities', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'Optimization History'];
   return (section: Section): boolean => {
     if (section === 'Overview') return true;

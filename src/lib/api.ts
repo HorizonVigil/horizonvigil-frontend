@@ -530,6 +530,10 @@ class ApiClient {
   }
   /** Real USD-based exchange rates (frankfurter.dev, cached server-side ~6h) for FinOps' optional display currency — see lib/finops/fx.ts. */
   getFxRates() { return this.get<{ base: 'USD'; date: string; rates: Record<string, number> }>('costManagement', '/api/cost-management/fx-rates'); }
+  /** Real per-resource cost ("Cost by Resource") — only ever populated for AWS accounts with Cost & Usage Report ingestion turned on; honestly empty otherwise (no CUR configured, or Azure/GCP, neither of which has a per-resource cost pipeline). */
+  getResourceCosts(params: { connectionId?: string; connectionIds?: string[]; from?: string; to?: string; tagKey?: string; tagValue?: string; limit?: number } = {}) {
+    return this.get<{ items: ResourceCostRow[] }>('costManagement', `/api/cost-management/resource-costs${qs({ connectionId: params.connectionId, connection_ids: params.connectionIds?.join(','), from: params.from, to: params.to, tagKey: params.tagKey, tagValue: params.tagValue, limit: params.limit })}`);
+  }
 
   // ── cost-optimization-api ────────────────────────────────────────────────
 
@@ -1175,6 +1179,7 @@ export interface ResourceMetric { id: string; connection_id: string; resource_id
 
 export interface CostSnapshot { id: string; connection_id: string; account_id: string; usage_date: string; service: string; region: string | null; unblended_cost: string; usage_quantity: string | null; usage_unit: string | null; currency: string }
 export interface CostAllocation { tagKey: string; totalCost: number; buckets: { tagValue: string; totalCost: number }[] }
+export interface ResourceCostRow { resourceId: string; connectionId: string; resourceName: string | null; resourceType: string; region: string | null; totalCost: number; tags: Record<string, unknown> | null }
 export interface Budget {
   id: string; org_id: string; scope_type: BudgetScopeType; scope_id: string; name: string; monthly_limit: number; alert_thresholds: number[]; created_at: string;
   currentSpend: number; projectedSpend: number; forecastMethod: string; percentOfLimit: number; status: 'ok' | 'warning' | 'exceeded';

@@ -440,6 +440,7 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Forecast', to: sectionTabLink(FINOPS, 'Cost Management', 'Forecast'), real: true, group: 'Cost Management' },
       { label: 'Budgets', to: sectionTabLink(FINOPS, 'Cost Management', 'Budgets'), real: true, minRole: 'editor', group: 'Cost Management' },
       { label: 'Cost Allocation', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Allocation'), real: true, group: 'Cost Management' },
+      { label: 'Cost by Resource', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost by Resource'), real: true, group: 'Cost Management' },
       { label: 'Chargeback', to: sectionTabLink(FINOPS, 'Cost Management', 'Chargeback'), real: true, group: 'Cost Management' },
       { label: 'Showback', to: sectionTabLink(FINOPS, 'Cost Management', 'Showback'), real: true, group: 'Cost Management' },
       { label: 'Cost Reports', to: sectionTabLink(FINOPS, 'Cost Management', 'Cost Reports'), real: true, group: 'Cost Management' },

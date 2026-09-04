@@ -10,7 +10,7 @@ import { useTabParam } from '../lib/useTabParam';
 import { useFilters, dateRangeToDays, type DateRangePreset } from '../lib/filterContext';
 import { useOrg } from '../lib/orgContext';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
-import { api, type ActivityEntry, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot } from '../lib/api';
+import { api, type ActivityEntry, type Budget, type BudgetScopeType, type CostAllocation, type CostSnapshot, type ResourceCostRow } from '../lib/api';
 import { money } from '../lib/format';
 import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
@@ -22,7 +22,7 @@ const STATUS_TONE = { ok: 'good', warning: 'warning', exceeded: 'critical' } as 
 // org, so this is just a typeahead starting point (free text still works).
 const TAG_KEY_SUGGESTIONS = ['CostCenter', 'Environment', 'Team', 'Project'];
 
-const TABS = ['Cost Explorer', 'Cost Analytics', 'Forecast', 'Budgets', 'Cost Allocation', 'Chargeback', 'Showback', 'Cost Reports'] as const;
+const TABS = ['Cost Explorer', 'Cost Analytics', 'Forecast', 'Budgets', 'Cost Allocation', 'Cost by Resource', 'Chargeback', 'Showback', 'Cost Reports'] as const;
 type Tab = typeof TABS[number];
 
 /** Converts the FilterBar's day-count preset into ISO from/to dates for the cost-management-api's date-scoped endpoints. */
@@ -310,6 +310,59 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
       });
   }, [tagKey, dateRange, allocationMode, onAllocationTab, refreshToken, allocationRetryToken, account, groupIds]);
 
+  // Cost by Resource — real per-resource cost from resource_costs (only
+  // populated for AWS accounts with Cost & Usage Report ingestion turned
+  // on, see AwsAccountDetail's CUR sync). The tag key/value filter is the
+  // same "Cost Center" concept Cost Allocation already breaks down by,
+  // applied here as a real filter over individual resources rather than
+  // only a chart — this is the honest, data-model-supported version of a
+  // "cost center filter": it can't be a *global* filter across every panel
+  // (cost_snapshots, which powers Cost Explorer/Analytics/Forecast/Trend,
+  // has no resource_id at all — only CUR-ingested resource_costs does), so
+  // it's scoped to this one resource-level view instead of silently doing
+  // nothing on panels that structurally can't support it.
+  const [resourceCostTagKey, setResourceCostTagKey] = useState('');
+  const [resourceCostTagValue, setResourceCostTagValue] = useState('');
+  const [resourceCosts, setResourceCosts] = useState<ResourceCostRow[]>([]);
+  const [resourceCostLoading, setResourceCostLoading] = useState(false);
+  const [resourceCostError, setResourceCostError] = useState<string | null>(null);
+  const resourceCostRequestRef = useRef(0);
+
+  useEffect(() => {
+    if (tab !== 'Cost by Resource') return;
+
+    const requestId = ++resourceCostRequestRef.current;
+    setResourceCostLoading(true);
+    setResourceCostError(null);
+
+    const { from, to } = rangeToFromTo(dateRange);
+    const connectionId = account === 'all' ? undefined : account;
+    const tagKeyTrimmed = resourceCostTagKey.trim();
+    const tagValueTrimmed = resourceCostTagValue.trim();
+
+    void api
+      .getResourceCosts({
+        connectionId,
+        connectionIds: connectionId ? undefined : groupIds,
+        from,
+        to,
+        tagKey: tagKeyTrimmed && tagValueTrimmed ? tagKeyTrimmed : undefined,
+        tagValue: tagKeyTrimmed && tagValueTrimmed ? tagValueTrimmed : undefined,
+        limit: 100,
+      })
+      .then((res) => {
+        if (requestId !== resourceCostRequestRef.current) return;
+        setResourceCosts(res.items);
+      })
+      .catch((err) => {
+        if (requestId !== resourceCostRequestRef.current) return;
+        setResourceCosts([]);
+        setResourceCostError(err instanceof Error ? err.message : 'Could not load cost by resource.');
+      })
+      .finally(() => {
+        if (requestId === resourceCostRequestRef.current) setResourceCostLoading(false);
+      });
+  }, [tab, dateRange, account, groupIds, resourceCostTagKey, resourceCostTagValue, refreshToken]);
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -678,6 +731,64 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
                 ))}
               </tbody>
             </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'Cost by Resource' && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Cost by Resource</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                list="tag-key-suggestions"
+                value={resourceCostTagKey}
+                onChange={e => setResourceCostTagKey(e.target.value)}
+                placeholder="Filter by tag key (e.g. CostCenter)"
+                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200"
+              />
+              <input
+                value={resourceCostTagValue}
+                onChange={e => setResourceCostTagValue(e.target.value)}
+                placeholder="Tag value (e.g. Marketing, or Untagged)"
+                disabled={!resourceCostTagKey.trim()}
+                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-slate-700 dark:text-slate-200 disabled:opacity-50"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 mb-3">
+            Real per-resource cost, top 100 by spend for the selected range — only populated for AWS accounts with Cost &amp; Usage Report ingestion turned on (Cloud Accounts → an AWS account → sync its CUR). Azure and GCP have no per-resource cost pipeline yet, so their resources never appear here regardless of sync. The tag filter narrows this table only — it can't apply to Cost Explorer/Analytics/Forecast above, since those are built from service+account-level cost with no resource_id to filter by.
+          </p>
+          {resourceCostError && (
+            <div className="mb-3 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300 flex items-center justify-between gap-3" role="alert">
+              <span>{resourceCostError}</span>
+              <button type="button" onClick={() => setResourceCosts([])} className="text-xs underline shrink-0">Dismiss</button>
+            </div>
+          )}
+          {resourceCostLoading ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : resourceCosts.length === 0 ? (
+            <p className="text-sm text-slate-400">No per-resource cost data for this range/filter — either no AWS account here has Cost &amp; Usage Report ingestion turned on yet, or nothing matches the tag filter.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
+                    <th className="py-2">Resource</th><th className="py-2">Type</th><th className="py-2">Region</th><th className="py-2 text-right">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resourceCosts.map(r => (
+                    <tr key={`${r.connectionId}:${r.resourceId}`} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0">
+                      <td className="py-2 text-slate-700 dark:text-slate-200 font-mono text-xs">{r.resourceName ?? r.resourceId}</td>
+                      <td className="py-2 text-slate-500 dark:text-slate-400">{r.resourceType}</td>
+                      <td className="py-2 text-slate-500 dark:text-slate-400">{r.region ?? '—'}</td>
+                      <td className="py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">{money(r.totalCost, 2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
