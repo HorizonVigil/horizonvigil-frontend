@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, type IconName } from '../../icons';
 import { useTheme } from '../../../lib/theme';
@@ -119,4 +119,29 @@ export function SectionError({ label }: { label: string }) {
       <span>Couldn’t load {label}. <button type="button" onClick={() => window.location.reload()} className="underline">Retry</button></span>
     </div>
   );
+}
+
+/**
+ * Isolates one Overview section — a render error in a single widget shows a
+ * small inline notice instead of taking down the whole dashboard (spec §33).
+ */
+export class SectionBoundary extends Component<{ name: string; children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[Cloud Accounts Overview] "${this.props.name}" section failed to render:`, error, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/20 p-4 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
+          <Icon name="alert-triangle" size={13} className="shrink-0" />
+          The {this.props.name} section couldn’t be shown.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

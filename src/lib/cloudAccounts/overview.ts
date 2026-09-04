@@ -40,6 +40,101 @@ export const EMPTY_DASHBOARD: AwsAccountsDashboard = {
   topGrowingAccounts: [], openRecommendations: 0, potentialMonthlySavings: 0, rotationDue: 0, recentActivity: [], recentAlerts: [],
 };
 
+// ── Boundary normalisation ──────────────────────────────────────────────────
+// The compose endpoints are typed but the live payloads can be partial (a
+// service returns 200 with a subset of fields, or an older shape). Everything
+// below trusts its inputs, so the raw payloads are normalised here first.
+
+function num(x: unknown): number {
+  return typeof x === 'number' && Number.isFinite(x) ? x : 0;
+}
+function arr<T>(x: unknown): T[] {
+  return Array.isArray(x) ? (x as T[]) : [];
+}
+function rec(x: unknown): Record<string, number> {
+  if (!x || typeof x !== 'object') return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(x as Record<string, unknown>)) out[k] = num(v);
+  return out;
+}
+
+/** Merge a raw (possibly partial) provider dashboard onto the zeroed shape and coerce every field. */
+export function normalizeDashboard(raw: Partial<AwsAccountsDashboard> | null | undefined): AwsAccountsDashboard {
+  const d = raw ?? {};
+  return {
+    totalAccounts: num(d.totalAccounts),
+    healthyAccounts: num(d.healthyAccounts),
+    failedAccounts: num(d.failedAccounts),
+    disconnectedAccounts: num(d.disconnectedAccounts),
+    accountsNeedingAttention: num(d.accountsNeedingAttention),
+    resourcesDiscovered: num(d.resourcesDiscovered),
+    regionsCovered: num(d.regionsCovered),
+    lastDiscovery: typeof d.lastDiscovery === 'string' ? d.lastDiscovery : null,
+    nextScheduledDiscovery: typeof d.nextScheduledDiscovery === 'string' ? d.nextScheduledDiscovery : null,
+    discoverySuccessRate: typeof d.discoverySuccessRate === 'number' ? d.discoverySuccessRate : null,
+    accountsNeedingAttentionList: arr<AwsAccountsDashboard['accountsNeedingAttentionList'][number]>(d.accountsNeedingAttentionList)
+      .filter((a) => a && typeof a === 'object')
+      .map((a) => ({ connectionId: String(a.connectionId ?? ''), connectionName: String(a.connectionName ?? 'Unknown'), reason: String(a.reason ?? '') })),
+    permissionErrors: num(d.permissionErrors),
+    syncFailures: num(d.syncFailures),
+    monthlyCost: num(d.monthlyCost),
+    topCostAccounts: arr(d.topCostAccounts),
+    topGrowingAccounts: arr(d.topGrowingAccounts),
+    openRecommendations: num(d.openRecommendations),
+    potentialMonthlySavings: num(d.potentialMonthlySavings),
+    rotationDue: num(d.rotationDue),
+    recentActivity: arr<AwsAccountsDashboard['recentActivity'][number]>(d.recentActivity)
+      .filter((e) => e && typeof e === 'object')
+      .map((e) => ({
+        id: String(e.id ?? Math.random()),
+        action: String(e.action ?? 'activity'),
+        targetId: e.targetId ?? null,
+        occurredAt: typeof e.occurredAt === 'string' ? e.occurredAt : new Date(0).toISOString(),
+        actorEmail: typeof e.actorEmail === 'string' ? e.actorEmail : null,
+      })),
+    recentAlerts: arr(d.recentAlerts),
+  };
+}
+
+/** Coerce a `/health/detailed` response; returns null when the payload is unusable. */
+export function normalizeHealth(raw: unknown): CloudAccountsHealthResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<CloudAccountsHealthResponse>;
+  const provider = r.provider === 'aws' || r.provider === 'azure' || r.provider === 'gcp' ? r.provider : null;
+  if (!provider) return null;
+  const accounts = arr<CloudAccountsHealthResponse['accounts'][number]>(r.accounts)
+    .filter((a) => a && typeof a === 'object')
+    .map((a) => ({ ...a, signals: arr<HealthSignal>(a.signals).filter((s) => s && typeof s === 'object') }));
+  const s = (r.summary ?? {}) as Partial<CloudAccountsHealthResponse['summary']>;
+  return {
+    provider,
+    accounts,
+    summary: {
+      total: num(s.total),
+      healthy: num(s.healthy),
+      warning: num(s.warning),
+      critical: num(s.critical),
+      unknown: num(s.unknown),
+      healthPercent: typeof s.healthPercent === 'number' ? s.healthPercent : null,
+    },
+  };
+}
+
+/** Coerce the resources dashboard payload into the shape the Overview needs. */
+export function normalizeResources(raw: unknown): ResourcesDashboardLike | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  return {
+    total: num(r.total),
+    byCategory: rec(r.byCategory),
+    byStatus: rec(r.byStatus),
+    byRegion: rec(r.byRegion),
+    trend30d: arr<{ date: string; created: number; deleted: number }>(r.trend30d)
+      .filter((d) => d && typeof d === 'object')
+      .map((d) => ({ date: String(d.date ?? ''), created: num(d.created), deleted: num(d.deleted) })),
+  };
+}
+
 /** Narrow the per-provider maps to a single provider (the rest zeroed / null), for the Cloud filter. */
 export function narrowToProvider(
   dashes: ProviderDashes,
@@ -106,14 +201,17 @@ export function rollupProvider(
   let unknown: number;
   let total: number;
 
-  if (health && health.summary.total > 0) {
-    ({ healthy, warning, critical, unknown } = health.summary);
-    total = health.summary.total;
+  if (health && health.summary && num(health.summary.total) > 0) {
+    healthy = num(health.summary.healthy);
+    warning = num(health.summary.warning);
+    critical = num(health.summary.critical);
+    unknown = num(health.summary.unknown);
+    total = num(health.summary.total);
   } else {
-    total = dash.totalAccounts;
-    healthy = dash.healthyAccounts;
-    critical = dash.failedAccounts;
-    unknown = clampNonNeg(dash.disconnectedAccounts - dash.failedAccounts);
+    total = num(dash.totalAccounts);
+    healthy = num(dash.healthyAccounts);
+    critical = num(dash.failedAccounts);
+    unknown = clampNonNeg(num(dash.disconnectedAccounts) - num(dash.failedAccounts));
     warning = clampNonNeg(total - healthy - critical - unknown);
   }
 
@@ -125,9 +223,9 @@ export function rollupProvider(
     warning,
     critical,
     unknown,
-    attention: dash.accountsNeedingAttention,
-    resources: dash.resourcesDiscovered,
-    monthlyCost: dash.monthlyCost,
+    attention: num(dash.accountsNeedingAttention),
+    resources: num(dash.resourcesDiscovered),
+    monthlyCost: num(dash.monthlyCost),
     hasCost: PROVIDER_HAS_COST[provider],
     healthPercent: pct(healthy, rated),
   };
@@ -224,8 +322,9 @@ export function signalHealthRows(health: ProviderHealth): SignalHealthRow[] {
   for (const p of PROVIDERS) {
     const resp = health[p];
     if (!resp) continue;
-    for (const acct of resp.accounts) {
-      for (const sig of acct.signals) {
+    for (const acct of arr<CloudAccountsHealthResponse['accounts'][number]>(resp.accounts)) {
+      for (const sig of arr<HealthSignal>(acct?.signals)) {
+        if (!sig?.key) continue;
         const cur = rows.get(sig.key) ?? { ok: 0, total: 0 };
         cur.total += 1;
         if (sig.status === 'ok') cur.ok += 1;
@@ -251,10 +350,11 @@ export interface SyncBuckets {
 }
 
 export function syncBuckets(agg: OverviewAggregate, dashes: ProviderDashes): SyncBuckets {
-  const failed = PROVIDERS.reduce((n, p) => n + dashes[p].syncFailures, 0);
-  const permissionIssues = PROVIDERS.reduce((n, p) => n + dashes[p].permissionErrors, 0);
-  const successful = clampNonNeg(agg.totals.total - failed - permissionIssues);
-  return { successful, failed, permissionIssues, total: agg.totals.total };
+  const failed = PROVIDERS.reduce((n, p) => n + num(dashes[p]?.syncFailures), 0);
+  const permissionIssues = PROVIDERS.reduce((n, p) => n + num(dashes[p]?.permissionErrors), 0);
+  const total = num(agg.totals.total);
+  const successful = clampNonNeg(total - failed - permissionIssues);
+  return { successful, failed, permissionIssues, total };
 }
 
 export function syncStackRow(b: SyncBuckets): StackRow[] {
@@ -279,9 +379,9 @@ export interface ResourcesDashboardLike {
   trend30d: { date: string; created: number; deleted: number }[];
 }
 
-export function recordToBars(rec: Record<string, number>, limit = 8): BarDatum[] {
-  return Object.entries(rec)
-    .map(([label, value]) => ({ label, value }))
+export function recordToBars(record: Record<string, number> | null | undefined, limit = 8): BarDatum[] {
+  return Object.entries(record ?? {})
+    .map(([label, value]) => ({ label, value: num(value) }))
     .filter((d) => d.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, limit);
@@ -289,12 +389,13 @@ export function recordToBars(rec: Record<string, number>, limit = 8): BarDatum[]
 
 /** Cumulative resource count over the trend window, back-calculated so the series ends at `total`. */
 export function resourceGrowthSeries(res: ResourcesDashboardLike): { x: string; y: number }[] {
-  const net = res.trend30d.map((d) => d.created - d.deleted);
+  const trend = arr<{ date: string; created: number; deleted: number }>(res?.trend30d);
+  const net = trend.map((d) => num(d.created) - num(d.deleted));
   const totalNet = net.reduce((a, b) => a + b, 0);
-  let running = res.total - totalNet;
-  return res.trend30d.map((d, i) => {
+  let running = num(res?.total) - totalNet;
+  return trend.map((d, i) => {
     running += net[i];
-    return { x: d.date, y: clampNonNeg(running) };
+    return { x: String(d.date ?? ''), y: clampNonNeg(running) };
   });
 }
 
@@ -354,8 +455,10 @@ export function buildAttentionItems(
   }
 
   const staleProviders = PROVIDERS.filter((p) => {
-    const d = dashes[p].lastDiscovery;
-    return d != null && now - new Date(d).getTime() > STALE_DISCOVERY_DAYS * 86_400_000 && agg.perProvider[p].total > 0;
+    const d = dashes[p]?.lastDiscovery;
+    if (d == null) return false;
+    const t = new Date(d).getTime();
+    return Number.isFinite(t) && now - t > STALE_DISCOVERY_DAYS * 86_400_000 && agg.perProvider[p].total > 0;
   });
   if (staleProviders.length > 0) {
     items.push({
@@ -378,7 +481,7 @@ export function buildAttentionItems(
     });
   }
 
-  const rotationDue = PROVIDERS.reduce((n, p) => n + dashes[p].rotationDue, 0);
+  const rotationDue = PROVIDERS.reduce((n, p) => n + num(dashes[p]?.rotationDue), 0);
   if (rotationDue > 0) {
     items.push({
       id: 'rotation',
@@ -405,8 +508,14 @@ export interface ProblemAccount {
 export function topProblemAccounts(dashes: ProviderDashes, limit = 6): ProblemAccount[] {
   const out: ProblemAccount[] = [];
   for (const p of PROVIDERS) {
-    for (const a of dashes[p].accountsNeedingAttentionList) {
-      out.push({ connectionId: a.connectionId, connectionName: a.connectionName, provider: p, issue: a.reason });
+    for (const a of arr<AwsAccountsDashboard['accountsNeedingAttentionList'][number]>(dashes[p]?.accountsNeedingAttentionList)) {
+      if (!a) continue;
+      out.push({
+        connectionId: String(a.connectionId ?? ''),
+        connectionName: String(a.connectionName ?? 'Unknown'),
+        provider: p,
+        issue: String(a.reason ?? 'Needs attention'),
+      });
     }
   }
   return out.slice(0, limit);
@@ -425,8 +534,15 @@ export interface TimelineEntry {
 export function mergeActivity(dashes: ProviderDashes, limit = 12): TimelineEntry[] {
   const all: TimelineEntry[] = [];
   for (const p of PROVIDERS) {
-    for (const e of dashes[p].recentActivity) {
-      all.push({ id: `${p}-${e.id}`, provider: p, action: e.action, occurredAt: e.occurredAt, actorEmail: e.actorEmail });
+    for (const e of arr<AwsAccountsDashboard['recentActivity'][number]>(dashes[p]?.recentActivity)) {
+      if (!e) continue;
+      all.push({
+        id: `${p}-${e.id ?? Math.random()}`,
+        provider: p,
+        action: String(e.action ?? 'activity'),
+        occurredAt: typeof e.occurredAt === 'string' ? e.occurredAt : '',
+        actorEmail: typeof e.actorEmail === 'string' ? e.actorEmail : null,
+      });
     }
   }
   return all.sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1)).slice(0, limit);
@@ -434,7 +550,7 @@ export function mergeActivity(dashes: ProviderDashes, limit = 12): TimelineEntry
 
 /** Coarse category for the activity filter chips (spec §21). */
 export function activityCategory(action: string): 'connections' | 'security' | 'cost' | 'configuration' | 'resources' | 'accounts' {
-  const a = action.toLowerCase();
+  const a = String(action ?? '').toLowerCase();
   if (a.includes('connect') || a.includes('sync') || a.includes('credential') || a.includes('validat')) return 'connections';
   if (a.includes('security') || a.includes('finding') || a.includes('vuln') || a.includes('permission')) return 'security';
   if (a.includes('cost') || a.includes('budget') || a.includes('spend')) return 'cost';

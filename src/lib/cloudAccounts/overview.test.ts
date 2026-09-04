@@ -3,6 +3,9 @@ import type { AwsAccountsDashboard, CloudAccountsHealthResponse } from '../api';
 import {
   aggregateOverview,
   narrowToProvider,
+  normalizeDashboard,
+  normalizeHealth,
+  normalizeResources,
   rollupProvider,
   healthDonutSlices,
   providerHealthRows,
@@ -89,6 +92,56 @@ describe('aggregateOverview', () => {
       { aws: health('aws', { total: 100, healthy: 90, warning: 5, critical: 5, unknown: 0 }), azure: null, gcp: null },
     );
     expect(agg.totals.healthPercent).toBe(90);
+  });
+});
+
+describe('boundary normalisation (partial / garbage payloads must not throw)', () => {
+  it('normalizeDashboard fills a zeroed shape and coerces junk', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = normalizeDashboard({ totalAccounts: 5, syncFailures: 'nope', recentActivity: null, accountsNeedingAttentionList: undefined } as any);
+    expect(d.totalAccounts).toBe(5);
+    expect(d.syncFailures).toBe(0);
+    expect(d.recentActivity).toEqual([]);
+    expect(d.accountsNeedingAttentionList).toEqual([]);
+    expect(d.monthlyCost).toBe(0);
+  });
+
+  it('normalizeDashboard handles null/undefined', () => {
+    expect(normalizeDashboard(null).totalAccounts).toBe(0);
+    expect(normalizeDashboard(undefined).recentActivity).toEqual([]);
+  });
+
+  it('normalizeHealth rejects payloads without a valid provider', () => {
+    expect(normalizeHealth(null)).toBeNull();
+    expect(normalizeHealth({ summary: { total: 5 } })).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const h = normalizeHealth({ provider: 'aws', accounts: 'x', summary: null } as any);
+    expect(h).not.toBeNull();
+    expect(h!.accounts).toEqual([]);
+    expect(h!.summary.total).toBe(0);
+  });
+
+  it('normalizeResources coerces missing maps to {} and missing trend to []', () => {
+    expect(normalizeResources(null)).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = normalizeResources({ total: 10 } as any)!;
+    expect(r.byCategory).toEqual({});
+    expect(r.byRegion).toEqual({});
+    expect(r.trend30d).toEqual([]);
+  });
+
+  it('the full pipeline survives all-garbage input', () => {
+    const dashes: ProviderDashes = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aws: normalizeDashboard({ totalAccounts: 'x', recentActivity: 'y' } as any),
+      azure: normalizeDashboard(null),
+      gcp: normalizeDashboard(undefined),
+    };
+    const agg = aggregateOverview(dashes, { aws: null, azure: null, gcp: null });
+    expect(agg.totals.total).toBe(0);
+    expect(() => mergeActivity(dashes)).not.toThrow();
+    expect(() => buildAttentionItems(agg, dashes, { security: null })).not.toThrow();
+    expect(() => topProblemAccounts(dashes)).not.toThrow();
   });
 });
 

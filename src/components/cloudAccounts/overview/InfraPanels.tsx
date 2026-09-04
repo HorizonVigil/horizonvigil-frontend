@@ -26,38 +26,44 @@ export function ConnectivityHealth({ health }: { health: ProviderHealth }) {
 }
 
 export interface ContainersDash {
-  total: number;
-  ecsCount: number;
-  eksCount: number;
-  types: { key: string; displayName: string; count: number }[];
+  total?: number;
+  ecsCount?: number;
+  eksCount?: number;
+  types?: { key: string; displayName: string; count: number }[];
 }
+
+const n = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
 
 /**
  * Spec §18 — Kubernetes / container summary. Only rendered when the user has
  * `kubernetes.read` AND containers have actually been discovered.
  */
 export function KubernetesSummary({ containers }: { containers: ContainersDash | null }) {
-  if (!containers || containers.total === 0) {
+  const total = n(containers?.total);
+  const eks = n(containers?.eksCount);
+  const ecs = n(containers?.ecsCount);
+  const types = Array.isArray(containers?.types) ? containers!.types.filter((t) => t && typeof t === 'object') : [];
+
+  if (!containers || total === 0) {
     return (
       <SectionCard title="Kubernetes & Containers" icon="containers" to="/containers" linkLabel="Open">
         <EmptyState icon="containers" title="No container workloads discovered" description="EKS / ECS / Cloud Run resources show up here once discovered." />
       </SectionCard>
     );
   }
-  const clusters = containers.eksCount + containers.ecsCount;
   return (
     <SectionCard title="Kubernetes & Containers" icon="containers" to="/containers" linkLabel="Open">
       <div className="flex flex-wrap gap-x-8 gap-y-3">
-        <MiniStat label="Clusters" value={clusters.toLocaleString()} />
-        <MiniStat label="EKS" value={containers.eksCount.toLocaleString()} />
-        <MiniStat label="ECS" value={containers.ecsCount.toLocaleString()} />
-        <MiniStat label="Total resources" value={containers.total.toLocaleString()} />
+        <MiniStat label="Clusters" value={(eks + ecs).toLocaleString()} />
+        <MiniStat label="EKS" value={eks.toLocaleString()} />
+        <MiniStat label="ECS" value={ecs.toLocaleString()} />
+        <MiniStat label="Total resources" value={total.toLocaleString()} />
       </div>
-      {containers.types.length > 0 && (
+      {types.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-1.5">
-          {containers.types.slice(0, 6).map((t) => (
+          {types.slice(0, 6).map((t) => (
             <li key={t.key} className="text-[11px] rounded-full border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-slate-500 dark:text-slate-400">
-              {t.displayName} · {t.count.toLocaleString()}
+              {t.displayName} · {n(t.count).toLocaleString()}
             </li>
           ))}
         </ul>

@@ -37,7 +37,7 @@ export function ResourceGrowth({ res, days, error }: { res: ResourcesDashboardLi
     <SectionCard title="Resource Growth" icon="chart-area">
       {error ? (
         <SectionError label="resource growth" />
-      ) : !res || res.trend30d.length === 0 ? (
+      ) : !res || !res.trend30d?.length ? (
         <EmptyState icon="chart-line" title="Not enough history yet" description="Growth appears once discovery has run over several days." />
       ) : (
         <>
@@ -63,8 +63,11 @@ export function DistributionPanel({
   error?: boolean;
 }) {
   const navigate = useNavigate();
-  const regionBars = res ? recordToBars(res.byRegion, 8) : [];
-  const envBars = (environments ?? []).map((e) => ({ label: e.environment, value: e.count })).sort((a, b) => b.value - a.value);
+  const regionBars = recordToBars(res?.byRegion, 8);
+  const envBars = (environments ?? [])
+    .map((e) => ({ label: String(e?.environment ?? ''), value: typeof e?.count === 'number' ? e.count : 0 }))
+    .filter((e) => e.label && e.value > 0)
+    .sort((a, b) => b.value - a.value);
 
   return (
     <SectionCard title="Distribution" icon="map-pin">

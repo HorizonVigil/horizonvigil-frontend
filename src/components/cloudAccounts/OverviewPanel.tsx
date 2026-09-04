@@ -25,8 +25,10 @@ import {
   buildAttentionItems,
   mergeActivity,
   narrowToProvider,
+  normalizeDashboard,
+  normalizeHealth,
+  normalizeResources,
   topProblemAccounts,
-  EMPTY_DASHBOARD,
   PROVIDERS,
   type ProviderDashes,
   type ProviderHealth,
@@ -47,9 +49,8 @@ import { ConnectivityHealth, KubernetesSummary } from './overview/InfraPanels';
 import { SyncPanel } from './overview/SyncPanel';
 import { ActivityTimeline } from './overview/ActivityTimeline';
 import { TopProblemAccounts } from './overview/TopProblemAccounts';
-import { LockedSection } from './overview/primitives';
+import { LockedSection, SectionBoundary } from './overview/primitives';
 
-const val = <T,>(r: PromiseSettledResult<T>, fallback: T): T => (r.status === 'fulfilled' ? r.value : fallback);
 const ok = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
 
 export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
@@ -83,21 +84,26 @@ export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
       ]);
 
       const dashes: ProviderDashes = {
-        aws: val(aws, EMPTY_DASHBOARD),
-        azure: val(azure, EMPTY_DASHBOARD),
-        gcp: val(gcp, EMPTY_DASHBOARD),
+        aws: normalizeDashboard(ok(aws)),
+        azure: normalizeDashboard(ok(azure)),
+        gcp: normalizeDashboard(ok(gcp)),
       };
-      const health: ProviderHealth = { aws: ok(hAws), azure: ok(hAzure), gcp: ok(hGcp) };
+      const health: ProviderHealth = {
+        aws: normalizeHealth(ok(hAws)),
+        azure: normalizeHealth(ok(hAzure)),
+        gcp: normalizeHealth(ok(hGcp)),
+      };
+      const envList = ok(envs)?.environments;
 
       return {
         dashes,
         health,
-        resources: ok(res),
+        resources: normalizeResources(ok(res)),
         resourcesError: res.status === 'rejected',
         containers: ok(containers),
         security: ok(sec),
         cost: ok(cost),
-        environments: ok(envs)?.environments ?? null,
+        environments: Array.isArray(envList) ? envList.filter((e) => e && typeof e === 'object') : null,
         fetchedAt: Date.now(),
       };
     },
@@ -193,49 +199,61 @@ export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
       </div>
 
       {/* Provider cards (spec §7) */}
-      <ProviderCards agg={fullAgg} activeFilter={filters.provider} onSelect={(p) => setFilters((f) => ({ ...f, provider: p }))} />
+      <SectionBoundary name="provider cards">
+        <ProviderCards agg={fullAgg} activeFilter={filters.provider} onSelect={(p) => setFilters((f) => ({ ...f, provider: p }))} />
+      </SectionBoundary>
 
       {/* Attention required (spec §20) — high in the flow, before the charts */}
-      <AttentionRequired items={attention} />
+      <SectionBoundary name="attention required">
+        <AttentionRequired items={attention} />
+      </SectionBoundary>
 
       {/* Health (spec §9, §10) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <CloudHealthDonut agg={agg} onDrill={drillHealth} />
-        <ProviderHealthComparison agg={agg} onDrill={drillHealth} />
+        <SectionBoundary name="cloud health"><CloudHealthDonut agg={agg} onDrill={drillHealth} /></SectionBoundary>
+        <SectionBoundary name="provider comparison"><ProviderHealthComparison agg={agg} onDrill={drillHealth} /></SectionBoundary>
       </div>
 
       {/* Resources (spec §11, §13) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ResourceDistribution res={d.resources} error={d.resourcesError} />
-        <ResourceGrowth res={d.resources} days={days} error={d.resourcesError} />
+        <SectionBoundary name="resource distribution"><ResourceDistribution res={d.resources} error={d.resourcesError} /></SectionBoundary>
+        <SectionBoundary name="resource growth"><ResourceGrowth res={d.resources} days={days} error={d.resourcesError} /></SectionBoundary>
       </div>
 
       {/* Cost + Security (spec §14–16) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {canCost
-          ? <CostPanel agg={agg} monthToDate={d.cost?.monthToDate ?? null} potentialSavings={potentialSavings} />
-          : <LockedSection title="Cloud Cost" reason="You don’t have cost access for this organization." />}
-        {canSecurity
-          ? <SecurityPanel security={d.security} />
-          : <LockedSection title="Security & Risk" reason="You don’t have security access for this organization." />}
+        <SectionBoundary name="cost">
+          {canCost
+            ? <CostPanel agg={agg} monthToDate={d.cost?.monthToDate ?? null} potentialSavings={potentialSavings} />
+            : <LockedSection title="Cloud Cost" reason="You don’t have cost access for this organization." />}
+        </SectionBoundary>
+        <SectionBoundary name="security">
+          {canSecurity
+            ? <SecurityPanel security={d.security} />
+            : <LockedSection title="Security & Risk" reason="You don’t have security access for this organization." />}
+        </SectionBoundary>
       </div>
 
       {/* Infra health + Kubernetes (spec §17, §18) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ConnectivityHealth health={narrowed.health} />
-        {canK8s && <KubernetesSummary containers={d.containers} />}
+        <SectionBoundary name="connectivity health"><ConnectivityHealth health={narrowed.health} /></SectionBoundary>
+        {canK8s && <SectionBoundary name="kubernetes"><KubernetesSummary containers={d.containers} /></SectionBoundary>}
       </div>
 
       {/* Sync health (spec §19) */}
-      <SyncPanel agg={agg} dashes={narrowed.dashes} onDrill={() => navigate('/cloud-accounts?tab=Sync+Center')} />
+      <SectionBoundary name="synchronization">
+        <SyncPanel agg={agg} dashes={narrowed.dashes} onDrill={() => navigate('/cloud-accounts?tab=Sync+Center')} />
+      </SectionBoundary>
 
       {/* Distribution — regions + environments (spec §23, §24) */}
-      <DistributionPanel res={d.resources} environments={d.environments} error={d.resourcesError} />
+      <SectionBoundary name="distribution">
+        <DistributionPanel res={d.resources} environments={d.environments} error={d.resourcesError} />
+      </SectionBoundary>
 
       {/* Activity timeline + top problem accounts (spec §21, §26) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ActivityTimeline entries={activity} />
-        <TopProblemAccounts rows={problems} />
+        <SectionBoundary name="activity"><ActivityTimeline entries={activity} /></SectionBoundary>
+        <SectionBoundary name="problem accounts"><TopProblemAccounts rows={problems} /></SectionBoundary>
       </div>
     </div>
   );
