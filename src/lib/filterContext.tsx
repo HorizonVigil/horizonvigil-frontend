@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { api } from './api';
 import { useAuth } from './auth';
 import { useOrg } from './orgContext';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from './unifiedAccounts';
 import { fetchAllPages } from './fetchAllPages';
+import { filterConnectionsByScope } from './scope';
 
 export type DateRangePreset = '1h' | '7d' | '30d' | 'mtd';
 
@@ -12,8 +13,10 @@ export interface GlobalFilters {
   account: string; // 'all' or a specific connection id
   dateRange: DateRangePreset;
   refreshToken: number;
-  /** Every connected AWS account, GCP project, AND Azure subscription, merged — was AWS-only until an earlier fix (then AWS+GCP), which meant the app-wide Account dropdown (FilterBar, budget/maintenance-window scope pickers, ...) could never even show a GCP project or Azure subscription, let alone filter by one. */
+  /** Every connected AWS account, GCP project, AND Azure subscription, merged — was AWS-only until an earlier fix (then AWS+GCP), which meant the app-wide Account dropdown (FilterBar, budget/maintenance-window scope pickers, ...) could never even show a GCP project or Azure subscription, let alone filter by one. Narrowed to `useOrg().scope` (see lib/scope.ts) — a folder/project selection in <ScopePicker> filters this down to that scope's connections. */
   connections: UnifiedAccountRow[];
+  /** The same list, NOT narrowed by scope — for the handful of things that need to see every connection regardless of the current folder/project (e.g. bulk-import picking a management/org connection to import *from*, which may sit outside whatever's currently in view). Prefer `connections` unless you specifically need this. */
+  allConnections: UnifiedAccountRow[];
 }
 
 interface FilterContextType extends GlobalFilters {
@@ -38,12 +41,23 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // X-Org-Id header" on all three account fetches -- exactly the kind of
   // failure a first-time visitor (or a demo audience watching a fresh login)
   // would hit.
-  const { currentOrg } = useOrg();
+  const { currentOrg, scope, folders, projects } = useOrg();
   const [region, setRegion] = useState('all');
   const [account, setAccount] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangePreset>('30d');
   const [refreshToken, setRefreshToken] = useState(0);
-  const [connections, setConnections] = useState<UnifiedAccountRow[]>([]);
+  const [allConnections, setAllConnections] = useState<UnifiedAccountRow[]>([]);
+
+  // The org/folder/project <ScopePicker> selection narrows this list — every
+  // consumer (the Account dropdown, Cloud Accounts' Connections/Hierarchy/
+  // Changes tabs, anything else reading `connections`) gets scoped data for
+  // free instead of each having to re-derive it. Re-filters instantly on a
+  // scope change; no refetch needed since the full org-wide list is already
+  // held in `allConnections`.
+  const connections = useMemo(
+    () => filterConnectionsByScope(allConnections, scope, folders, projects),
+    [allConnections, scope, folders, projects],
+  );
 
   const refresh = useCallback(() => setRefreshToken(t => t + 1), []);
 
@@ -65,7 +79,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     // (there's no connections list to show until someone's logged in).
     // Also wait for OrgProvider to have actually picked an org -- see the
     // comment on `currentOrg` above.
-    if (!isAuthenticated || !currentOrg) { setConnections([]); return; }
+    if (!isAuthenticated || !currentOrg) { setAllConnections([]); return; }
     void Promise.allSettled([
       fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
       fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
@@ -74,12 +88,12 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       const awsRows = aws.status === 'fulfilled' ? aws.value.map(toUnifiedRow) : [];
       const gcpRows = gcp.status === 'fulfilled' ? gcp.value.map(toUnifiedGcpRow) : [];
       const azureRows = azure.status === 'fulfilled' ? azure.value.map(toUnifiedAzureRow) : [];
-      setConnections([...awsRows, ...gcpRows, ...azureRows]);
+      setAllConnections([...awsRows, ...gcpRows, ...azureRows]);
     });
   }, [refreshToken, isAuthenticated, currentOrg]);
 
   return (
-    <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, setRegion, setAccount, setDateRange, refresh }}>
+    <FilterContext.Provider value={{ region, account, dateRange, refreshToken, connections, allConnections, setRegion, setAccount, setDateRange, refresh }}>
       {children}
     </FilterContext.Provider>
   );

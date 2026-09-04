@@ -137,7 +137,7 @@ function IdentityPermissionsList({ identity }: { identity: CloudIdentity }) {
 
 export function CloudAccounts() {
   const { projects, currentOrg } = useOrg();
-  const { refreshToken, connections: allConnectionRows } = useFilters();
+  const { refreshToken, connections: allConnectionRows, allConnections } = useFilters();
   const navigate = useNavigate();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { toast } = useToast();
@@ -1027,7 +1027,10 @@ export function CloudAccounts() {
           onUpdated={() => { setUpdateCredsFor(null); void loadInventory(); }}
         />
       )}
-      <BulkOnboardingModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={allConnectionRows} onImported={loadInventory} />
+      {/* Bulk import picks a management/org connection to import *from* -- that
+          connection may sit outside the currently-selected folder/project
+          scope, so this needs the unscoped list, not `allConnectionRows`. */}
+      <BulkOnboardingModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={allConnections} onImported={loadInventory} />
       {confirmDialog}
     </div>
   );

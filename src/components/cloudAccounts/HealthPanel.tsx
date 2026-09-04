@@ -12,8 +12,10 @@ import { StatCard } from '../StatCard';
 import { Icon } from '../icons';
 import { TableSkeleton } from '../Skeleton';
 import { EmptyState } from '../EmptyState';
-import { api, friendlyErrorMessage, type CloudAccountHealthRow, type HealthSignalStatus } from '../../lib/api';
-import { combineHealth, HEALTH_STATE_TONE, HEALTH_STATE_LABEL, healthTierClass } from '../../lib/cloudAccounts/health';
+import { api, friendlyErrorMessage, type HealthSignalStatus } from '../../lib/api';
+import { summarizeHealthRows, HEALTH_STATE_TONE, HEALTH_STATE_LABEL, healthTierClass } from '../../lib/cloudAccounts/health';
+import { useFilters } from '../../lib/filterContext';
+import { useOrg } from '../../lib/orgContext';
 
 const SIGNAL_DOT: Record<HealthSignalStatus, string> = {
   ok: 'bg-emerald-500', warn: 'bg-amber-500', fail: 'bg-red-500', unknown: 'bg-slate-400',
@@ -21,6 +23,8 @@ const SIGNAL_DOT: Record<HealthSignalStatus, string> = {
 
 export function HealthPanel({ refreshToken }: { refreshToken: number }) {
   const navigate = useNavigate();
+  const { connections } = useFilters();
+  const { scope } = useOrg();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<'' | 'aws' | 'azure' | 'gcp'>('');
   const [stateFilter, setStateFilter] = useState<'' | 'healthy' | 'warning' | 'critical' | 'unknown'>('');
@@ -33,19 +37,28 @@ export function HealthPanel({ refreshToken }: { refreshToken: number }) {
       ]);
       const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : null);
       const responses = [val(aws), val(azure), val(gcp)];
-      const rows = responses.flatMap((r) => r?.accounts ?? []);
-      return { responses, rows, combined: combineHealth(responses) };
+      return { rows: responses.flatMap((r) => r?.accounts ?? []) };
     },
     staleTime: 60_000,
   });
 
+  // `connections` is already narrowed to the active org/folder/project scope
+  // (see lib/scope.ts) -- cross-referencing by connectionId scopes these
+  // per-account health rows (and the KPIs recomputed from them) the same way,
+  // without this tab needing to know about folders/projects itself.
+  const scopedRows = useMemo(() => {
+    const rows = query.data?.rows ?? [];
+    const scopedIds = new Set(connections.map((c) => c.id));
+    return rows.filter((r) => scopedIds.has(r.connectionId));
+  }, [query.data, connections]);
+
   const filtered = useMemo(() => {
-    let rows: CloudAccountHealthRow[] = query.data?.rows ?? [];
+    let rows = scopedRows;
     if (providerFilter) rows = rows.filter((r) => r.provider === providerFilter);
     if (stateFilter) rows = rows.filter((r) => r.state === stateFilter);
     const rank = { critical: 0, warning: 1, unknown: 2, healthy: 3 };
     return [...rows].sort((a, b) => rank[a.state] - rank[b.state] || a.score - b.score);
-  }, [query.data, providerFilter, stateFilter]);
+  }, [scopedRows, providerFilter, stateFilter]);
 
   if (query.isLoading) return <TableSkeleton rows={6} cols={5} />;
   if (query.isError) {
@@ -56,9 +69,11 @@ export function HealthPanel({ refreshToken }: { refreshToken: number }) {
     );
   }
 
-  const combined = query.data!.combined;
+  const combined = summarizeHealthRows(scopedRows);
   if (combined.total === 0) {
-    return <EmptyState icon="gauge" title="No connected environments yet" description="Connect an AWS account, Azure subscription or GCP project to see its health here." />;
+    return scope && scope.type !== 'org' && (query.data?.rows.length ?? 0) > 0
+      ? <EmptyState icon="gauge" title={`No environments in ${scope.name}`} description="Pick a different folder/project scope, or switch back to the whole organization." />
+      : <EmptyState icon="gauge" title="No connected environments yet" description="Connect an AWS account, Azure subscription or GCP project to see its health here." />;
   }
 
   return (

@@ -6,7 +6,7 @@
  * This module only maps that output onto UI tokens and rolls the three
  * providers' summaries into one. Pure + unit-tested.
  */
-import type { CloudAccountsHealthResponse, HealthState, HealthSignalStatus } from '../api';
+import type { CloudAccountHealthRow, CloudAccountsHealthResponse, HealthState, HealthSignalStatus } from '../api';
 
 type Tone = 'good' | 'warning' | 'serious' | 'critical' | 'neutral';
 
@@ -62,6 +62,42 @@ export function combineHealth(responses: (CloudAccountsHealthResponse | null)[])
   }
 
   acc.healthPercent = ratedTotal === 0 ? null : Math.round((healthyTotal / ratedTotal) * 100);
+  return acc;
+}
+
+/**
+ * Recomputes {@link CombinedHealth} from a (possibly scope-filtered) flat
+ * row list, instead of the unfiltered per-provider summaries `combineHealth`
+ * reads. Used by the Health tab so a folder/project scope selection changes
+ * the KPI numbers too, not just which table rows show.
+ */
+export function summarizeHealthRows(rows: CloudAccountHealthRow[]): CombinedHealth {
+  const acc: CombinedHealth = { total: 0, healthy: 0, warning: 0, critical: 0, unknown: 0, healthPercent: null, perProvider: [] };
+  const byProvider = new Map<'aws' | 'azure' | 'gcp', { total: number; healthy: number; unknown: number }>();
+
+  for (const r of rows) {
+    acc.total += 1;
+    if (r.state === 'healthy') acc.healthy += 1;
+    else if (r.state === 'warning') acc.warning += 1;
+    else if (r.state === 'critical') acc.critical += 1;
+    else acc.unknown += 1;
+
+    const p = byProvider.get(r.provider) ?? { total: 0, healthy: 0, unknown: 0 };
+    p.total += 1;
+    if (r.state === 'healthy') p.healthy += 1;
+    if (r.state === 'unknown') p.unknown += 1;
+    byProvider.set(r.provider, p);
+  }
+
+  const ratedTotal = acc.total - acc.unknown;
+  acc.healthPercent = ratedTotal === 0 ? null : Math.round((acc.healthy / ratedTotal) * 100);
+  acc.perProvider = (['aws', 'azure', 'gcp'] as const)
+    .filter((p) => byProvider.has(p))
+    .map((p) => {
+      const s = byProvider.get(p)!;
+      const rated = s.total - s.unknown;
+      return { provider: p, total: s.total, healthPercent: rated === 0 ? null : Math.round((s.healthy / rated) * 100) };
+    });
   return acc;
 }
 
