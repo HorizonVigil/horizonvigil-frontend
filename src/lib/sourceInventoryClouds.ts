@@ -102,6 +102,12 @@ function assetFromRow(row: UnifiedAccountRow, findings: VulnerabilityFinding[]):
 function bucketByConnection(findings: VulnerabilityFinding[]): Map<string, VulnerabilityFinding[]> {
   const map = new Map<string, VulnerabilityFinding[]>();
   for (const f of findings) {
+    // This view is specifically about cloud accounts/connections -- a
+    // scanner-platform finding with no connection (e.g. a git-repo scan)
+    // has no cloud account to bucket into here, so it's correctly excluded
+    // from this list rather than grouped under a fabricated key. It still
+    // shows up in the Security Findings tab and Risk Score, just not here.
+    if (!f.connection_id) continue;
     if (!map.has(f.connection_id)) map.set(f.connection_id, []);
     map.get(f.connection_id)!.push(f);
   }

@@ -60,6 +60,7 @@ export const WIDGET_COMPONENTS: Record<string, WidgetComponent> = {
   'security-posture': security.SecurityPostureWidget,
   'security-score': security.SecurityScoreWidget,
   'critical-vulnerabilities': security.CriticalVulnerabilitiesWidget,
+  'critical-now': security.CriticalNowWidget,
   'attack-paths': security.AttackPathsWidget,
   'exposure': security.ExposureWidget,
   'compliance': security.ComplianceWidget,

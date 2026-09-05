@@ -232,6 +232,12 @@ export const REGISTRY_META: WidgetMeta[] = [
     contextBoost: (s) => boostWhen(s.criticalVulns > 0, 150, `${s.criticalVulns} critical vulnerabilities open`),
   },
   {
+    id: 'critical-now', title: 'Critical Now', description: 'Open findings ranked by severity plus real-world context (internet exposure, asset criticality) — not just recency.',
+    category: 'security', kind: 'panel', module: 'security', requires: ['security.read'],
+    defaultSize: { w: 1, h: 6 }, basePriority: 123, integrated: true, defaultEnabled: false,
+    contextBoost: (s) => boostWhen(s.criticalVulns > 0, 148, `${s.criticalVulns} critical vulnerabilities open`),
+  },
+  {
     id: 'attack-paths', title: 'Attack Paths', description: 'Resources where exposure, a vulnerability and over-privilege converge.',
     category: 'security', kind: 'panel', module: 'security', requires: ['security.read'],
     defaultSize: { w: 1, h: 6 }, basePriority: 126, integrated: true,

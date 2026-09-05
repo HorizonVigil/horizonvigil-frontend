@@ -597,7 +597,7 @@ class ApiClient {
       remediation: { open: number; resolved: number; suppressed: number };
     }>('vulnerabilityManagement', '/api/vulnerability-management/dashboard');
   }
-  getFindings(params: { severity?: string; status?: string; finding_source?: string; region?: string; connection_id?: string; search?: string; page?: number; limit?: number } = {}) {
+  getFindings(params: { severity?: string; status?: string; finding_source?: string; region?: string; connection_id?: string; search?: string; page?: number; limit?: number; criticalNow?: boolean } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/findings${qs(params)}`);
   }
   getFinding(id: string) { return this.get<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`); }
@@ -1222,10 +1222,29 @@ export interface RemediationRequest {
 }
 
 export interface VulnerabilityFinding {
-  id: string; connection_id: string; resource_id: string | null; finding_source: 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'iam_access_analyzer_unused' | 'aws_config' | 'trusted_advisor' | 'gcp_scc' | 'defender' | 'trivy';
-  aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational'; cvss_score: number | null; title: string; description: string | null;
+  id: string;
+  /** null for scanner-platform-origin findings with no cloud connection at all (e.g. a git-repo scan) -- see org_id below, which every finding has one or the other of. */
+  connection_id: string | null;
+  /** Always present. For connection-scoped findings this mirrors cloud_connections.org_id (snapshotted server-side); for scanner-platform findings it's the only scope a row has. */
+  org_id: string;
+  resource_id: string | null;
+  finding_source: 'security_hub' | 'guardduty' | 'inspector' | 'iam_access_analyzer' | 'iam_access_analyzer_unused' | 'aws_config' | 'trusted_advisor' | 'gcp_scc' | 'defender' | 'trivy'
+    | 'scanner_prowler' | 'scanner_trivy' | 'scanner_semgrep' | 'scanner_gitleaks' | 'scanner_checkov' | 'scanner_grype' | 'scanner_syft' | 'scanner_trufflehog' | 'scanner_nuclei' | 'scanner_dependency_check';
+  aws_finding_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low' | 'informational'; cvss_score: number | null;
+  /** Real CVE/CWE when the source has one -- populated for scanner-platform findings and (for real CVEs only) AWS Inspector; null everywhere else, never guessed. */
+  cve: string | null; cwe: string | null;
+  title: string; description: string | null;
   compliance_frameworks: string[]; status: 'open' | 'resolved' | 'suppressed'; remediation_link: string | null; region: string | null; resource_arn: string | null;
   discovered_at: string; last_seen_at: string; resolved_at: string | null;
+  /** Snapshot of cloud_connections.environment at write time; null for connection-less findings. */
+  environment: string | null;
+  /** null = honestly unknown/not evaluated for this resource type -- never a guess. Only a small set of resource types (public IP/EC2/RDS/EKS/Azure storage+NIC) are evaluated today. */
+  internet_exposed: boolean | null;
+  /** Best-effort tag/metadata lookup -- reads empty for most orgs until real asset-criticality tagging exists. */
+  asset_criticality: 'low' | 'medium' | 'high' | 'critical' | null;
+  asset_type: string | null;
+  /** Server-computed, bounded 0-100 -- see the context_risk_score column/trigger. On a different scale from the dashboard's own org-aggregate riskScore; don't conflate the two. */
+  context_risk_score: number | null;
   /** Only present on the single-finding GET (list endpoints use a narrower select for payload size) -- the scanner's own untouched finding payload, shown as a fallback in the detail drawer for whatever isn't already surfaced in a named field above. */
   raw_finding?: Record<string, unknown> | null;
 }

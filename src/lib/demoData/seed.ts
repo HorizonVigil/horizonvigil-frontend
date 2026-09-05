@@ -120,9 +120,14 @@ function generateFinding(globalIndex: number, filters: FindingsPresetFilter): De
   const technology = pick(rng, TECHNOLOGIES);
   const hasCve = rng() < 0.55;
 
+  const environment = pick(rng, ENVIRONMENTS);
+  const internetExposed = rng() < 0.06;
+  const assetType = pick(rng, ASSET_TYPES);
+
   return {
     id: `demo-${globalIndex}`,
     connection_id: `demo-conn-${Math.floor(rng() * DEMO_TOTALS.awsAccounts)}`,
+    org_id: 'demo-org',
     resource_id: `demo-resource-${globalIndex}`,
     finding_source: pick(rng, FINDING_SOURCE_VALUES),
     aws_finding_id: null,
@@ -142,9 +147,16 @@ function generateFinding(globalIndex: number, filters: FindingsPresetFilter): De
     cwe: pick(rng, CWES),
     epss: hasCve ? Math.round(rng() * 100) / 100 : null,
     exploitAvailable,
-    internetExposed: rng() < 0.06,
-    assetType: pick(rng, ASSET_TYPES),
-    environment: pick(rng, ENVIRONMENTS),
+    internetExposed,
+    assetType,
+    environment,
+    // snake_case counterparts inherited from the real VulnerabilityFinding
+    // type (added by the scanner-platform unification) -- kept in sync with
+    // the camelCase demo-only fields above rather than a separate random draw.
+    internet_exposed: internetExposed,
+    asset_type: assetType,
+    asset_criticality: weightedPick(rng, [['low', 3], ['medium', 4], ['high', 2], ['critical', 1]] as const),
+    context_risk_score: null, // computed server-side for real rows; demo rows don't need it duplicated for the "Critical Now" widget, which never queries demo data
     scanner: pick(rng, SCANNERS),
     owner: pick(rng, OWNERS),
     slaDueAt: status === 'open' && severity !== 'informational' ? daysAgoISO(rng, -14) : null,

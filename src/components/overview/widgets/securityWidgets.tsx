@@ -71,6 +71,42 @@ export const CriticalVulnerabilitiesWidget: WidgetComponent = ({ ctx }) => {
   );
 };
 
+/**
+ * Ranked by context_risk_score (severity + internet exposure + asset
+ * criticality, computed server-side — see the criticalNow query param on
+ * GET /findings), not just recency like CriticalVulnerabilitiesWidget above.
+ * Distinct widget rather than a rewrite of that one, since its current
+ * "newest open critical findings" behavior may already be relied on
+ * elsewhere.
+ */
+export const CriticalNowWidget: WidgetComponent = ({ ctx }) => {
+  const query = useWidgetQuery('critical-now', ctx, () =>
+    api.getFindings({ criticalNow: true, limit: 6, connection_id: scopedConnectionId(ctx.scope) }));
+  return (
+    <WidgetBody query={query} errorLabel="Critical Now couldn't be loaded." emptyTitle="Nothing urgent right now"
+      emptyDescription="No open findings currently meet the Critical Now bar (severity + exposure + asset criticality)." emptyIcon="shield-check"
+      isEmpty={(d) => d.items.length === 0}>
+      {(d) => (
+        <div className="flex flex-col gap-2">
+          <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+            {d.items.map((f) => (
+              <li key={f.id} className="py-1.5 flex items-center justify-between gap-2">
+                <button type="button" onClick={() => ctx.navigate(`/vulnerability-management/findings/${f.id}`)}
+                  className={`text-left hover:underline truncate ${severityToneOf(f.severity)}`}>{f.title}</button>
+                {f.context_risk_score != null && <span className="tabular-nums text-slate-400 shrink-0">{f.context_risk_score}</span>}
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <ViewAllLink to="/vulnerability-management?tab=Security Findings" label="View Security Findings" />
+            <WidgetAction ctx={ctx} need="security.remediate" label="Remediate" to="/automation?tab=remediation" tone="danger" />
+          </div>
+        </div>
+      )}
+    </WidgetBody>
+  );
+};
+
 export const AttackPathsWidget: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('attack-paths', ctx, () => api.getAttackPaths());
   return (
