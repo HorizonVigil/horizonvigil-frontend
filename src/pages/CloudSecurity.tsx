@@ -9,10 +9,13 @@ import { RoadmapPanel } from '../components/EmptyState';
 import { SecurityPostureSummary, type SecurityPostureDashboard } from '../components/SecurityPostureSummary';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
+import { useFilters } from '../lib/filterContext';
 import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type ComplianceBenchmark } from '../lib/api';
 
-const TABS = ['Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Cloud Vulnerabilities', 'Compliance', 'Multi-Cloud Coverage'] as const;
+const TABS = ['Overview', 'Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Cloud Vulnerabilities', 'Compliance', 'Multi-Cloud Coverage'] as const;
 type Tab = typeof TABS[number];
+const PROVIDERS = ['aws', 'gcp', 'azure'] as const;
+const PROVIDER_LABEL: Record<typeof PROVIDERS[number], string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 function formatDate(value: string | null | undefined): string {
@@ -32,7 +35,8 @@ function formatDate(value: string | null | undefined): string {
 export function CloudSecurity() {
   const canSeeTab = useSubmenuAccess('cloud-security');
   const visibleTabs = TABS.filter(canSeeTab);
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'Posture');
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
+  const { connections } = useFilters();
   useEffect(() => {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
@@ -134,6 +138,44 @@ export function CloudSecurity() {
           </button>
         ))}
       </div>
+
+      {tab === 'Overview' && (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="Connected Accounts" value={String(connections.length)} icon="cloud" />
+            <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'good'} />
+            <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'good'} />
+            <StatCard label="Risk Score" value={dashboard ? `${dashboard.riskScore}/100` : '—'} icon="gauge" iconTone={dashboard && dashboard.riskScore >= 50 ? 'critical' : dashboard && dashboard.riskScore >= 20 ? 'warning' : 'good'} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {PROVIDERS.map(provider => {
+              const providerConns = connections.filter(c => c.provider === provider);
+              const connected = providerConns.filter(c => c.status === 'connected').length;
+              return (
+                <div key={provider} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{PROVIDER_LABEL[provider]}</span>
+                    <Badge tone={providerConns.length === 0 ? 'neutral' : connected === providerConns.length ? 'good' : 'warning'}>
+                      {providerConns.length === 0 ? 'Not connected' : `${connected} / ${providerConns.length} connected`}
+                    </Badge>
+                  </div>
+                  <button type="button" onClick={() => setTab('Multi-Cloud Coverage')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                    {providerConns.length === 0 ? 'Connect an account →' : 'View coverage →'}
+                  </button>
+                </div>
+              );
+            })}
+            <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">OCI</span>
+                <Badge tone="neutral">No connector</Badge>
+              </div>
+              <p className="text-xs text-slate-400">Not built yet — see Multi-Cloud Coverage.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tab === 'Posture' && dashboard && <SecurityPostureSummary dashboard={dashboard} variant="full" />}
 

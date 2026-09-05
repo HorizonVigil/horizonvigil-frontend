@@ -14,6 +14,13 @@ const TABS = ['Overview', 'Repositories', 'Code Vulnerabilities', 'Dependency Vu
 type Tab = typeof TABS[number];
 
 interface RepoRow { key: string; installationLogin: string; fullName: string; defaultBranch: string; private: boolean }
+interface InstallationCard { id: string; login: string; repoCount: number }
+
+// The 5 scanners this page's own tabs are backed by (Semgrep/Dependency-
+// Check/Grype/Gitleaks/TruffleHog) -- same set ScanHistoryTable instances
+// below use, just aggregated here for the Overview tab's scan-count/last-
+// scan stats instead of the full row list.
+const CODE_SCANNERS = ['semgrep', 'dependency-check', 'grype', 'gitleaks', 'trufflehog'] as const;
 
 /**
  * Code & repository security -- Repositories, Code Vulnerabilities,
@@ -32,6 +39,11 @@ export function CodeSecurity() {
   }, [tab, canSeeTab, visibleTabs, setTab]);
 
   const [repos, setRepos] = useState<RepoRow[]>([]);
+  const [installationCards, setInstallationCards] = useState<InstallationCard[]>([]);
+  // Per-scanner {count, lastScan} for the Overview tab -- Promise.allSettled
+  // (not all) since an org that's never run one of the 5 scanners shouldn't
+  // blank the whole tab over that scanner's empty/erroring list call.
+  const [scanStats, setScanStats] = useState<Record<string, { count: number; lastScan: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -43,10 +55,17 @@ export function CodeSecurity() {
       const perInstallation = await Promise.all(
         installations.map(async inst => {
           const { items } = await api.getInstallationRepos(inst.id);
-          return items.map((r): RepoRow => ({ key: `${inst.id}:${r.fullName}`, installationLogin: inst.account_login, fullName: r.fullName, defaultBranch: r.defaultBranch, private: r.private }));
+          return { card: { id: inst.id, login: inst.account_login, repoCount: items.length }, rows: items.map((r): RepoRow => ({ key: `${inst.id}:${r.fullName}`, installationLogin: inst.account_login, fullName: r.fullName, defaultBranch: r.defaultBranch, private: r.private })) };
         }),
       );
-      setRepos(perInstallation.flat());
+      setRepos(perInstallation.flatMap(p => p.rows));
+      setInstallationCards(perInstallation.map(p => p.card));
+
+      const scanResults = await Promise.allSettled(CODE_SCANNERS.map(s => api.listScans(s, { limit: 1 })));
+      setScanStats(Object.fromEntries(CODE_SCANNERS.map((s, i) => {
+        const res = scanResults[i];
+        return [s, res.status === 'fulfilled' ? { count: res.value.total, lastScan: res.value.items[0]?.finished_at ?? null } : { count: 0, lastScan: null }];
+      })));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load repositories.');
     } finally {
@@ -103,7 +122,40 @@ export function CodeSecurity() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Connected Repositories" value={String(repos.length)} icon="git-branch" />
             <StatCard label="Private Repos" value={String(repos.filter(r => r.private).length)} icon="key" />
+            <StatCard label="SAST/SCA/Secrets Scans" value={String(Object.values(scanStats).reduce((sum, s) => sum + s.count, 0))} icon="target" />
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {installationCards.length === 0 ? (
+              <p className="text-xs text-slate-400 col-span-full">No Git installations connected yet — connect one under Settings &gt; Git Integration.</p>
+            ) : installationCards.map(inst => (
+              <div key={inst.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{inst.login}</span>
+                  <Badge tone="good">GitHub</Badge>
+                </div>
+                <p className="text-xs text-slate-400">{inst.repoCount} repositor{inst.repoCount === 1 ? 'y' : 'ies'}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Scan History by Tool</h3>
+            <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
+              {CODE_SCANNERS.map(s => {
+                const stat = scanStats[s];
+                return (
+                  <li key={s} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span className="capitalize text-slate-700 dark:text-slate-200">{s.replace('-', ' ')}</span>
+                    <span className="text-xs text-slate-400 tabular-nums">
+                      {stat && stat.count > 0 ? `${stat.count} scan${stat.count === 1 ? '' : 's'} · last ${new Date(stat.lastScan!).toLocaleDateString()}` : 'No scans recorded yet'}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Real, persisted data across every tab — Repositories (GitHub App installations) and Code/Dependency/Secrets findings (each backed by a real scanner's own scan history).
           </p>

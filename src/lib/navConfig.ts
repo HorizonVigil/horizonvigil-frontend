@@ -192,15 +192,18 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   {
-    // The unified security workspace -- Overview/Vulnerabilities/Risk/Assets
-    // groups plus the five domain pillars (Security Scanning, Cloud
-    // Security, Application Security, Code Security, Container &
-    // Kubernetes, Infrastructure) that were separate top-level modules
-    // before this restructure. Each pillar's own page (CloudSecurity.tsx,
-    // SecurityScanningCenter.tsx, etc.) is unchanged -- still its own route,
-    // still its own tab bar -- only reached via this module's Sidebar now
-    // instead of its own rail icon. `group` tags below drive Sidebar's
-    // section dividers; purely cosmetic, see NavChild.group's own comment.
+    // The unified security workspace -- Overview/Scan Categories/
+    // Vulnerabilities/Risk/Assets groups plus the five domain pillars
+    // (Security Scanning, Cloud Security, Application Security, Code
+    // Security, Container & Kubernetes, Infrastructure) that were separate
+    // top-level modules before this restructure. Each pillar's own page
+    // (CloudSecurity.tsx, SecurityScanningCenter.tsx, etc.) is unchanged --
+    // still its own route, still its own tab bar -- only reached via this
+    // module's Sidebar now instead of its own rail icon. `group` tags below
+    // drive Sidebar's section dividers; purely cosmetic, see NavChild.group's
+    // own comment. "Scan Categories" (Cloud/Repository/URL & API/Container
+    // Image/Server & VM/Cluster & Runtime Scans) is a later, thinner relabel
+    // layer on top of the same pillars -- see its own inline comment below.
     label: 'Vulnerability Management',
     icon: 'security',
     section: 'Security',
@@ -208,6 +211,34 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       // ── Overview ──────────────────────────────────────────────────────
       { label: 'Vulnerability Overview', to: VULN, real: true, group: 'Overview' },
+
+      // ── Scan Categories ──────────────────────────────────────────────
+      // The simplified, scan-category-first framing a later spec asked
+      // for -- NOT a nav restructure. Each entry is a thin relabel that
+      // routes straight into the existing real pillar page/tab below (via
+      // the same tabLink() convention everything else here already uses),
+      // so there's no duplicate implementation, no RBAC submenuKey
+      // migration, and no broken deep link into the pillars themselves.
+      // The actual user-facing "6 simple categories" surface is the
+      // Vulnerability Overview page's own Scan Category Summary section
+      // (see VulnerabilityManagement.tsx) -- these nav entries exist so
+      // the categories are also Cmd+K-searchable and independently
+      // RBAC-configurable, since nothing in this app renders
+      // NavChild.group as an actual visible sidebar today (only
+      // CommandPalette/MenuAccessTree/useCanSeeSubmenu consume it).
+      { label: 'Cloud Scans', to: tabLink(CLOUD_SEC, 'Overview'), real: true, group: 'Scan Categories' },
+      { label: 'Repository Scans', to: tabLink(CODE_SEC, 'Overview'), real: true, group: 'Scan Categories' },
+      { label: 'URL & API Scans', to: tabLink(APP_SEC, 'Overview'), real: true, group: 'Scan Categories' },
+      { label: 'Container Image Scans', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Scan Categories' },
+      // Genuinely honest, not a stub-that-looks-real: InfrastructureSecurity.tsx
+      // is 100% RoadmapPanel today (no server/VM scanning surface exists
+      // anywhere in the product) -- this entry just gives that same honest
+      // page spec-aligned framing, it doesn't imply new capability.
+      { label: 'Server & VM Scans', to: INFRA_SEC, real: true, group: 'Scan Categories' },
+      // Kubernetes Security tab shows real live EKS/GKE pod/node/deployment
+      // inventory paired with an explicit "no CVE overlay yet" note
+      // (kube-bench/kubescape are unimplemented) -- see ContainerKubernetesSecurity.tsx.
+      { label: 'Cluster & Runtime Scans', to: tabLink(CONTAINER_SEC, 'Kubernetes Security'), real: true, group: 'Scan Categories' },
 
       // ── Vulnerabilities ───────────────────────────────────────────────
       // All seven land on the same Security Findings table, pre-filtered by

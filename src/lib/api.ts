@@ -586,16 +586,7 @@ class ApiClient {
   // ── vulnerability-management-api ────────────────────────────────────────
 
   getVulnerabilityDashboard() {
-    return this.get<{
-      openFindings: number; bySeverity: Record<string, number>; riskScore: number;
-      compliance: { benchmarksEvaluated: number; averagePassRate: number };
-      // Scoped to AWS-native findings (vulnerability_findings) only -- does
-      // NOT include cloudops360-scanner-* results, a separate database with
-      // no connection to this one. See the Scanners tab's own banner.
-      topAssets: Array<{ resource: string; label: string; findingCount: number }>;
-      bySource: Array<{ source: string; label: string; count: number }>;
-      remediation: { open: number; resolved: number; suppressed: number };
-    }>('vulnerabilityManagement', '/api/vulnerability-management/dashboard');
+    return this.get<VulnerabilityDashboard>('vulnerabilityManagement', '/api/vulnerability-management/dashboard');
   }
   getFindings(params: { severity?: string; status?: string; finding_source?: string; region?: string; connection_id?: string; search?: string; page?: number; limit?: number; criticalNow?: boolean } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/findings${qs(params)}`);
@@ -1219,6 +1210,25 @@ export interface RemediationRequest {
   execution_result: { ok?: boolean; errorCode?: string; errorMessage?: string; snapshotId?: string; reason?: string; step?: string; observedState?: string } | null;
   rollback_of: string | null; target_config: { targetInstanceType?: string; zone?: string } | null;
   provider: 'aws' | 'gcp'; created_at: string; approved_at: string | null; executed_at: string | null;
+}
+
+/**
+ * Org-wide aggregate, no query params -- the Account filter cannot re-scope
+ * any of this without a backend change (see VulnerabilityManagement.tsx's
+ * Overview tab, which is explicit about which of its widgets are org-wide
+ * vs. connection-scoped). Since the 2026-09-05 scanner-platform unification,
+ * bySource/topAssets/bySeverity/remediation/openFindings all include
+ * scanner_* (SAST/SCA/secrets/IaC/container) findings alongside AWS-native
+ * ones -- this was previously AWS-native-only, no longer true.
+ */
+export interface VulnerabilityDashboard {
+  openFindings: number;
+  bySeverity: Record<string, number>;
+  riskScore: number;
+  compliance: { benchmarksEvaluated: number; averagePassRate: number | null };
+  topAssets: Array<{ resource: string; label: string; findingCount: number }>;
+  bySource: Array<{ source: string; label: string; count: number }>;
+  remediation: { open: number; resolved: number; suppressed: number };
 }
 
 export interface VulnerabilityFinding {

@@ -1,10 +1,12 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { RoadmapPanel } from '../components/EmptyState';
 import { ScanHistoryTable } from '../components/ScanHistoryTable';
+import { StatCard } from '../components/StatCard';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
+import { api } from '../lib/api';
 
 const TABS = ['Overview', 'Applications', 'APIs', 'URLs & Domains', 'DAST Results', 'SAST Results', 'API Security Findings', 'Web Vulnerabilities', 'Testing History'] as const;
 type Tab = typeof TABS[number];
@@ -25,6 +27,19 @@ export function ApplicationSecurity() {
   useEffect(() => {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
+
+  // Real counts for the two tabs that aren't roadmap placeholders --
+  // Promise.allSettled since an org that's never run one shouldn't blank the
+  // other's card.
+  const [scanCounts, setScanCounts] = useState<{ sast: number; web: number }>({ sast: 0, web: 0 });
+  const loadScanCounts = useCallback(async () => {
+    const [sast, web] = await Promise.allSettled([api.listScans('semgrep', { limit: 1 }), api.listScans('nuclei', { limit: 1 })]);
+    setScanCounts({
+      sast: sast.status === 'fulfilled' ? sast.value.total : 0,
+      web: web.status === 'fulfilled' ? web.value.total : 0,
+    });
+  }, []);
+  useEffect(() => { void loadScanCounts(); }, [loadScanCounts]);
 
   return (
     <div className="min-w-0">
@@ -54,11 +69,17 @@ export function ApplicationSecurity() {
       </div>
 
       {tab === 'Overview' && (
-        <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-6 py-8">
-          <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Positioning today, not yet a functionally rich module</p>
-          <p className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
-            No Application, API, or URL/domain entity exists in the product yet — every tab below is honestly scoped rather than showing fabricated data. SAST Results and Web Vulnerabilities are the exception: real, persisted Semgrep/Nuclei scan history. The rest are on the roadmap.
-          </p>
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="SAST Scans (Semgrep)" value={String(scanCounts.sast)} icon="code" />
+            <StatCard label="Web Scans (Nuclei)" value={String(scanCounts.web)} icon="globe" />
+          </div>
+          <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 px-6 py-8">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">Positioning today, not yet a functionally rich module</p>
+            <p className="max-w-2xl text-xs text-slate-500 dark:text-slate-400">
+              No Application, API, or URL/domain entity exists in the product yet — every tab below is honestly scoped rather than showing fabricated data. SAST Results and Web Vulnerabilities above are the exception: real, persisted Semgrep/Nuclei scan history. The rest are on the roadmap.
+            </p>
+          </div>
         </div>
       )}
 

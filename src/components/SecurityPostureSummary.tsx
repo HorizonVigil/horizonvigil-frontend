@@ -1,18 +1,13 @@
 import { Link } from 'react-router-dom';
 import { StatCard } from './StatCard';
 import { Badge, severityTone } from './Badge';
+import type { VulnerabilityDashboard } from '../lib/api';
 
-/** Matches the real shape of api.getVulnerabilityDashboard()'s response --
- * declared locally (not imported) since that method returns an inline
- * anonymous type, not a named export. Structural typing means the real
- * response satisfies this without a cast. */
-export interface SecurityPostureDashboard {
-  openFindings: number;
-  bySeverity: Record<string, number>;
-  riskScore: number;
-  compliance: { benchmarksEvaluated: number; averagePassRate: number | null };
-  topAssets?: Array<{ resource: string; label: string; findingCount: number }>;
-}
+/** Alias, not a fresh type -- this used to be a locally-declared duplicate of
+ * api.getVulnerabilityDashboard()'s response (back when that method returned
+ * an inline anonymous type with no name to import). Kept as an export under
+ * this name since three call sites already import it that way. */
+export type SecurityPostureDashboard = VulnerabilityDashboard;
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 

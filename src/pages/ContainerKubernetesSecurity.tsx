@@ -35,16 +35,36 @@ export function ContainerKubernetesSecurity() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Real, live K8s inventory (EKS + GKE) for the Kubernetes Security tab --
+  // genuinely calls the cluster's own API server (see connector-aws/gcp's
+  // eksWorkloads.ts/gkeWorkloads.ts), not just a control-plane resource
+  // describe-call. Paired with an explicit "no vulnerability scanner
+  // connected" note below since kube-bench/kubescape are unimplemented --
+  // this is real inventory, not a security posture score. Promise.allSettled
+  // (not all) since an org with only one of EKS/GKE connected shouldn't blank
+  // the whole tab because the other provider's call 404s/errors.
+  const [k8sInventory, setK8sInventory] = useState<{ pods: number; nodes: number; deployments: number } | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [imageFindings, gcpRepos] = await Promise.all([
+      const [imageFindings, gcpRepos, eksPods, eksNodes, eksDeployments, gkePods, gkeDeployments] = await Promise.all([
         api.getFindingsBySource('container-images', { limit: 100 }),
         api.getGcpArtifactRegistryRepos({ limit: 50 }),
+        api.getEksPods({ limit: 1 }).catch(() => null),
+        api.getEksNodes({ limit: 1 }).catch(() => null),
+        api.getEksDeployments({ limit: 1 }).catch(() => null),
+        api.getGkePods({ limit: 1 }).catch(() => null),
+        api.getGkeDeployments({ limit: 1 }).catch(() => null),
       ]);
       setImages(imageFindings.items);
       setRegistries(gcpRepos.items);
+      setK8sInventory({
+        pods: (eksPods?.pagination.total ?? 0) + (gkePods?.pagination.total ?? 0),
+        nodes: eksNodes?.pagination.total ?? 0,
+        deployments: (eksDeployments?.pagination.total ?? 0) + (gkeDeployments?.pagination.total ?? 0),
+      });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load container security data.');
     } finally {
@@ -120,11 +140,18 @@ export function ContainerKubernetesSecurity() {
       )}
 
       {tab === 'Kubernetes Security' && (
-        <RoadmapPanel
-          icon="layers"
-          title="Kubernetes security posture isn't built yet"
-          description="Cluster/workload inventory already exists in the operational Clusters consoles (EKS/GKE). A dedicated posture view (RBAC risk, pod security standards, network policy gaps) is on the roadmap, not implemented."
-        />
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <StatCard label="Pods" value={String(k8sInventory?.pods ?? 0)} icon="box" caption="EKS + GKE, live" />
+            <StatCard label="Nodes" value={String(k8sInventory?.nodes ?? 0)} icon="server" caption="EKS, live" />
+            <StatCard label="Deployments" value={String(k8sInventory?.deployments ?? 0)} icon="layers" caption="EKS + GKE, live" />
+          </div>
+          <RoadmapPanel
+            icon="shield-alert"
+            title="No vulnerability/CVE overlay on this inventory yet"
+            description="The counts above are real, live cluster state (pulled directly from each connected cluster's own Kubernetes API, not just cloud-provider resource inventory). What's missing is a security scan on top of it — kube-bench (CIS benchmark) and Kubescape (posture/compliance) are both planned scanners in this platform but neither has been implemented yet, so there's no CVE, RBAC-risk, or pod-security-standard finding to show against these workloads today."
+          />
+        </div>
       )}
 
       {tab === 'Rancher' && (
