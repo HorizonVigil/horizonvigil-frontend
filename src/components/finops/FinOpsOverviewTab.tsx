@@ -182,7 +182,7 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
       {!hasAnyBilling && (
         <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
           Cloud connected successfully — cost data isn't available yet. Open an AWS or Azure account (Cloud Accounts → Account Inventory) and click "Sync Cost."
-          {connections.some((c) => c.provider === 'gcp') && ' GCP cost tracking isn’t built yet — GCP projects won’t show cost here regardless of sync.'}
+          {connections.some((c) => c.provider === 'gcp') && ' GCP projects need Cloud Billing export to BigQuery enabled first (GCP Console → Billing → Billing export), then click "Sync Billing" on the project — GCP cost stays $0 until that\'s done, even after a resource sync.'}
         </div>
       )}
 

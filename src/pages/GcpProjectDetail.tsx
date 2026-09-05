@@ -62,6 +62,7 @@ export function GcpProjectDetail() {
   const [permissionChecks, setPermissionChecks] = useState<PermissionCheckResult[]>([]);
   const [gcpIdentity, setGcpIdentity] = useState<GcpIdentitySummary | null>(null);
   const [validating, setValidating] = useState(false);
+  const [billingSyncing, setBillingSyncing] = useState(false);
   const [syncRuns, setSyncRuns] = useState<ValidationRun[]>([]);
   const [recurringFailures, setRecurringFailures] = useState<RecurringFailure[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -170,6 +171,28 @@ export function GcpProjectDetail() {
     }
   }
 
+  /**
+   * GCP has no "get my current spend" API the way AWS Cost Explorer does —
+   * the customer enables Cloud Billing export to BigQuery themselves, and
+   * this discovers that table (defaulting to searching this project) then
+   * queries it into cost_snapshots. Until this existed, GCP cost was a
+   * real, honestly-labeled $0 everywhere in FinOps regardless of actual
+   * spend — this is the fix, not a new limitation.
+   */
+  async function syncBilling() {
+    if (!id || billingSyncing) return;
+    setBillingSyncing(true);
+    try {
+      await api.discoverGcpBillingExport(id);
+      const result = await api.syncGcpBillingCost(id);
+      toast(result.synced > 0 ? `Synced ${result.synced} cost line item${result.synced === 1 ? '' : 's'} from your Cloud Billing export` : 'Synced — no cost data found for this project this month', 'success');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Billing sync failed — enable Cloud Billing export to BigQuery for this project first (GCP Console → Billing → Billing export).', 'error');
+    } finally {
+      setBillingSyncing(false);
+    }
+  }
+
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of resources) counts[r.category] = (counts[r.category] ?? 0) + 1;
@@ -270,6 +293,9 @@ export function GcpProjectDetail() {
         <Badge tone="neutral">{connection.environment}</Badge>
         <span className="text-xs text-slate-400 font-mono">{connection.gcp_project_id}</span>
         <div className="flex-1" />
+        <button type="button" onClick={() => void syncBilling()} disabled={billingSyncing} title="Finds this project's Cloud Billing export to BigQuery (enable it in GCP Console → Billing → Billing export if not set up yet) and pulls real month-to-date cost into cost_snapshots — powers Cost by Cloud/Account/Region/Service and Forecast on the Cost Management page." className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+          {billingSyncing ? 'Syncing…' : 'Sync Billing'}
+        </button>
         <button type="button" onClick={() => id && startDiscovery(id, 'gcpAccounts')} disabled={syncing} title="Scans this project for Compute Engine instances, Cloud Storage buckets, Cloud SQL instances, and GKE clusters" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           {syncing ? 'Working…' : 'Discover Resources'}
         </button>

@@ -574,7 +574,7 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
             {byServiceEntries.length === 0 && (
               <p className="text-sm text-slate-400 mt-3">
                 No cost data yet — open an AWS or Azure account's detail page (Cloud Accounts → Account Inventory) and click "Sync Cost."
-                {connections.some(c => c.provider === 'gcp') && ' GCP cost tracking isn’t built yet — GCP projects won’t show cost here regardless of sync.'}
+                {connections.some(c => c.provider === 'gcp') && ' GCP projects need Cloud Billing export to BigQuery enabled first (GCP Console → Billing → Billing export), then "Sync Billing" on the project.'}
               </p>
             )}
           </div>
@@ -862,11 +862,11 @@ export function CostManagementBody({ groupFilter }: { groupFilter: ResolvedGroup
               )}
               {budgetScopeType === 'connection' && (
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-slate-600 dark:text-slate-300">AWS/Azure Account</span>
-                  {/* AWS + Azure only, deliberately: GCP cost sync doesn't exist yet (see Cost Explorer's empty state), so a budget scoped to a GCP project could never actually track spend — offering it here would be a dead, misleading option, not just an empty one. */}
+                  <span className="text-slate-600 dark:text-slate-300">Account</span>
+                  {/* Every provider is offered now that GCP can populate cost_snapshots too (via Sync Billing, once Cloud Billing export to BigQuery is enabled) — sumMtdCost just sums cost_snapshots by connection_id regardless of provider. A GCP account without billing export configured yet will genuinely show $0 here, same honest behavior as a brand-new AWS/Azure account that hasn't synced. */}
                   <select required value={budgetScopeId} onChange={e => setBudgetScopeId(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
                     <option value="">Choose an account…</option>
-                    {connections.filter(c => c.provider === 'aws' || c.provider === 'azure').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </label>
               )}

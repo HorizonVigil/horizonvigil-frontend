@@ -258,6 +258,12 @@ class ApiClient {
   getGcpAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ActivityEntry>>('gcpAccounts', `/api/gcp-accounts/projects/${id}/activity${qs(params)}`);
   }
+  /** Searches BigQuery datasets in `bqProjectId` (defaults to this connection's own GCP project) for a standard Cloud Billing export table — see connector-gcp's gcpBilling.ts for why this can't be true auto-discovery. */
+  discoverGcpBillingExport(id: string, bqProjectId?: string) {
+    return this.post<{ bqProjectId: string; datasetId: string; tableId: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/billing/discover`, bqProjectId ? { bqProjectId } : {});
+  }
+  /** Pulls real month-to-date cost from the discovered billing export table into cost_snapshots — the GCP analog of syncAccountCost(). Requires discoverGcpBillingExport to have found a table first. */
+  syncGcpBillingCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/billing/sync`); }
 
   // ── azure-accounts-api ────────────────────────────────────────────────────
   // Same one-service-principal-connects-a-subscription shape as GCP's service
