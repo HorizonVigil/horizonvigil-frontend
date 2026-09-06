@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { NAV_MODULES } from '../lib/navConfig';
+import { isCloudOnlyMode } from '../lib/featureFlags';
 
 interface Command {
   id: string;
@@ -20,7 +21,13 @@ interface Command {
 function buildCommands(): Command[] {
   const commands: Command[] = [];
   const seen = new Set<string>();
+  const cloudOnly = isCloudOnlyMode();
   for (const mod of NAV_MODULES) {
+    // Same render-layer-only skip getVisibleModules() applies for the
+    // sidebar -- NAV_MODULES itself (and therefore ProtectedRoute's
+    // independent lookup) is untouched, this only keeps a hidden module's
+    // ~dozens of children out of Cmd+K search results.
+    if (cloudOnly && mod.hiddenInCloudOnlyMode) continue;
     if (mod.to && !seen.has(mod.to)) {
       seen.add(mod.to);
       commands.push({ id: mod.to, label: mod.label, group: mod.label, icon: mod.icon, to: mod.to });

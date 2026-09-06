@@ -17,8 +17,17 @@ describe('NAV_MODULES sections', () => {
     }
   });
 
-  it('every module has a unique icon (RBAC menu_key)', () => {
-    const icons = NAV_MODULES.map(m => m.icon);
+  it('every module has a unique icon (RBAC menu_key), except Cost Optimization\'s deliberate share with FinOps', () => {
+    // Cost Optimization is a thin cloud-only-release nav shortcut into
+    // FinOps' own existing page -- it intentionally shares FinOps' icon/RBAC
+    // menu_key (see navConfig.ts's inline comment) so an admin's one
+    // menu_permissions override for that domain consistently governs both.
+    // Safe because FinOps is never hidden in cloud-only mode, so this can't
+    // cause the Overview-widget-eligibility leak described on Cloud
+    // Security/Cloud Compliance's own icons below -- those two deliberately
+    // do NOT share Vulnerability Management's icon, for exactly that reason.
+    const KNOWN_SHARED_ICON_LABELS = new Set(['Cost Optimization']);
+    const icons = NAV_MODULES.filter(m => !KNOWN_SHARED_ICON_LABELS.has(m.label)).map(m => m.icon);
     expect(new Set(icons).size).toBe(icons.length);
   });
 
