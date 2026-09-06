@@ -512,7 +512,11 @@ export const NAV_MODULES: NavModule[] = [
   // the whole point of these three is to be visible when that mode is on;
   // outside cloud-only mode they're simply redundant with the entries their
   // "home" module (FinOps / Vulnerability Management) already has, which is
-  // harmless (same icon-derived RBAC domain, same destination).
+  // harmless (same destination either way). Cost Optimization shares
+  // FinOps's icon/RBAC key (FinOps is never hidden, so no leak risk); Cloud
+  // Security/Cloud Compliance deliberately do NOT share Vulnerability
+  // Management's -- see the comment on Cloud Security below for why that
+  // was tried first and caused a real Overview-widget leak.
   {
     label: 'Cost Optimization',
     icon: 'cost', // shares FinOps's RBAC menu_key -- same page, same permission concern (see NavModule.icon doc).
@@ -521,15 +525,30 @@ export const NAV_MODULES: NavModule[] = [
     children: [],
   },
   {
+    // Deliberately its OWN icon/RBAC key, NOT 'security' -- sharing
+    // Vulnerability Management's icon here was tried first and caused a
+    // real bug: getEnabledModules() (lib/overview/modules.ts) builds the
+    // Overview dashboard's widget-eligibility set from
+    // getVisibleModules().map(m => m.icon), so as long as ANY visible
+    // module carried icon 'security', every module:'security' widget in
+    // registryMeta.ts (Critical Vulnerabilities, Attack Paths, Security
+    // Posture, ...) stayed eligible -- even with Vulnerability Management
+    // itself correctly hidden. A distinct icon here means hiding
+    // Vulnerability Management actually removes 'security' from that set
+    // in cloud-only mode, and those widgets correctly disappear from
+    // Overview too. Route access is unaffected either way -- ProtectedRoute
+    // gates /cloud-security by module="Vulnerability Management" (a label
+    // lookup), never by this icon.
     label: 'Cloud Security',
-    icon: 'security', // shares Vulnerability Management's RBAC menu_key -- the route is still gated by ProtectedRoute module="Vulnerability Management" regardless of which nav entry links to it.
+    icon: 'cloud-security',
     section: 'Cloud Operations',
     to: CLOUD_SEC,
     children: [],
   },
   {
+    // Same reasoning and same fix as Cloud Security immediately above.
     label: 'Cloud Compliance',
-    icon: 'security', // same reasoning as Cloud Security above -- this is the existing real AWS Config-based Compliance tab, not a new framework-mapping module.
+    icon: 'cloud-compliance',
     section: 'Cloud Operations',
     to: tabLink(VULN, 'Compliance'),
     children: [],
