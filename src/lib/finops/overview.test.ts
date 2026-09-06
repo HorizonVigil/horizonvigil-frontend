@@ -35,7 +35,7 @@ function budget(over: Partial<Budget> = {}): Budget {
 }
 
 function rec(over: Partial<CostRecommendation> = {}): CostRecommendation {
-  return { id: 'r1', connection_id: 'c1', resource_id: null, category: 'idle', issue: 'x', recommended_action: 'y', potential_monthly_savings: 10, priority: 'low', status: 'open', created_at: '', external_key: null, excluded_reason: null, excluded_justification: null, excluded_by: null, excluded_at: null, excluded_until: null, assigned_to: null, last_notified_at: null, last_notified_by: null, ...over };
+  return { id: 'r1', connection_id: 'c1', resource_id: null, category: 'idle', issue: 'x', recommended_action: 'y', potential_monthly_savings: 10, priority: 'low', status: 'open', created_at: '', external_key: null, excluded_reason: null, excluded_justification: null, excluded_by: null, excluded_at: null, excluded_until: null, assigned_to: null, last_notified_at: null, last_notified_by: null, source: 'homegrown_heuristic', commitment_term: null, payment_option: null, ...over };
 }
 
 function anomaly(over: Partial<CostAnomaly> = {}): CostAnomaly {
