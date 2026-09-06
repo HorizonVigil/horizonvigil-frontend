@@ -476,6 +476,10 @@ class ApiClient {
   getEksDeployments(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/deployments${qs(params)}`); }
   getEksPods(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/pods${qs(params)}`); }
   getEksHelmReleases() { return this.get<NotIntegrated>('containers', '/api/containers/eks/helm-releases'); }
+  /** Real, per-pod EKS cost allocation (OpenCost/CNCF technique — node cost x pod's CPU-request share of that node's allocatable CPU). `clusterId` is "<region>/<clusterName>" (matches the scanner's own resource_id prefix); omitted aggregates every EKS cluster on this connection. Requires Discovery/Sync to have run since providerID/resource-request capture shipped, or nodes/pods will be missing the fields this needs. */
+  getEksCostAllocation(connectionId: string, clusterId?: string) {
+    return this.get<EksCostAllocation>('awsAccounts', `/api/aws-accounts/accounts/${connectionId}/eks/cost-allocation${clusterId ? `?clusterId=${encodeURIComponent(clusterId)}` : ''}`);
+  }
   getEksAccessEntries(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/access-entries${qs(params)}`); }
   getEksAuthMappings(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/auth-mappings${qs(params)}`); }
   getEksAddons(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/addons${qs(params)}`); }
@@ -1210,6 +1214,16 @@ export interface CostRecommendation {
   source: CostRecommendationSource; commitment_term: string | null; payment_option: string | null;
 }
 export type RecommendationListParams = { connectionId?: string; connectionIds?: string[]; category?: string; priority?: string; status?: string; page?: number; limit?: number }
+/** Real EKS Kubernetes cost allocation — see k8sCostAllocation.ts (connector-aws) for the full OpenCost-technique methodology and why every excludedReason exists (never a fabricated $0). */
+export interface EksPodCostAllocation { podName: string; namespace: string; nodeName?: string; monthlyCost: number | null; excludedReason?: 'no_matching_node' | 'node_cost_unavailable' | 'node_allocatable_unknown' | 'no_cpu_request' }
+export interface EksCostAllocation {
+  totalNodeCost: number; totalAllocatedCost: number; totalIdleCost: number;
+  byNamespace: { namespace: string; monthlyCost: number; podCount: number }[];
+  byWorkload: { key: string; kind: string; name: string; namespace: string; monthlyCost: number; podCount: number }[];
+  pods: EksPodCostAllocation[];
+  excludedNodeCount: number; excludedPodCount: number;
+  nodeCostSources: Record<string, number>; totalNodes: number; totalPods: number;
+}
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }
 
 export type RemediationActionType = 'stop_instance' | 'start_instance' | 'release_eip' | 'delete_volume' | 'delete_snapshot' | 'deregister_ami' | 'resize_instance';
