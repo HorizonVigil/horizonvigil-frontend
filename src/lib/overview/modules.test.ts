@@ -25,11 +25,15 @@ describe('getEnabledModules', () => {
 
     expect(enabled.has('security')).toBe(false); // Vulnerability Management
     expect(enabled.has('incidents')).toBe(false);
-    expect(enabled.has('organization')).toBe(false); // Organization Management
     expect(enabled.has('issues')).toBe(false);
     expect(enabled.has('dashboard')).toBe(false); // Custom Dashboards
-    expect(enabled.has('users')).toBe(false); // Users & Groups
+    expect(enabled.has('monitoring')).toBe(false);
+    expect(enabled.has('alerts')).toBe(false);
 
+    // Users & Groups / Organization Management stay visible in cloud-only
+    // mode -- access/org management is needed regardless of product scope.
+    expect(enabled.has('users')).toBe(true);
+    expect(enabled.has('organization')).toBe(true);
     // The cloud-only shortcuts are still visible, on their own distinct
     // icons -- proving they didn't get swept up in the exclusion above.
     expect(enabled.has('cloud-security')).toBe(true);
@@ -48,5 +52,7 @@ describe('getEnabledModules', () => {
     expect(enabled.has('issues')).toBe(true);
     expect(enabled.has('dashboard')).toBe(true);
     expect(enabled.has('users')).toBe(true);
+    expect(enabled.has('monitoring')).toBe(true);
+    expect(enabled.has('alerts')).toBe(true);
   });
 });

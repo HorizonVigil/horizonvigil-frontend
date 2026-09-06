@@ -574,6 +574,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'monitoring',
     section: 'Cloud Operations',
     to: MON,
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'CloudWatch', to: MON, real: true },
       { label: 'Metrics', to: tabLink(MON, 'Metrics'), real: true },
@@ -590,6 +591,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'alerts',
     section: 'Cloud Operations',
     to: ALERTS,
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'Active Alerts', to: ALERTS, real: true },
       { label: 'Alert Rules', to: tabLink(ALERTS, 'rules'), real: true, minRole: 'editor' },
@@ -644,7 +646,8 @@ export const NAV_MODULES: NavModule[] = [
     section: 'Platform',
     to: USERS,
     minRole: 'admin',
-    hiddenInCloudOnlyMode: true,
+    // Kept visible in cloud-only mode -- access/user management is needed
+    // regardless of which product surface is scoped down.
     children: [
       { label: 'Users', to: USERS, real: true },
       { label: 'Groups', to: tabLink(USERS, 'Groups'), real: true },
@@ -662,7 +665,7 @@ export const NAV_MODULES: NavModule[] = [
     section: 'Platform',
     to: ORG,
     minRole: 'admin',
-    hiddenInCloudOnlyMode: true,
+    // Kept visible in cloud-only mode -- same reasoning as Users & Groups above.
     children: [
       { label: 'Organizations', to: ORG, real: true },
       { label: 'Folders', to: tabLink(ORG, 'Folders'), real: true, minRole: 'editor' },
