@@ -306,7 +306,24 @@ export function DataTable<T>({
                 const sortDisabled = !c.sortValue || (!!server && !server.onSortChange);
                 return (
                   <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
-                    <button className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100 disabled:hover:text-slate-500 dark:disabled:hover:text-slate-400" onClick={() => c.sortValue && toggleSort(c.key)} disabled={sortDisabled}>
+                    {/* Real bug fixed here: a disabled sort button (server
+                        mode with no onSortChange -- most tables in this app,
+                        since few backend list endpoints accept a sort param
+                        yet) looked IDENTICAL to an enabled one at rest -- no
+                        opacity/cursor change, only a hover-state override
+                        that a user obviously never triggers on a button that
+                        does nothing. Confirmed via a live click-through: it
+                        reads as "sortable but broken," not "not sortable
+                        yet." disabled:cursor-default + disabled:opacity-60
+                        make the non-interactive state visible without a
+                        hover, matching this file's own doc comment's intent
+                        ("no dead click that silently no-ops"). */}
+                    <button
+                      className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100 disabled:hover:text-slate-500 dark:disabled:hover:text-slate-400 disabled:cursor-default disabled:opacity-60"
+                      onClick={() => c.sortValue && toggleSort(c.key)}
+                      disabled={sortDisabled}
+                      title={sortDisabled && c.sortValue ? 'Sorting isn’t available for this view yet' : undefined}
+                    >
                       {c.header}
                       {effectiveSortKey === c.key && <span>{effectiveSortDir === 'asc' ? '▲' : '▼'}</span>}
                     </button>

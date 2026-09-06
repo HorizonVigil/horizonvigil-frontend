@@ -599,7 +599,13 @@ class ApiClient {
   bulkUpdateFindingStatus(ids: string[], status: 'open' | 'resolved' | 'suppressed', reason?: string) {
     return this.patch<{ requestedCount: number; updatedCount: number; items: VulnerabilityFinding[] }>('vulnerabilityManagement', '/api/vulnerability-management/findings/bulk-status', reason ? { ids, status, reason } : { ids, status });
   }
-  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images' | 'gcp-scc' | 'defender', params: { page?: number; limit?: number } = {}) {
+  // severity/status/search were missing here even though the backend route
+  // (sources.ts) already reuses the same listFindings() as getFindings() and
+  // has always honored them -- these per-source tabs (Container Images, the
+  // 6 AWS-native sources) simply never had a way to send them. Confirmed via
+  // a live network capture: the backend already filters correctly on all
+  // three, this was a pure frontend gap.
+  getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images' | 'gcp-scc' | 'defender', params: { page?: number; limit?: number; severity?: string; status?: string; search?: string } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
   }
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
