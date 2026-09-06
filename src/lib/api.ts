@@ -371,6 +371,8 @@ class ApiClient {
 
   getAccountRecommendations(id: string) { return this.get<{ recommendations: CostRecommendation[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations`); }
   getAwsAccountsRecommendationsSummary() { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number }>('awsAccounts', '/api/aws-accounts/recommendations'); }
+  /** Real Reserved Instance / Savings Plan / Rightsizing recommendations from AWS Cost Explorer's own recommendation APIs — separate from the homegrown idle/unattached heuristic, which runs on its own schedule. Savings Plans generation is async on AWS's side; call this again later to pick up the result once savingsPlansStatus comes back 'generating'. */
+  syncAwsRecommendations(id: string) { return this.post<{ inserted: number; savingsPlansStatus: 'generating' | 'ready' | 'error' | 'not_started'; errors: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations/sync`); }
 
   getAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${id}/activity${qs(params)}`); }
   getAwsAccountsActivity(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/activity${qs(params)}`); }
@@ -1198,11 +1200,14 @@ export interface GitInstallation { id: string; org_id: string; installation_id: 
 export interface GitRepo { fullName: string; defaultBranch: string; private: boolean }
 export type ExclusionReason = 'business_critical' | 'performance_required' | 'temporary_workload' | 'false_positive' | 'other';
 export type ExclusionDuration = '30d' | '90d' | 'permanent' | 'custom';
+/** 'homegrown_heuristic' is the pre-existing AWS-only CPU/inventory estimate; the aws_ce-, azure_consumption-, and gcp_recommender-prefixed sources are real dollar figures computed by each cloud's own recommendation engine (FinOps Phase 1 — see ceRecommendations.ts). */
+export type CostRecommendationSource = 'homegrown_heuristic' | 'aws_ce_reservation' | 'aws_ce_savings_plan' | 'aws_ce_rightsizing' | 'azure_consumption_reservation' | 'gcp_recommender_cud';
 export interface CostRecommendation {
   id: string; connection_id: string; resource_id: string | null; category: string; issue: string; recommended_action: string;
   potential_monthly_savings: number; priority: 'high' | 'medium' | 'low'; status: 'open' | 'applied' | 'dismissed'; created_at: string; external_key: string | null;
   excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
   assigned_to: string | null; last_notified_at: string | null; last_notified_by: string | null;
+  source: CostRecommendationSource; commitment_term: string | null; payment_option: string | null;
 }
 export type RecommendationListParams = { connectionId?: string; connectionIds?: string[]; category?: string; priority?: string; status?: string; page?: number; limit?: number }
 export interface CostAnomaly { id: string; connection_id: string; service: string; detected_at: string; usage_date: string; expected_cost: number; actual_cost: number; percent_change: number; dollar_impact: number; status: 'open' | 'acknowledged' | 'resolved'; created_at: string }

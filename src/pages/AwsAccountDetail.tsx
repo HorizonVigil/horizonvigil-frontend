@@ -85,6 +85,7 @@ export function AwsAccountDetail() {
   const [credentials, setCredentials] = useState<AccountCredentials | null>(null);
   const [accountCost, setAccountCost] = useState<{ monthToDate: number; byService: Record<string, number> } | null>(null);
   const [syncingCost, setSyncingCost] = useState(false);
+  const [syncingRecommendations, setSyncingRecommendations] = useState(false);
   const [curSyncing, setCurSyncing] = useState(false);
   const [curProgress, setCurProgress] = useState('');
   const [permissionRun, setPermissionRun] = useState<ValidationRun | null>(null);
@@ -293,6 +294,24 @@ export function AwsAccountDetail() {
       toast(err instanceof ApiError ? err.message : 'Cost sync failed', 'error');
     } finally {
       setSyncingCost(false);
+    }
+  }
+
+  async function syncRecommendations() {
+    if (!id) return;
+    setSyncingRecommendations(true);
+    try {
+      const result = await api.syncAwsRecommendations(id);
+      const spNote = result.savingsPlansStatus === 'generating'
+        ? ' — AWS is still computing Savings Plan recommendations; click Sync again in a bit to pick those up.'
+        : result.savingsPlansStatus === 'error' ? ' — Savings Plan recommendations hit an error (see below).' : '';
+      toast(`Synced ${result.inserted} real recommendation${result.inserted === 1 ? '' : 's'} from AWS Cost Explorer${spNote}`, result.errors.length ? 'error' : 'success');
+      if (result.errors.length) toast(result.errors.join(' / '), 'error');
+      setRecommendations((await api.getAccountRecommendations(id)).recommendations);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Recommendation sync failed', 'error');
+    } finally {
+      setSyncingRecommendations(false);
     }
   }
 
@@ -752,12 +771,19 @@ export function AwsAccountDetail() {
       )}
 
       {tab === 'Recommendations' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-500 dark:text-slate-400">Idle/unattached and CPU-based rightsizing run automatically. Reserved Instance, Savings Plan, and AWS's own rightsizing analysis require a sync — AWS computes these from your real usage history.</p>
+            <button type="button" onClick={() => void syncRecommendations()} disabled={syncingRecommendations} title="Calls AWS Cost Explorer's GetReservationPurchaseRecommendation, GetRightsizingRecommendation, and GetSavingsPlansPurchaseRecommendation for this account" className="text-xs rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-2.5 py-1.5 shrink-0 ml-3">
+              {syncingRecommendations ? 'Syncing…' : 'Sync Recommendations'}
+            </button>
+          </div>
           {recommendations.map(rec => (
             <div key={rec.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Badge tone={rec.priority === 'high' ? 'critical' : rec.priority === 'medium' ? 'warning' : 'good'}>{rec.priority}</Badge>
+                  {rec.source !== 'homegrown_heuristic' && <Badge tone="good">AWS-computed</Badge>}
                   <span className="text-sm font-medium text-slate-800 dark:text-slate-100">{rec.issue}</span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{rec.recommended_action}</p>
