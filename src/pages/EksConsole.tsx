@@ -9,7 +9,7 @@ import { Icon } from '../components/icons';
 import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useToast } from '../lib/toast';
-import { api, friendlyErrorMessage, type CloudResource } from '../lib/api';
+import { api, friendlyErrorMessage, type CloudResource, type EksCostAllocation } from '../lib/api';
 import {
   DetailField, DetailSection, RelatedList, RelatedRow, RawMetadata, ContainerSpecPanel,
   bytesFromK8sQuantity, formatAge, conditionTone, podHealthTone, containerStateSummary,
@@ -21,7 +21,7 @@ import {
 // since both are AWS-only container platforms discovered via the same
 // connection). Split out from the old unified Clusters.tsx so this page
 // only ever shows AWS data — see the multi-cloud K8s consoles plan.
-const TABS = ['EKS Clusters', 'Node Groups', 'Nodes', 'Namespaces', 'Deployments', 'Pods', 'Helm Releases', 'ECS Clusters', 'ECS Services', 'ECS Tasks'] as const;
+const TABS = ['EKS Clusters', 'Node Groups', 'Nodes', 'Namespaces', 'Deployments', 'Pods', 'Cost & Optimization', 'Helm Releases', 'ECS Clusters', 'ECS Services', 'ECS Tasks'] as const;
 type Tab = typeof TABS[number];
 
 function displayValue(value: unknown, fallback = '—'): string {
@@ -75,6 +75,16 @@ export function EksConsole() {
   const [iamOidcProviders, setIamOidcProviders] = useState<CloudResource[]>([]);
   const [eksAddons, setEksAddons] = useState<CloudResource[]>([]);
   const [selected, setSelected] = useState<CloudResource | null>(null);
+
+  // Cost & Optimization tab -- loaded on demand (needs one cluster's real
+  // AWS credentials for the Pricing API fallback, so it can't be
+  // Promise.all'd with everything else above, and doesn't make sense
+  // aggregated across "All accounts" the way the read-only inventory tabs
+  // above do).
+  const [costClusterKey, setCostClusterKey] = useState(''); // "<connection_id>|<region>/<clusterName>"
+  const [costAllocation, setCostAllocation] = useState<EksCostAllocation | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
+  const [costError, setCostError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -157,6 +167,27 @@ export function EksConsole() {
 
 
   useEffect(() => { void load(); }, [load, refreshToken]);
+
+  // Auto-select the first real EKS cluster once the fleet list loads, if
+  // nothing's picked yet (or the previously-picked one disappeared).
+  useEffect(() => {
+    if (eksClusters.length === 0) return;
+    const keys = eksClusters.map(c => `${c.connection_id}|${c.region}/${c.resource_name}`);
+    if (!costClusterKey || !keys.includes(costClusterKey)) setCostClusterKey(keys[0]);
+  }, [eksClusters, costClusterKey]);
+
+  useEffect(() => {
+    if (tab !== 'Cost & Optimization' || !costClusterKey) return;
+    const [connectionId, clusterId] = costClusterKey.split('|');
+    let cancelled = false;
+    setCostLoading(true);
+    setCostError(null);
+    api.getEksCostAllocation(connectionId, clusterId)
+      .then(res => { if (!cancelled) setCostAllocation(res); })
+      .catch(err => { if (!cancelled) setCostError(friendlyErrorMessage(err, 'Failed to load cost allocation.')); })
+      .finally(() => { if (!cancelled) setCostLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, costClusterKey]);
 
   const ecsClusterNameByArn = useMemo(
     () => new Map(
@@ -389,6 +420,91 @@ export function EksConsole() {
       )}
       {tab === 'Pods' && (
         <DataTable columns={podColumns} rows={eksPods} rowKey={p => p.id} onRowClick={setSelected} emptyMessage="No pods discovered yet." />
+      )}
+      {tab === 'Cost & Optimization' && (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium text-slate-500 dark:text-slate-400" htmlFor="cost-cluster-select">Cluster</label>
+            <select
+              id="cost-cluster-select"
+              className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5"
+              value={costClusterKey}
+              onChange={e => setCostClusterKey(e.target.value)}
+            >
+              {eksClusters.map(c => (
+                <option key={c.id} value={`${c.connection_id}|${c.region}/${c.resource_name}`}>
+                  {c.resource_name} ({c.region})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            Cost is allocated proportionally to each running pod's CPU request as a share of its node's allocatable CPU
+            (the OpenCost technique) — memory-weighted blending isn't factored in yet. Node cost uses this month's
+            actual AWS-billed cost when Cost &amp; Usage Report data is available for that instance, otherwise AWS's
+            on-demand list price for its instance type and region (not your actual Reserved Instance/Savings-Plan-discounted
+            rate). Fargate-backed pods and pods with no declared CPU request are excluded from allocation, not shown as $0.
+          </p>
+
+          {eksClusters.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No EKS clusters discovered yet.</p>}
+          {costLoading && <p className="text-sm text-slate-400 py-6 text-center">Loading cost allocation…</p>}
+          {costError && <p className="text-sm text-red-500 py-6 text-center">{costError}</p>}
+
+          {!costLoading && !costError && costAllocation && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <StatCard label="Total Node Cost" value={`$${costAllocation.totalNodeCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo`} />
+                <StatCard label="Allocated to Pods" value={`$${costAllocation.totalAllocatedCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo`} />
+                <StatCard label="Idle / Unattributed" value={`$${costAllocation.totalIdleCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo`} />
+                <StatCard label="Excluded Pods" value={String(costAllocation.excludedPodCount)} caption={costAllocation.excludedNodeCount > 0 ? `${costAllocation.excludedNodeCount} node(s) excluded too` : undefined} />
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Cost by Namespace</h3>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-500 dark:text-slate-400">
+                      <tr><th className="text-left px-4 py-2">Namespace</th><th className="text-left px-4 py-2">Pods</th><th className="text-right px-4 py-2">Monthly Cost</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {costAllocation.byNamespace.map(n => (
+                        <tr key={n.namespace}>
+                          <td className="px-4 py-2">{n.namespace}</td>
+                          <td className="px-4 py-2">{n.podCount}</td>
+                          <td className="px-4 py-2 text-right tabular-nums font-medium">${n.monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                      {costAllocation.byNamespace.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-400">No allocated cost yet.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Cost by Workload</h3>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 text-xs text-slate-500 dark:text-slate-400">
+                      <tr><th className="text-left px-4 py-2">Workload</th><th className="text-left px-4 py-2">Namespace</th><th className="text-left px-4 py-2">Pods</th><th className="text-right px-4 py-2">Monthly Cost</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {costAllocation.byWorkload.map(w => (
+                        <tr key={w.key}>
+                          <td className="px-4 py-2">{w.name} <span className="text-xs text-slate-400">({w.kind})</span></td>
+                          <td className="px-4 py-2">{w.namespace}</td>
+                          <td className="px-4 py-2">{w.podCount}</td>
+                          <td className="px-4 py-2 text-right tabular-nums font-medium">${w.monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                      {costAllocation.byWorkload.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">No allocated cost yet.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       )}
       {tab === 'Helm Releases' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
