@@ -9,6 +9,7 @@ import { useOrg } from '../lib/orgContext';
 import { supabase } from '../lib/supabase';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
+import { isBillingEnabled } from '../lib/featureFlags';
 import { api, type Role, type RecommendationRules, type GitInstallation, type GitRepo } from '../lib/api';
 
 const TIMEZONES = ['UTC', 'America/New_York', 'America/Los_Angeles', 'America/Chicago', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
@@ -664,6 +665,30 @@ export function Settings() {
               <p className="text-xs text-slate-400">
                 API key management moved to <Link to="/users-groups" className="text-brand-600 dark:text-brand-400 hover:underline">Users &amp; Groups</Link>.
               </p>
+            </div>
+
+            {/* Cloud-only go-live: Organization Management / Users & Groups /
+                Subscription are hidden from the primary nav in that mode
+                (see navConfig.ts's hiddenInCloudOnlyMode), but remain fully
+                real, unchanged pages -- these are plain links into them, not
+                a content merge, so Settings stays the one discoverable
+                jumping-off point for org/user/billing administration
+                regardless of which nav mode is active. */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-3">Organization & Access</h3>
+              <div className="flex flex-col gap-2 text-sm">
+                <Link to="/organization" className="flex items-center justify-between text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400">
+                  <span>Organization</span><span aria-hidden="true">→</span>
+                </Link>
+                <Link to="/users-groups" className="flex items-center justify-between text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400">
+                  <span>Users & Roles</span><span aria-hidden="true">→</span>
+                </Link>
+                {isBillingEnabled() && (
+                  <Link to="/subscription" className="flex items-center justify-between text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400">
+                    <span>Billing</span><span aria-hidden="true">→</span>
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
         </div>

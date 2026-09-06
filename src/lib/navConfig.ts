@@ -58,7 +58,7 @@
  * `minRole` = minimum role required (e.g. 'editor' means editor+)
  */
 
-import { isBillingEnabled } from './featureFlags';
+import { isBillingEnabled, isCloudOnlyMode } from './featureFlags';
 
 export type Role = 'viewer' | 'editor' | 'billing_admin' | 'admin' | 'owner';
 
@@ -118,6 +118,16 @@ export interface NavModule {
    * routing, or RBAC. Modules are bucketed by this at render time; array
    * order within NAV_MODULES is otherwise unaffected. */
   section?: string;
+  /** Hidden from the sidebar (getVisibleModules) and Cmd+K (CommandPalette's
+   * own separate NAV_MODULES scan) when isCloudOnlyMode() is on — a
+   * render-layer-only filter. Deliberately NOT a removal from this array:
+   * ProtectedRoute looks a module up by label in this exact array
+   * independent of getVisibleModules, so a module tagged here stays fully
+   * reachable by direct URL for any role that already had access. See
+   * featureFlags.ts's isCloudOnlyMode() doc comment for why (the existing
+   * isBillingEnabled()-splices-Subscription-out-of-this-array precedent
+   * blocks direct URL access too, which this must not do). */
+  hiddenInCloudOnlyMode?: boolean;
 }
 
 const OVERVIEW = '/overview';
@@ -208,6 +218,10 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'security',
     section: 'Security',
     to: VULN,
+    // Cloud-only go-live: the Cloud Security / Cloud Compliance shortcuts
+    // below (new top-level modules) surface this module's real
+    // cloud-posture content without needing the whole workspace visible.
+    hiddenInCloudOnlyMode: true,
     children: [
       // ── Overview ──────────────────────────────────────────────────────
       { label: 'Vulnerability Overview', to: VULN, real: true, group: 'Overview' },
@@ -447,6 +461,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'dashboard',
     section: 'Cloud Operations',
     to: DASHBOARDS,
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'My Dashboards', to: DASHBOARDS, real: true },
       { label: 'Shared Dashboards', to: tabLink(DASHBOARDS, 'shared'), real: true },
@@ -483,6 +498,41 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Cost Anomalies', to: sectionTabLink(FINOPS, 'Cost Optimization', 'Cost Anomalies'), real: true, group: 'Cost Optimization' },
       { label: 'Optimization History', to: sectionTabLink(FINOPS, 'Cost Optimization', 'History'), real: true, group: 'Cost Optimization' },
     ],
+  },
+  // ── Cloud-only go-live shortcuts ──────────────────────────────────────
+  // Three thin top-level entries added for the cloud-only release so its
+  // nav can show "Cost Optimization"/"Cloud Security"/"Cloud Compliance" as
+  // their own items (per that release's spec) without duplicating any real
+  // page or restructuring the modules that already own this content. Each
+  // `to` points at content that already exists and is already reachable via
+  // FinOps/Vulnerability Management above -- these are extra doors into the
+  // same rooms, not new rooms. `real: false`-style hiding doesn't apply to
+  // modules (only NavChild) so there's nothing to flip once real; there's
+  // nothing unbuilt here to begin with. Not tagged hiddenInCloudOnlyMode --
+  // the whole point of these three is to be visible when that mode is on;
+  // outside cloud-only mode they're simply redundant with the entries their
+  // "home" module (FinOps / Vulnerability Management) already has, which is
+  // harmless (same icon-derived RBAC domain, same destination).
+  {
+    label: 'Cost Optimization',
+    icon: 'cost', // shares FinOps's RBAC menu_key -- same page, same permission concern (see NavModule.icon doc).
+    section: 'Cloud Operations',
+    to: sectionTabLink(FINOPS, 'Cost Optimization', 'Recommendations'),
+    children: [],
+  },
+  {
+    label: 'Cloud Security',
+    icon: 'security', // shares Vulnerability Management's RBAC menu_key -- the route is still gated by ProtectedRoute module="Vulnerability Management" regardless of which nav entry links to it.
+    section: 'Cloud Operations',
+    to: CLOUD_SEC,
+    children: [],
+  },
+  {
+    label: 'Cloud Compliance',
+    icon: 'security', // same reasoning as Cloud Security above -- this is the existing real AWS Config-based Compliance tab, not a new framework-mapping module.
+    section: 'Cloud Operations',
+    to: tabLink(VULN, 'Compliance'),
+    children: [],
   },
   {
     label: 'Clusters',
@@ -535,6 +585,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'issues',
     section: 'Cloud Operations',
     to: ISSUES,
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'All Issues', to: ISSUES, real: true },
     ],
@@ -544,6 +595,7 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'incidents',
     section: 'Cloud Operations',
     to: INCIDENTS,
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'All Incidents', to: INCIDENTS, real: true },
       { label: 'Open', to: tabLink(INCIDENTS, 'Open'), real: true },
@@ -573,6 +625,7 @@ export const NAV_MODULES: NavModule[] = [
     section: 'Platform',
     to: USERS,
     minRole: 'admin',
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'Users', to: USERS, real: true },
       { label: 'Groups', to: tabLink(USERS, 'Groups'), real: true },
@@ -590,6 +643,7 @@ export const NAV_MODULES: NavModule[] = [
     section: 'Platform',
     to: ORG,
     minRole: 'admin',
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'Organizations', to: ORG, real: true },
       { label: 'Folders', to: tabLink(ORG, 'Folders'), real: true, minRole: 'editor' },
@@ -643,6 +697,7 @@ export const NAV_MODULES: NavModule[] = [
     section: 'Platform',
     to: SUBSCRIPTION,
     roles: ['billing_admin', 'admin', 'owner'] as Role[],
+    hiddenInCloudOnlyMode: true,
     children: [
       { label: 'Plans', to: SUBSCRIPTION, real: true },
       { label: 'Usage', to: tabLink(SUBSCRIPTION, 'Usage'), real: true },
@@ -722,7 +777,9 @@ export function findNavChild(parentIcon: string, label: string): NavChild | unde
  * with no visible children is hidden entirely.
  */
 export function getVisibleModules(role: Role, permissions?: Record<string, MenuPermissionLevel> | null): NavModule[] {
+  const cloudOnly = isCloudOnlyMode();
   return NAV_MODULES
+    .filter((mod) => !(cloudOnly && mod.hiddenInCloudOnlyMode))
     .filter((mod) => canSeeModule(mod, role, permissions))
     .map((mod) => ({
       ...mod,
