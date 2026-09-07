@@ -3,3 +3,8 @@ dist/
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js
+
+# Playwright (e2e/auth.setup.ts writes a real logged-in session here)
+/e2e/.auth/
+/playwright-report/
+/test-results/
