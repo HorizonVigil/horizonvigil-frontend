@@ -6,5 +6,5 @@ export default defineConfig({
   // docblock pragma didn't take effect on this vitest version). Verified
   // the existing pure-logic .test.ts suite is unaffected by the switch
   // from the default 'node' environment (163/163 still pass).
-  test: { include: ['src/**/*.test.{ts,tsx}'], environment: 'jsdom' },
+  test: { include: ['src/**/*.test.{ts,tsx}'], environment: 'jsdom', setupFiles: ['src/test/setup.ts'] },
 });
