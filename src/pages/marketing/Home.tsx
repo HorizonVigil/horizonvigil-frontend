@@ -15,7 +15,6 @@ const MODULES = [
   { name: 'Clusters', desc: 'EKS and GKE in one view — workloads, node health, and cluster-level issues alongside everything else.' },
   { name: 'Monitoring & Alerts', desc: 'Resource-level metrics and alerting that already knows which account and org a resource belongs to.' },
   { name: 'Automation', desc: 'One-click and scheduled remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail.' },
-  { name: 'AI Copilot', desc: 'Ask about your environment in plain language and get answers grounded in your actual connected-account data, with cited sources — not a generic chatbot bolted on the side.' },
   { name: 'Reports & Dashboards', desc: 'Custom dashboards and scheduled reports built from the same data your team already sees day to day.' },
   { name: 'Users & RBAC', desc: 'Org-scoped roles down to the individual account — the same access model backing every module above.' },
 ];
@@ -37,13 +36,20 @@ const AI_FEATURES = [
   { title: 'Savings recommendations', desc: 'Idle and oversized resources are surfaced with a specific, actionable fix — not a generic "reduce costs" tip.' },
   { title: 'Finding prioritization', desc: 'Vulnerability and misconfiguration findings are ranked by real exposure, so triage starts with what actually matters.' },
   { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline, one click from being applied.' },
-  { title: 'AI Copilot chat', desc: 'A conversational assistant that answers questions using your live account data — not a static model with no idea what you\'ve actually got connected.' },
 ];
 
+// Deliberately not claiming CIS/PCI DSS/ISO 27001/SOC 2/HIPAA as live scored
+// frameworks -- verified 2026-09-08 that compliance_benchmarks (the table
+// backing GET /api/vulnerability-management/compliance, which does have real
+// framework columns for cis_aws_foundations/pci_dss/iso_27001) has zero rows
+// in production for any framework, ever. The real, live compliance signal
+// today is AWS Config's own rule/conformance-pack evaluation (see
+// connector-aws's awsConfigFindings.ts / config.ts) -- this section now
+// describes that instead of a capability that has never produced a result.
 const COMPLIANCE_BENCHMARKS = [
-  { name: 'CIS AWS Foundations', desc: 'Automated checks against the CIS benchmark, scored per account with a live pass rate.' },
-  { name: 'PCI DSS', desc: 'Continuous evaluation against PCI DSS controls — not a once-a-year manual questionnaire.' },
-  { name: 'ISO 27001', desc: 'ISO 27001 control checks run on the same schedule as everything else, no separate audit tool required.' },
+  { name: 'AWS Config rules', desc: 'Pass/fail evaluation from the AWS Config rules you already have running in your account, surfaced without a separate console.' },
+  { name: 'Conformance packs', desc: 'Conformance pack results (often CIS- or PCI-aligned managed rule sets you\'ve enabled in AWS Config) show up as findings alongside everything else.' },
+  { name: 'More frameworks', desc: 'Independent CIS, PCI DSS, ISO 27001, and SOC 2 scoring — not dependent on what you\'ve already configured in AWS Config — is on the roadmap, not live yet.' },
 ];
 
 const SECURITY_FEATURES = [
@@ -51,7 +57,7 @@ const SECURITY_FEATURES = [
   { title: 'Org-scoped RBAC', desc: 'Every role grant is scoped to an organization and, where it matters, to a single cloud account — not a blanket admin toggle.' },
   { title: 'Full audit log', desc: 'Every write — connecting an account, running a remediation, changing a role — is recorded with who, what, and when.' },
   { title: 'Rate-limited by design', desc: 'API abuse protection is enforced atomically at the database layer, consistent across every instance of every service.' },
-  { title: 'Compliance mappings', desc: 'SOC 2 and CIS benchmark mappings on Business plans and above; ISO 27001 and HIPAA-ready posture on Enterprise.' },
+  { title: 'AWS Config compliance', desc: 'Real pass/fail results from the AWS Config rules and conformance packs already running in your account — not a separate, independent CIS/SOC 2/ISO 27001/HIPAA scoring engine, which isn\'t live yet.' },
   { title: 'SSO / SAML', desc: 'Single sign-on on Professional and above; full SAML SSO on Business and Enterprise.' },
 ];
 
@@ -138,7 +144,11 @@ function Hero() {
 }
 
 function TrustBar() {
-  const items = ['AWS', 'Google Cloud', 'EKS', 'GKE', 'AES-256 encryption', 'SOC 2 mapped'];
+  // 'SOC 2 mapped' removed 2026-09-08 -- verified no such mapping exists
+  // anywhere in the product (see SECURITY_FEATURES and COMPLIANCE_BENCHMARKS
+  // comments below for the full finding). Full audit log is real (writeAuditLog
+  // is used pervasively, confirmed live in Overview's own Recent Activity feed).
+  const items = ['AWS', 'Google Cloud', 'EKS', 'GKE', 'AES-256 encryption', 'Full audit log'];
   return (
     <div className="border-y border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
       <div className="max-w-6xl mx-auto px-5 py-6 flex items-center justify-center gap-x-8 gap-y-3 flex-wrap text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -293,19 +303,25 @@ function SecurityCompliance() {
 }
 
 /**
- * Distinct from SecurityCompliance above: that section covers plan-gated
- * compliance *mappings* (SOC 2, HIPAA-ready posture). This is the live,
- * automated benchmark scanning every connected account gets — real API
- * (getComplianceBenchmarks), real frameworks (see the ComplianceBenchmark
- * type in lib/api.ts), not the same claim restated.
+ * Distinct from SecurityCompliance above: that section covers AWS Config
+ * compliance signal (rules/conformance packs). This section is about
+ * breadth of independent framework support -- what's real today (AWS
+ * Config-derived) and what's roadmap (CIS/PCI DSS/ISO 27001/SOC 2 scored
+ * independently of a customer's own AWS Config setup). Both sections point
+ * at the same underlying honesty: compliance_benchmarks (the table with real
+ * cis_aws_foundations/pci_dss/iso_27001 framework columns, read by
+ * GET /api/vulnerability-management/compliance) has zero rows in production
+ * for any framework as of 2026-09-08 -- nothing populates it yet. Don't
+ * restate the old "live scoring" claim until something actually writes to
+ * that table.
  */
 function ComplianceBenchmarks() {
   return (
     <Section>
       <div className="text-center max-w-2xl mx-auto mb-14">
         <Eyebrow>Compliance</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Live benchmark scoring, not a once-a-year checklist.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Every connected account is checked against real compliance frameworks on an ongoing basis, with a pass rate you can see at any time — under Vulnerability Management › Compliance.</p>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Real signal from AWS Config, today.</h2>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">Every connected AWS account's Config rules and conformance packs are surfaced as findings you can see at any time — under Vulnerability Management › Compliance. Independent framework scoring is on the roadmap.</p>
       </div>
       <div className="grid sm:grid-cols-3 gap-5">
         {COMPLIANCE_BENCHMARKS.map(b => (
