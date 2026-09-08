@@ -17,17 +17,16 @@ describe('NAV_MODULES sections', () => {
     }
   });
 
-  it('every module has a unique icon (RBAC menu_key), except Cost Optimization\'s deliberate share with FinOps', () => {
-    // Cost Optimization is a thin cloud-only-release nav shortcut into
-    // FinOps' own existing page -- it intentionally shares FinOps' icon/RBAC
-    // menu_key (see navConfig.ts's inline comment) so an admin's one
-    // menu_permissions override for that domain consistently governs both.
-    // Safe because FinOps is never hidden in cloud-only mode, so this can't
-    // cause the Overview-widget-eligibility leak described on Cloud
-    // Security/Cloud Compliance's own icons below -- those two deliberately
-    // do NOT share Vulnerability Management's icon, for exactly that reason.
-    const KNOWN_SHARED_ICON_LABELS = new Set(['Cost Optimization']);
-    const icons = NAV_MODULES.filter(m => !KNOWN_SHARED_ICON_LABELS.has(m.label)).map(m => m.icon);
+  it('every module has a unique icon (RBAC menu_key)', () => {
+    // The "Cost Optimization" top-level shortcut used to deliberately share
+    // FinOps' icon here -- removed 2026-09-08 (user-reported nav
+    // duplication) because FinOps is never hidden in cloud-only mode, which
+    // made the shortcut a permanent, always-visible duplicate of FinOps' own
+    // Cost Optimization group rather than a stand-in for a hidden module
+    // (unlike Cloud Security/Cloud Compliance, whose home module,
+    // Vulnerability Management, genuinely is hidden in cloud-only mode).
+    // With it gone, every module's icon really should be unique now.
+    const icons = NAV_MODULES.map(m => m.icon);
     expect(new Set(icons).size).toBe(icons.length);
   });
 
@@ -78,6 +77,42 @@ describe('NAV_MODULES sections', () => {
    * string in App.tsx resolves to a real NAV_MODULES label so this class of
    * bug can't reoccur silently again.
    */
+  /**
+   * Regression tests for real nav duplication caught live 2026-09-08 (user
+   * report: "a lot of duplicates of menu and submenu"). Root cause in each
+   * case: the same underlying page got a nav entry added more than once
+   * across different spec passes, without anyone removing the earlier one.
+   * These assert the fix rather than just the absence of the exact bug, so
+   * a future PR can't silently reintroduce a third label for one of these
+   * destinations either.
+   */
+  it('does not carry a standalone "Cost Optimization" module -- FinOps is never hidden in cloud-only mode, so a separate top-level shortcut into its own Cost Optimization tab was a permanent, always-visible duplicate (unlike Cloud Security/Cloud Compliance, whose home module genuinely is hidden)', () => {
+    expect(NAV_MODULES.find(m => m.label === 'Cost Optimization')).toBeUndefined();
+  });
+
+  it('Vulnerability Management\'s Container & Kubernetes group has exactly one entry for the Docker & Container Images tab, not three ("Docker"/"Container Image Inventory"/"Container Vulnerabilities" all landing on the identical `to`)', () => {
+    const vuln = NAV_MODULES.find(m => m.label === 'Vulnerability Management');
+    expect(vuln).toBeTruthy();
+    const containerGroupSameTab = vuln!.children.filter(
+      c => c.group === 'Container & Kubernetes' && c.to === '/container-security?tab=Docker%20%26%20Container%20Images',
+    );
+    expect(containerGroupSameTab.map(c => c.label)).toEqual(['Container Image Inventory']);
+  });
+
+  it('Vulnerability Management\'s Code Security group has exactly one entry each for the Code/Dependency Vulnerabilities tabs, not two ("SAST"+"Code Vulnerabilities" and "SCA"+"Dependencies" each landing on the identical `to`)', () => {
+    const vuln = NAV_MODULES.find(m => m.label === 'Vulnerability Management');
+    expect(vuln).toBeTruthy();
+    const codeGroup = vuln!.children.filter(c => c.group === 'Code Security');
+    const byTo = new Map<string, string[]>();
+    for (const c of codeGroup) {
+      if (!c.to) continue;
+      byTo.set(c.to, [...(byTo.get(c.to) ?? []), c.label]);
+    }
+    for (const [to, labels] of byTo) {
+      expect(labels, `Code Security group: multiple labels land on ${to}: ${labels.join(', ')}`).toHaveLength(1);
+    }
+  });
+
   it('every ProtectedRoute module="..." in App.tsx resolves to a real NAV_MODULES label', () => {
     const appSource = Object.values(appSourceFiles)[0];
     expect(appSource, 'App.tsx raw import came back empty -- check the glob pattern still resolves').toBeTruthy();
