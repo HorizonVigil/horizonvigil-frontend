@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -162,6 +162,22 @@ export function CloudAccounts() {
   const [gcpConnections, setGcpConnections] = useState<GcpConnection[]>([]);
   const [azureConnections, setAzureConnections] = useState<AzureConnection[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
+  // URL-addressable open, for Overview's "Connect Cloud Account" quick
+  // action (previously ?tab=Onboarding, a tab this page hasn't had since
+  // onboarding folded into "+ Connect Cloud" + Bulk Onboarding -- that quick
+  // action silently landed on the default Overview tab instead of opening
+  // anything). ?action=connect opens the same chooser the button does, then
+  // clears itself so a refresh/back doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('action') === 'connect') {
+      setChooserOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [awsWizardOpen, setAwsWizardOpen] = useState(false);
   const [gcpWizardOpen, setGcpWizardOpen] = useState(false);
