@@ -75,6 +75,13 @@ export function Issues() {
   const [costItems, setCostItems] = useState<CostRecommendation[]>([]);
   const [findings, setFindings] = useState<VulnerabilityFinding[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  // Real per-source totals (pagination.total, a genuine server-side count —
+  // see openTotals below), independent of the 200-per-source row cap on
+  // costItems/findings/alerts above. Those stay capped for populating the
+  // visible triage table; "Total Open Issues" must not be derived from them
+  // (fixed 2026-09-08 — was previously counting rows in the capped, merged
+  // array, so a real "3,619 open" org showed "204" here).
+  const [openTotals, setOpenTotals] = useState({ cost: 0, security: 0, alert: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -119,6 +126,11 @@ export function Issues() {
       setCostItems(cost.items);
       setFindings(sec.items);
       setAlerts(al.items);
+      // Real totals, same api.<x>().pagination.total pattern already proven
+      // by Overview's OpenIssuesKpi widget (operationsWidgets.tsx) — a
+      // genuine server-side count, not the row-body length these calls also
+      // return (which is capped at the limit:200 requested above).
+      setOpenTotals({ cost: cost.pagination.total, security: sec.pagination.total, alert: al.pagination.total });
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
 
@@ -179,35 +191,33 @@ export function Issues() {
   ];
 
   const stats = useMemo(() => {
-    let open = 0;
+    // "Total Open Issues", "Cost Recommendations", and "Security + Alerts"
+    // are real per-source totals (openTotals, from each API's own
+    // pagination.total) — NOT counts of the capped, merged allIssues array.
+    // Fixed 2026-09-08: an org with 3,619 real open issues was showing "204"
+    // here, because this used to count rows in a 200-per-source cap.
+    // "High + Critical" stays sample-based: no backend endpoint returns a
+    // real count filtered by severity, so this is necessarily a statistic
+    // over whatever's in the capped, loaded sample — same disclosed
+    // limitation as the table rows below ("capped at 200 records in this
+    // triage view").
     let highOrCritical = 0;
-    let openCost = 0;
-    let openSecurityOrAlerts = 0;
-
     for (const issue of allIssues) {
-      if (issue.status === 'open') open += 1;
-
       if (
         issue.status !== 'resolved' &&
         (issue.severity === 'critical' || issue.severity === 'high')
       ) {
         highOrCritical += 1;
       }
-
-      if (issue.source === 'cost' && issue.status === 'open') {
-        openCost += 1;
-      }
-
-      if (
-        (issue.source === 'security' || issue.source === 'alert') &&
-        issue.status === 'open'
-      ) {
-        openSecurityOrAlerts += 1;
-      }
     }
 
-    return { open, highOrCritical, openCost, openSecurityOrAlerts };
-  }, [allIssues]);
+    return {
+      open: openTotals.cost + openTotals.security + openTotals.alert,
+      highOrCritical,
+      openCost: openTotals.cost,
+      openSecurityOrAlerts: openTotals.security + openTotals.alert,
+    };
+  }, [allIssues, openTotals]);
 
   const formatDate = useCallback((value: string, includeTime = false) => {
     const date = new Date(value);

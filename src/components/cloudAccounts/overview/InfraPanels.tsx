@@ -46,13 +46,13 @@ export function KubernetesSummary({ containers }: { containers: ContainersDash |
 
   if (!containers || total === 0) {
     return (
-      <SectionCard title="Kubernetes & Containers" icon="containers" to="/containers" linkLabel="Open">
+      <SectionCard title="Kubernetes & Containers" icon="containers" to="/resources/Containers" linkLabel="Open">
         <EmptyState icon="containers" title="No container workloads discovered" description="EKS / ECS / Cloud Run resources show up here once discovered." />
       </SectionCard>
     );
   }
   return (
-    <SectionCard title="Kubernetes & Containers" icon="containers" to="/containers" linkLabel="Open">
+    <SectionCard title="Kubernetes & Containers" icon="containers" to="/resources/Containers" linkLabel="Open">
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <MiniStat label="Clusters" value={(eks + ecs).toLocaleString()} />
         <MiniStat label="EKS" value={eks.toLocaleString()} />
