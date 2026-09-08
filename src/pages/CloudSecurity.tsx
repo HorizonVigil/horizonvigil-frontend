@@ -71,34 +71,49 @@ export function CloudSecurity() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // FIXED 2026-09-08 (live audit): this used to be a single Promise.all
+  // across all 9 independent fetches -- one of them throwing (a cold-start
+  // timeout, a transient 500, anything) rejected the whole thing, so every
+  // section on this page fell back to its blank/zero initial state and the
+  // page showed one generic "Load failed" banner. That's exactly what made
+  // Identity & Access Risk read as zero here while Cloud Accounts, which
+  // fetches the identical api.getIdentitySummary()/getIdentities() calls
+  // via Promise.allSettled (see its identities-tab loader), kept showing
+  // the real counts: same data, same endpoint, but this page discarded a
+  // result that had already come back successfully because a *different*
+  // call in the same batch failed. Promise.allSettled lets each section
+  // stand on its own result, and loadError now names only what actually
+  // failed instead of implying nothing loaded.
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    try {
-      const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.all([
-        api.getVulnerabilityDashboard(),
-        api.getFindingsBySource('aws-config', { limit: 50 }),
-        api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
-        api.getIdentitySummary(),
-        api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
-        api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
-        api.getComplianceBenchmarks({ limit: 20 }),
-        api.getFindingsBySource('gcp-scc', { limit: 50 }),
-        api.getFindingsBySource('defender', { limit: 50 }),
-      ]);
-      setDashboard(dash);
-      setMisconfigs(misconfig.items);
-      setExposed(exposedRes.items);
-      setIdentitySummary(idSummary);
-      setRiskyIdentities([...admin.items, ...broad.items]);
-      setBenchmarks(compliance.items);
-      setGcpFindings(gcpScc.items);
-      setAzureFindings(defender.items);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not load cloud security data.');
-    } finally {
-      setLoading(false);
-    }
+    const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.allSettled([
+      api.getVulnerabilityDashboard(),
+      api.getFindingsBySource('aws-config', { limit: 50 }),
+      api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
+      api.getIdentitySummary(),
+      api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
+      api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
+      api.getComplianceBenchmarks({ limit: 20 }),
+      api.getFindingsBySource('gcp-scc', { limit: 50 }),
+      api.getFindingsBySource('defender', { limit: 50 }),
+    ]);
+
+    const failed: string[] = [];
+    if (dash.status === 'fulfilled') setDashboard(dash.value); else failed.push('risk score & posture summary');
+    if (misconfig.status === 'fulfilled') setMisconfigs(misconfig.value.items); else failed.push('misconfigurations');
+    if (exposedRes.status === 'fulfilled') setExposed(exposedRes.value.items); else failed.push('exposed resources');
+    if (idSummary.status === 'fulfilled') setIdentitySummary(idSummary.value); else failed.push('identity summary');
+    const adminItems = admin.status === 'fulfilled' ? admin.value.items : [];
+    const broadItems = broad.status === 'fulfilled' ? broad.value.items : [];
+    if (admin.status === 'fulfilled' || broad.status === 'fulfilled') setRiskyIdentities([...adminItems, ...broadItems]);
+    if (admin.status === 'rejected' || broad.status === 'rejected') failed.push('risky identities');
+    if (compliance.status === 'fulfilled') setBenchmarks(compliance.value.items); else failed.push('compliance benchmarks');
+    if (gcpScc.status === 'fulfilled') setGcpFindings(gcpScc.value.items); else failed.push('GCP Security Command Center findings');
+    if (defender.status === 'fulfilled') setAzureFindings(defender.value.items); else failed.push('Azure Defender findings');
+
+    setLoadError(failed.length > 0 ? `Couldn't load: ${failed.join(', ')}. The rest of this page reflects real, loaded data.` : null);
+    setLoading(false);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
