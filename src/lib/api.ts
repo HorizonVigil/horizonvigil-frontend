@@ -113,10 +113,34 @@ class ApiClient {
     return this.currentOrgId;
   }
 
+  /**
+   * The organisation node currently selected in the scope picker, sent to
+   * every service so scope is resolved SERVER-side (Phase 1, 2026-09-08
+   * audits: "A client filter is not authorization").
+   *
+   * Previously the picker only narrowed things the browser happened to
+   * filter, which is why selecting a folder with four connections still
+   * showed all 1,805 org resources: any endpoint without a connection-id
+   * parameter simply returned org-wide data.
+   *
+   * Kept in memory rather than localStorage deliberately -- the picked
+   * scope is per-session UI state, and orgContext already owns its
+   * lifecycle. Org scope sends no header at all, which is exactly the
+   * request an older client makes, so the server default stays correct.
+   */
+  private activeScope: { type: 'org' | 'folder' | 'project'; id: string } | null = null;
+  setActiveScope(scope: { type: 'org' | 'folder' | 'project'; id: string } | null) {
+    this.activeScope = scope && scope.type !== 'org' ? scope : null;
+  }
+
   private async authHeaders(): Promise<Record<string, string>> {
     const { data: { session } } = await supabase.auth.getSession();
     const headers: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
     if (this.currentOrgId) headers['X-Org-Id'] = this.currentOrgId;
+    if (this.activeScope) {
+      headers['X-Scope-Type'] = this.activeScope.type;
+      headers['X-Scope-Id'] = this.activeScope.id;
+    }
     return headers;
   }
 
