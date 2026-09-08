@@ -28,6 +28,8 @@ const sources = import.meta.glob(
     '../pages/Issues.tsx',
     '../pages/CloudSecurity.tsx',
     '../pages/CustomDashboards.tsx',
+    '../components/cloudAccounts/OverviewPanel.tsx',
+    '../components/cloudAccounts/overview/SecurityPanel.tsx',
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
@@ -96,6 +98,35 @@ describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
     for (const kept of ['Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance']) {
       expect(tabs![1]).toContain(kept);
     }
+  });
+
+  it('the Overview Recommended Actions widget excludes V2 critical findings', () => {
+    // module: null in registryMeta, so unlike the security widgets this one
+    // is NOT removed by getEnabledModules() in cloud-only mode -- it needs
+    // its own gate or it renders CVEs as "Critical finding" on V1 Overview.
+    const src = code(source('widgets/operationsWidgets.tsx'));
+    const widget = src.slice(src.indexOf('RecommendedActionsWidget'));
+    expect(widget).toMatch(/isVulnerabilityDataEnabled\(\) && ctx\.can\.has\('security\.read'\)/);
+  });
+
+  it('Cloud Accounts Overview gates the V2 dashboard and omits Security & Risk when gated', () => {
+    const src = code(source('cloudAccounts/OverviewPanel.tsx'));
+    expect(src).toMatch(/isVulnerabilityDataEnabled\(\) && canSecurity \? api\.getVulnerabilityDashboard\(\)/);
+    // The section itself must not render at all while gated -- rendering it
+    // with null data produced a false "No open findings" claim.
+    expect(src).toMatch(/isVulnerabilityDataEnabled\(\) && \(\s*<SectionBoundary name="security">/);
+  });
+
+  it('SecurityPanel never reports unavailable data as "no open findings" (false-clean)', () => {
+    const src = code(source('overview/SecurityPanel.tsx'));
+    // Null (not fetched / denied / failed) and a genuine zero must be
+    // distinct branches, and the null branch must not claim nothing was found.
+    expect(src).toMatch(/if \(!security\) \{/);
+    expect(src).toMatch(/Not available/);
+    expect(src).toMatch(/if \(openFindings === 0\) \{/);
+    expect(src).not.toMatch(/!security \|\| openFindings === 0/);
+    // and its links must not dead-end into the gated route
+    expect(src).not.toMatch(/\/vulnerability-management/);
   });
 
   it('the custom-dashboard findings widget no longer renders a V2 count', () => {

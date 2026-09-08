@@ -175,7 +175,13 @@ export const RecommendedActionsWidget: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('recommended-actions', ctx, async () => {
     const [savings, findings, incidents] = await Promise.allSettled([
       ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
-      ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      // V2 excluded (2026-09-08 audit, "Overview recommendation cards still
+      // contain V2 CVEs"). This widget is module: null in registryMeta, so
+      // unlike the security widgets it is NOT removed by getEnabledModules()
+      // in cloud-only mode -- it rendered scanner CVEs as "Critical finding"
+      // on the V1 Overview and deep-linked each one into
+      // /vulnerability-management/findings/:id, a route that now redirects.
+      isVulnerabilityDataEnabled() && ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
       ctx.can.has('incident.read') ? api.getIncidents({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
     ]);
     const v = <T,>(r: PromiseSettledResult<T | null>) => (r.status === 'fulfilled' ? r.value : null);

@@ -27,9 +27,21 @@ export function SecurityPanel({ security }: { security: SecurityDash | null }) {
   const openFindings = n(security?.openFindings);
   const riskScore = n(security?.riskScore);
 
-  if (!security || openFindings === 0) {
+  // Missing data is not "clean" (2026-09-08 audit P0, "false zero and
+  // unknown-state collapse"). A null dashboard means the source was not
+  // fetched, not permitted, or failed -- previously that rendered the same
+  // reassuring "No open findings / nothing flagged" as a genuine zero.
+  if (!security) {
     return (
-      <SectionCard title="Security & Risk" icon="shield-alert" to="/vulnerability-management" linkLabel="Security">
+      <SectionCard title="Security & Risk" icon="shield-alert" to="/cloud-security" linkLabel="Cloud Security">
+        <EmptyState icon="shield-alert" title="Not available" description="Security findings could not be loaded for this scope. This is not a statement that nothing was found." />
+      </SectionCard>
+    );
+  }
+
+  if (openFindings === 0) {
+    return (
+      <SectionCard title="Security & Risk" icon="shield-alert" to="/cloud-security" linkLabel="Cloud Security">
         <EmptyState icon="shield-check" title="No open findings" description="Nothing flagged across your connected cloud resources." />
       </SectionCard>
     );
@@ -42,7 +54,7 @@ export function SecurityPanel({ security }: { security: SecurityDash | null }) {
   }));
 
   return (
-    <SectionCard title="Security & Risk" icon="shield-alert" to="/vulnerability-management" linkLabel="Security">
+    <SectionCard title="Security & Risk" icon="shield-alert" to="/cloud-security" linkLabel="Cloud Security">
       <div className="flex flex-col gap-4">
         <div className="flex items-end gap-6">
           <MiniStat label="Open findings" value={openFindings.toLocaleString()} tone="serious" />
@@ -50,7 +62,7 @@ export function SecurityPanel({ security }: { security: SecurityDash | null }) {
           {n(bySeverity.critical) > 0 && <MiniStat label="Critical" value={String(n(bySeverity.critical))} tone="critical" />}
         </div>
         {segments.length > 0 && (
-          <StackedBar rows={[{ segments }]} height={14} onSegmentClick={(sev) => navigate(`/vulnerability-management?severity=${sev.toLowerCase()}`)} />
+          <StackedBar rows={[{ segments }]} height={14} onSegmentClick={(sev) => navigate(`/cloud-security?tab=Misconfigurations&severity=${sev.toLowerCase()}`)} />
         )}
       </div>
     </SectionCard>

@@ -45,6 +45,7 @@ import { AttentionRequired } from './overview/AttentionRequired';
 import { ResourceDistribution, ResourceGrowth, DistributionPanel } from './overview/ResourcePanels';
 import { CostPanel } from './overview/CostPanel';
 import { SecurityPanel } from './overview/SecurityPanel';
+import { isVulnerabilityDataEnabled } from '../../lib/featureFlags';
 import { ConnectivityHealth, KubernetesSummary } from './overview/InfraPanels';
 import { SyncPanel } from './overview/SyncPanel';
 import { ActivityTimeline } from './overview/ActivityTimeline';
@@ -78,7 +79,12 @@ export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
         api.getGcpHealthDetailed(),
         api.getResourcesDashboard({ region, days }),
         canK8s ? api.getContainersDashboard() : Promise.resolve(null),
-        canSecurity ? api.getVulnerabilityDashboard() : Promise.resolve(null),
+        // V2 (2026-09-08 audit, "Cloud Accounts Security & Risk"): this fed
+        // SecurityPanel's open-findings/risk-score/severity bars and the
+        // "N critical security findings" attention item straight from the
+        // vulnerability dashboard -- 100% scanner/CVE data on a V1 page,
+        // deep-linking into /vulnerability-management, which now redirects.
+        isVulnerabilityDataEnabled() && canSecurity ? api.getVulnerabilityDashboard() : Promise.resolve(null),
         canCost ? api.getOverviewCost() : Promise.resolve(null),
         api.getEnvironments(),
       ]);
@@ -227,11 +233,18 @@ export function OverviewPanel({ refreshToken }: { refreshToken: number }) {
             ? <CostPanel agg={agg} monthToDate={d.cost?.monthToDate ?? null} potentialSavings={potentialSavings} />
             : <LockedSection title="Cloud Cost" reason="You don’t have cost access for this organization." />}
         </SectionBoundary>
-        <SectionBoundary name="security">
-          {canSecurity
-            ? <SecurityPanel security={d.security} />
-            : <LockedSection title="Security & Risk" reason="You don’t have security access for this organization." />}
-        </SectionBoundary>
+        {/* Security & Risk is omitted entirely while vulnerability data is
+            gated -- its only data source is the V2 dashboard. Rendering it
+            with null would claim "No open findings / nothing flagged", which
+            is the exact false-clean the audit calls out. Cloud Security owns
+            V1 posture. */}
+        {isVulnerabilityDataEnabled() && (
+          <SectionBoundary name="security">
+            {canSecurity
+              ? <SecurityPanel security={d.security} />
+              : <LockedSection title="Security & Risk" reason="You don’t have security access for this organization." />}
+          </SectionBoundary>
+        )}
       </div>
 
       {/* Infra health + Kubernetes (spec §17, §18) */}
