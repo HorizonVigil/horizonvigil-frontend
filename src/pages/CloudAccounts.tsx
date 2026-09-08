@@ -460,11 +460,6 @@ export function CloudAccounts() {
     if (row.provider === 'azure') return api.disconnectAzureAccount(row.id);
     return api.disconnectAccount(row.id);
   }
-  function deletePermanentlyFor(row: UnifiedAccountRow) {
-    if (row.provider === 'gcp') return api.deleteGcpAccountPermanently(row.id);
-    if (row.provider === 'azure') return api.deleteAzureAccountPermanently(row.id);
-    return api.deleteAccountPermanently(row.id);
-  }
 
   async function handleDisconnect(row: UnifiedAccountRow) {
     if (!(await confirm(`Disconnect "${row.name}"? It will be marked disconnected — discovered resources${row.provider === 'aws' ? ' and cost history are' : ' are'} kept.`))) return;
@@ -488,27 +483,7 @@ export function CloudAccounts() {
     }
   }
 
-  async function handleDeletePermanently(row: UnifiedAccountRow) {
-    if (!(await confirm(`Permanently delete "${row.name}"? This is irreversible — its discovered resources and history are deleted too, not just this connection. Use Disconnect instead if you might reconnect it later.`))) return;
-    await deletePermanentlyFor(row);
-    toast(`Deleted "${row.name}" permanently`, 'success');
-    await loadInventory();
-  }
 
-  async function handleBulkDeletePermanently() {
-    const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
-    const n = rows.length;
-    if (!(await confirm(`Permanently delete ${n} selected account(s)? This is irreversible — their discovered resources and history are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
-    const results = await Promise.allSettled(rows.map(deletePermanentlyFor));
-    const failed = results.filter(r => r.status === 'rejected').length;
-    setSelectedIds(new Set());
-    await loadInventory();
-    if (failed === 0) {
-      toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
-    } else {
-      toast(`Deleted ${n - failed} of ${n}; ${failed} failed.`, 'error');
-    }
-  }
 
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
@@ -642,7 +617,6 @@ export function CloudAccounts() {
               ? () => setUpdateCredsFor(r) : undefined
           }
           onDisconnect={() => void handleDisconnect(r)}
-          onDelete={() => void handleDeletePermanently(r)}
         />
       ),
     },
@@ -765,7 +739,11 @@ export function CloudAccounts() {
             {bulkMode && selectedIds.size > 0 && (
               <>
                 <button onClick={() => void handleBulkDisconnect()} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Disconnect {selectedIds.size} selected</button>
-                <button onClick={() => void handleBulkDeletePermanently()} className="text-xs rounded-md border border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5" title="Irreversible — also deletes resources and history for each selected account">Delete {selectedIds.size} selected permanently</button>
+                {/* Bulk "Delete N selected permanently" removed in V1 (2026-09-08
+                    audits, P0): it could destroy several connections and all their
+                    history without ever listing which accounts, their object counts,
+                    dependencies, or retention/legal-hold effects, behind one generic
+                    Confirm. Disconnect above is reversible and preserves history. */}
               </>
             )}
             <button
@@ -1131,7 +1109,7 @@ function SettingsTab({ folderProjectCount }: { folderProjectCount: number }) {
 }
 
 /** Row-level "⋯" menu. Provider-specific actions are hidden when they do not apply. */
-function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
+function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect }: {
   row: UnifiedAccountRow;
   validating: boolean;
   syncing: boolean;
@@ -1141,7 +1119,6 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   onToggleFavorite: () => void;
   onUpdateCredentials?: () => void;
   onDisconnect: () => void;
-  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
@@ -1262,7 +1239,23 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           )}
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
           <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
-          <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources and history">Delete Permanently</button>
+          {/* Phase 0.6 (2026-09-08 audits, P0 "Disable by default"): permanent
+              purge is gated server-side until it has an impact preview with
+              authoritative object counts, dependency/retention and legal-hold
+              checks, typed confirmation, recent-MFA reauthentication, an
+              asynchronous checkpointed job, and a recovery window. Shown
+              disabled with the reason rather than hidden, per the action
+              contract ("Disabled controls explain the unmet prerequisite"),
+              and rather than left enabled to hit a 403. */}
+          <button
+            role="menuitem"
+            disabled
+            aria-disabled="true"
+            className="w-full text-left px-3 py-1.5 text-slate-400 dark:text-slate-600 cursor-not-allowed"
+            title="Unavailable in this release. Permanent deletion needs an impact preview, retention and legal-hold checks, and typed confirmation before it can be offered safely. Use Disconnect — it stops collection and keeps your history."
+          >
+            Delete Permanently — unavailable
+          </button>
         </div>,
         document.body,
       )}
