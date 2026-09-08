@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge, severityTone } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { RoadmapPanel } from '../components/EmptyState';
+import { Icon } from '../components/icons';
 import { SecurityPostureSummary, type SecurityPostureDashboard } from '../components/SecurityPostureSummary';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
 import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type ComplianceBenchmark } from '../lib/api';
 
-const TABS = ['Overview', 'Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Cloud Vulnerabilities', 'Compliance', 'Multi-Cloud Coverage'] as const;
+// V1 scope decision (2026-09-08 audit): Cloud Security V1 is posture-only --
+// misconfigurations, exposure, identity risk, and provider-native compliance
+// evidence. No CVEs, no container/repo vulnerabilities, no scanners, no
+// attack paths. "Cloud Vulnerabilities" (removed below) was already just a
+// RoadmapPanel pointer into Vulnerability Management, not real data of its
+// own -- that whole surface is now gated for V2 (see App.tsx's redirects),
+// so there's nothing left for this tab to honestly point at.
+const TABS = ['Overview', 'Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance', 'Multi-Cloud Coverage'] as const;
 type Tab = typeof TABS[number];
 const PROVIDERS = ['aws', 'gcp', 'azure'] as const;
 const PROVIDER_LABEL: Record<typeof PROVIDERS[number], string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
@@ -33,6 +41,13 @@ function formatDate(value: string | null | undefined): string {
  * split this page follows.
  */
 export function CloudSecurity() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const showV2Notice = searchParams.get('notice') === 'vulnerability-management-is-v2';
+  const dismissV2Notice = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('notice');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const canSeeTab = useSubmenuAccess('cloud-security');
   const visibleTabs = TABS.filter(canSeeTab);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
@@ -107,6 +122,16 @@ export function CloudSecurity() {
   return (
     <div className="min-w-0">
       <FilterBar title="Cloud Security" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
+
+      {showV2Notice && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 px-4 py-3 mb-4 text-xs">
+          <Icon name="info" size={15} className="text-slate-500 dark:text-slate-400 shrink-0 mt-0.5" />
+          <p className="flex-1 text-slate-600 dark:text-slate-300">
+            Vulnerability scanning, CVEs, and scanner orchestration are being redesigned for a future release and aren't part of this view. Cloud Security here covers posture, misconfigurations, exposure, identity risk, and provider-native compliance evidence.
+          </p>
+          <button onClick={dismissV2Notice} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm leading-none shrink-0" aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       <div className="mb-5">
         <p className="max-w-3xl text-sm text-slate-500 dark:text-slate-400">
@@ -206,24 +231,16 @@ export function CloudSecurity() {
       {tab === 'Exposed Resources' && (
         <>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Resources IAM Access Analyzer flagged as shared outside your account or organization — a real, if partial, slice of "exposure." Full attack-path correlation (exposure + vulnerability + over-privileged identity on the same resource) lives in <Link to="/vulnerability-management?tab=Attack%20Paths" className="text-brand-600 dark:text-brand-400 hover:underline">Vulnerability Management's Attack Paths tab</Link>.
+            Resources IAM Access Analyzer flagged as shared outside your account or organization — a real, if partial, slice of "exposure." Full attack-path correlation (exposure + vulnerability + over-privileged identity on the same resource) isn't part of this release.
           </p>
           <DataTable columns={findingColumns} rows={exposed} rowKey={f => f.id} emptyMessage="No externally-shared resources found." />
         </>
       )}
 
-      {tab === 'Cloud Vulnerabilities' && (
-        <RoadmapPanel
-          icon="target"
-          title="See the full unified vulnerability list"
-          description="Cloud vulnerabilities across every source live in Vulnerability Management's Security Findings tab — this page doesn't duplicate that table, it links to it."
-        />
-      )}
-
       {tab === 'Compliance' && (
         <>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Benchmark pass rates across connected accounts. <Link to="/vulnerability-management?tab=Compliance" className="text-brand-600 dark:text-brand-400 hover:underline">View the full framework breakdown →</Link>
+            Benchmark pass rates across connected accounts, from provider-native evidence (AWS Config conformance packs) — not an independent framework certification.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {benchmarks.length === 0 && <p className="text-xs text-slate-400 col-span-full">No benchmarks evaluated yet.</p>}
