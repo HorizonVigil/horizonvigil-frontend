@@ -1199,6 +1199,7 @@ export interface RecommendationRules {
   rightsizingEnabled: boolean;
   rightsizingCpuThresholdPct: number;
   minMonthlySavingsToFlag: number;
+  minCpuDataPointsToFlag: number;
 }
 export interface GitInstallation { id: string; org_id: string; installation_id: number; account_login: string; connected_by: string | null; created_at: string }
 export interface GitRepo { fullName: string; defaultBranch: string; private: boolean }

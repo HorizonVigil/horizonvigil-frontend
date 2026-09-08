@@ -34,7 +34,7 @@ const CONNECTION_METHOD_LABELS: Record<string, string> = {
   service_principal: 'Service principal',
 };
 
-const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
+const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0, minCpuDataPointsToFlag: 3 };
 
 function formatSafeDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -272,6 +272,10 @@ export function Settings() {
           typeof value.minMonthlySavingsToFlag === 'number'
             ? value.minMonthlySavingsToFlag
             : DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
+        minCpuDataPointsToFlag:
+          typeof value.minCpuDataPointsToFlag === 'number'
+            ? value.minCpuDataPointsToFlag
+            : DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag,
       });
     }
 
@@ -486,6 +490,12 @@ export function Settings() {
         1_000_000_000,
         DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
       ),
+      minCpuDataPointsToFlag: Math.round(parseBoundedNumber(
+        String(rules.minCpuDataPointsToFlag),
+        1,
+        30,
+        DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag,
+      )),
     };
 
     try {
@@ -859,6 +869,13 @@ export function Settings() {
               <input type="number" min={1} max={100} value={rules.rightsizingCpuThresholdPct} disabled={!rules.rightsizingEnabled}
                 onChange={e => setRules(r => ({ ...r, rightsizingCpuThresholdPct: Number(e.target.value) || DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct }))}
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-500 dark:text-slate-400">Minimum days of CPU data required before flagging</span>
+              <input type="number" min={1} max={30} value={rules.minCpuDataPointsToFlag} disabled={!rules.rightsizingEnabled}
+                onChange={e => setRules(r => ({ ...r, minCpuDataPointsToFlag: Number(e.target.value) || DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag }))}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
+              <span className="text-xs text-slate-400 dark:text-slate-500">A single CPU sample isn't enough evidence to recommend a resize — this sets the floor.</span>
             </label>
 
             <label className="flex flex-col gap-1 text-sm pt-1">
