@@ -11,7 +11,7 @@ import { describeAvailability, type Availability } from './api';
  *    found" and a green zero.
  */
 const sources = import.meta.glob(
-  ['../pages/CloudSecurity.tsx', '../components/finops/FinOpsOverviewTab.tsx'],
+  ['../pages/CloudSecurity.tsx', '../components/finops/FinOpsOverviewTab.tsx', '../components/overview/widgets/securityWidgets.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -69,9 +69,14 @@ describe('security never claims clean without evaluation', () => {
 
   it('links identities to a tab that actually exists', () => {
     // ?tab=Identities is not in CloudAccounts' TABS, so it silently landed
-    // on Overview (audit AWS-P1-05).
+    // on Overview (audit AWS-P1-05). Checked on EVERY surface that links
+    // there -- the first fix missed the Overview widget, and the deployed
+    // bundle still carried the broken link.
     expect(sec).not.toMatch(/tab=Identities/);
     expect(sec).toMatch(/tab=Access/);
+    const widgets = code(source('/securityWidgets.tsx'));
+    expect(widgets).not.toMatch(/tab=Identities/);
+    expect(widgets).toMatch(/tab=Access/);
   });
 });
 

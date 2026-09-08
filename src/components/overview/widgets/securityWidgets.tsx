@@ -182,7 +182,10 @@ export const IdentityRiskWidget: WidgetComponent = ({ ctx }) => {
             <div><div className="text-lg font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{d.broad ?? 0}</div><div className="text-[10px] uppercase text-slate-400">broad</div></div>
             <div><div className="text-lg font-semibold text-orange-600 dark:text-orange-400 tabular-nums">{d.humanWithoutMfa ?? 0}</div><div className="text-[10px] uppercase text-slate-400">no MFA</div></div>
           </div>
-          <ViewAllLink to="/cloud-accounts?tab=Identities" label="Review identities" />
+          {/* ?tab=Identities is not a real tab, so this silently landed on
+              Cloud Accounts Overview (audit AWS-P1-05). The identity
+              inventory lives on the Access & Permissions tab. */}
+          <ViewAllLink to="/cloud-accounts?tab=Access" label="Review identities" />
         </div>
       )}
     </WidgetBody>
