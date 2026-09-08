@@ -70,6 +70,47 @@ const FAQS = [
   { q: 'Do you offer annual billing?', a: 'Yes — every paid plan has an annual price roughly 20% below paying monthly, shown on the pricing page.' },
 ];
 
+// Real, honest 5-stage product workflow -- every sentence traces to a real,
+// shipped capability (matches Docs.tsx / MODULES / AI_FEATURES wording
+// exactly). Deliberately does NOT borrow the "governed autonomy ladder"
+// framing from larger vision documents (simulate/approve/execute/rollback
+// stages) -- that policy-approval workflow doesn't exist in the product;
+// remediation today is an explicit one-click action, which is what stage 4
+// actually says.
+const HOW_IT_WORKS = [
+  { stage: 'Connect', desc: 'Link an AWS account or GCP project with a scoped access key, a cross-account IAM role, or service-account impersonation. Read-only by default — automation is a separate, explicit opt-in.' },
+  { stage: 'Discover', desc: 'A live, searchable inventory builds automatically across every connected account — EC2, S3, RDS, Compute Engine, Cloud SQL, GKE, Artifact Registry, and more.' },
+  { stage: 'Detect', desc: 'Cost anomalies, misconfigurations, and exposure are surfaced automatically and ranked by real impact — not a raw feed you sort through yourself.' },
+  { stage: 'Remediate', desc: 'Apply a fix in one click, or open an Auto-PR against a connected GitHub repo for changes your team would rather review first.' },
+  { stage: 'Audit', desc: 'Every action — who ran it, on what resource, and when — is logged automatically, with no separate compliance tool to bolt on.' },
+];
+
+// Each role links to real modules only -- no per-role marketing route exists
+// today, so the "learn more" destinations are the actual in-app module names
+// (matched against MODULES above) rather than invented solution pages.
+const ROLES = [
+  {
+    role: 'FinOps & Finance',
+    job: 'Move from an unexplained bill to spend you can actually act on.',
+    links: ['Cost Management', 'Cost Optimization'],
+  },
+  {
+    role: 'Security & Compliance',
+    job: 'Triage what\'s actually exposed, not a raw finding feed.',
+    links: ['Cloud Security', 'Resources & Containers'],
+  },
+  {
+    role: 'Platform & DevOps',
+    job: 'See workload health next to everything else that affects it.',
+    links: ['Clusters', 'Automation'],
+  },
+  {
+    role: 'Executive & Leadership',
+    job: 'One place to know what\'s running, what it costs, and what\'s at risk.',
+    links: ['Reports & Dashboards', 'Issues'],
+  },
+];
+
 function Section({ id, className = '', children }: { id?: string; className?: string; children: React.ReactNode }) {
   return <section id={id} className={`max-w-6xl mx-auto px-5 py-20 ${className}`}>{children}</section>;
 }
@@ -100,13 +141,17 @@ export function MarketingHome() {
       <MarketingNav />
       <Hero />
       <TrustBar />
+      <ProblemTransition />
+      <HowItWorks />
       <ProductOverview />
       <PlatformCapabilities />
+      <RoleSelector />
       <CloudProviders />
       <ArchitectureOverview />
       <AICapabilities />
       <SecurityCompliance />
       <ComplianceBenchmarks />
+      <DocsPreview />
       <ProductPreview />
       <PricingTeaser />
       <CustomerBenefits />
@@ -118,25 +163,58 @@ export function MarketingHome() {
 }
 
 function Hero() {
+  // Illustrative sequence only -- same "Illustrative" convention ProductPreview
+  // already uses further down this page. Every row names a real module
+  // (Cloud Accounts, Resources, Cost Management, Cloud Security, Automation);
+  // the numbers themselves are example figures, not a live feed.
+  const glimpse = [
+    { label: '3 accounts connected', tone: 'neutral' as const },
+    { label: '1,204 resources discovered', tone: 'neutral' as const },
+    { label: 'Cost anomaly: +34% in us-east-1', tone: 'warn' as const },
+    { label: '12 findings prioritized by exposure', tone: 'warn' as const },
+    { label: 'Remediation applied — audit logged', tone: 'good' as const },
+  ];
+  const toneClass: Record<'neutral' | 'warn' | 'good', string> = {
+    neutral: 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300',
+    warn: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300',
+    good: 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300',
+  };
+
   return (
     <Section className="pt-20 pb-16">
-      <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4">
-          AWS + Google Cloud, one login
-        </p>
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
-          One control plane for every AWS and GCP account you run.
-        </h1>
-        <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl text-balance">
-          Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
-        </p>
-        <div className="flex items-center gap-3 mt-8 flex-wrap">
-          <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
-            Start free — no credit card
-          </Link>
-          <a href={BOOK_DEMO_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">
-            Book a demo
-          </a>
+      <div className="grid lg:grid-cols-[1fr_minmax(0,20rem)] gap-12 items-start">
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4">
+            AWS + Google Cloud, one login
+          </p>
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
+            One control plane for every AWS and GCP account you run.
+          </h1>
+          <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl text-balance">
+            Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
+          </p>
+          <div className="flex items-center gap-3 mt-8 flex-wrap">
+            <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
+              Start free — no credit card
+            </Link>
+            <a href={BOOK_DEMO_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">
+              Book a demo
+            </a>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
+            Start on the free plan today. Add automation, SSO, and higher retention as your team grows.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shrink-0 w-full">
+          <div className="h-9 flex items-center px-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
+            <span className="text-xs font-medium text-slate-400 dark:text-slate-500">Illustrative example</span>
+          </div>
+          <div className="p-3 flex flex-col gap-2">
+            {glimpse.map(g => (
+              <div key={g.label} className={`text-xs font-medium rounded-md px-3 py-2.5 ${toneClass[g.tone]}`}>{g.label}</div>
+            ))}
+          </div>
         </div>
       </div>
     </Section>
@@ -155,6 +233,75 @@ function TrustBar() {
         {items.map(i => <span key={i}>{i}</span>)}
       </div>
     </div>
+  );
+}
+
+/**
+ * Names the real fragmentation problem before the product enters the
+ * narrative — every statement here is the same real pain the FAQ and
+ * CustomerBenefits sections already describe individually, just placed
+ * up front as a short editorial transition instead of only appearing later.
+ */
+function ProblemTransition() {
+  return (
+    <Section className="!py-16">
+      <div className="grid md:grid-cols-[1fr_1fr] gap-10 items-start border-t border-slate-200 dark:border-slate-800 pt-16">
+        <p className="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-white text-balance leading-snug">
+          Cost lives in a bill. Security lives in a different console. Ops finds out last.
+        </p>
+        <div className="flex flex-col gap-4">
+          <div className="border-l-2 border-slate-200 dark:border-slate-700 pl-4 text-sm text-slate-600 dark:text-slate-300">
+            Finance sees a monthly total, not which resource caused the spike.
+          </div>
+          <div className="border-l-2 border-slate-200 dark:border-slate-700 pl-4 text-sm text-slate-600 dark:text-slate-300">
+            Security sees a raw finding feed, not what's actually exposed.
+          </div>
+          <div className="border-l-2 border-slate-200 dark:border-slate-700 pl-4 text-sm text-slate-600 dark:text-slate-300">
+            Ops finds out when something breaks — not before.
+          </div>
+          <button
+            onClick={() => scrollToSection('how-it-works')}
+            className="text-sm font-semibold text-brand-600 dark:text-brand-400 hover:underline text-left mt-1"
+          >
+            See how HorizonVigil connects all three →
+          </button>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function HowItWorks() {
+  const [active, setActive] = useState(0);
+  return (
+    <Section id="how-it-works" className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
+      <div className="max-w-6xl mx-auto px-5">
+        <div className="max-w-2xl mb-10">
+          <Eyebrow>How it works</Eyebrow>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">From connected account to audited fix, in five real steps.</h2>
+        </div>
+        <div role="tablist" aria-label="How it works" className="flex flex-wrap gap-2 mb-6">
+          {HOW_IT_WORKS.map((s, i) => (
+            <button
+              key={s.stage}
+              role="tab"
+              aria-selected={active === i}
+              onClick={() => setActive(i)}
+              className={`text-sm font-semibold px-4 py-2 rounded-md transition-colors ${
+                active === i
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="opacity-60 mr-1.5">{i + 1}</span>{s.stage}
+            </button>
+          ))}
+        </div>
+        <div role="tabpanel" className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 max-w-3xl">
+          <p className="text-base text-slate-700 dark:text-slate-200 leading-relaxed">{HOW_IT_WORKS[active].desc}</p>
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -198,6 +345,49 @@ function PlatformCapabilities() {
               <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{m.desc}</div>
             </div>
           ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Every "learn more" destination below names a real MODULES entry rather
+ * than a per-role marketing route (none exist yet) -- deliberately kept as
+ * plain text call-outs, not links to pages that don't exist.
+ */
+function RoleSelector() {
+  const [active, setActive] = useState(0);
+  return (
+    <Section>
+      <div className="max-w-2xl mb-10">
+        <Eyebrow>Built for how your team works</Eyebrow>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Same data, a different starting view for each role.</h2>
+      </div>
+      <div className="grid md:grid-cols-[14rem_1fr] gap-6">
+        <div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
+          {ROLES.map((r, i) => (
+            <button
+              key={r.role}
+              onClick={() => setActive(i)}
+              aria-current={active === i}
+              className={`text-sm font-semibold text-left px-4 py-3 rounded-md whitespace-nowrap md:whitespace-normal shrink-0 ${
+                active === i
+                  ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
+              }`}
+            >
+              {r.role}
+            </button>
+          ))}
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+          <p className="text-base font-medium text-slate-900 dark:text-white mb-4">{ROLES[active].job}</p>
+          <div className="flex flex-wrap gap-2">
+            {ROLES[active].links.map(l => (
+              <span key={l} className="text-xs font-medium px-2.5 py-1.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{l}</span>
+            ))}
+          </div>
         </div>
       </div>
     </Section>
@@ -330,6 +520,35 @@ function ComplianceBenchmarks() {
             <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{b.desc}</div>
           </div>
         ))}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Excerpt wording mirrors Docs.tsx's own real setup copy exactly (steps 2-3
+ * of the getting-started guide) -- not a separate, invented description of
+ * the connection flow. No code sample is shown here since account
+ * connection is a UI flow, not an API call a visitor would copy.
+ */
+function DocsPreview() {
+  return (
+    <Section className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
+      <div className="max-w-6xl mx-auto px-5">
+        <div className="grid lg:grid-cols-[1fr_minmax(0,18rem)] gap-10 items-center">
+          <div>
+            <Eyebrow>Documentation</Eyebrow>
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Technical detail, before you sign up.</h2>
+            <p className="text-slate-600 dark:text-slate-300 mt-4 max-w-xl">
+              Connect an AWS account with a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. Connect a GCP project with a service-account key or service-account impersonation. Either way, HorizonVigil only requests read access unless you separately enable automation.
+            </p>
+          </div>
+          <div className="flex lg:justify-end">
+            <Link to="/docs" className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 whitespace-nowrap">
+              Read the docs →
+            </Link>
+          </div>
+        </div>
       </div>
     </Section>
   );
