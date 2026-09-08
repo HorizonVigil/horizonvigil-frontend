@@ -1,8 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { api, ApiError, type CloudAccountService } from './api';
-import { useAuth } from './auth';
-import { useOrg } from './orgContext';
-import { fetchAllPages } from './fetchAllPages';
 
 /**
  * A raw `fetch()` failure (a dropped connection, a Cloud Run cold-start
@@ -66,21 +63,8 @@ const SyncContext = createContext<SyncContextType | null>(null);
  * this loop is genuinely provider-agnostic, not duplicated per provider.
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
-  // See the matching comment in filterContext.tsx -- OrgProvider resolves
-  // the active org (and calls api.setCurrentOrgId(), which makes api.ts
-  // attach X-Org-Id) asynchronously after login, so gating this on
-  // isAuthenticated alone let the initial auto-sync sweep fire before an
-  // org id existed, 400ing on every account fetch it made.
-  const { currentOrg } = useOrg();
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const runningIds = useRef<Set<string>>(new Set());
-  const [autoSyncStatus, setAutoSyncStatus] = useState<'idle' | 'checking' | 'syncing' | 'done' | 'error'>('idle');
-  const [autoSyncMessage, setAutoSyncMessage] = useState<string>('');
-  const [lastAutoSyncAt, setLastAutoSyncAt] = useState<string | null>(null);
-  const autoSyncInitRef = useRef(false);
-  const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const syncingRef = useRef(false);
 
   const startSync = useCallback((connectionId: string, service: CloudAccountService = 'awsAccounts') => {
     if (runningIds.current.has(connectionId)) return;
@@ -159,115 +143,31 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  // ── Auto-sync every 24 hours for all connected cloud accounts ──────────
-  // Runs once on mount, then every 24 hours. For each connected AWS account
-  // and GCP project, checks if it needs a sync (lastSync is null or older
-  // than 24 hours) and triggers discovery for stale ones.
-  const runAutoSync = useCallback(async () => {
-    // SyncProvider is mounted at the app root, above the router -- including
-    // the public marketing routes. Without this guard, every anonymous
-    // visitor triggered these authenticated-only calls ~3s after page load.
-    if (!isAuthenticated || !currentOrg) return;
-    if (syncingRef.current) return;
-    syncingRef.current = true;
-    setAutoSyncStatus('checking');
-    setAutoSyncMessage('Checking for accounts that need syncing…');
-    try {
-      // Fetch every connected account (AWS + GCP + Azure), paginated to
-      // completion via fetchAllPages -- a single limit:200 fetch used to
-      // silently stop at the server's per-request cap, meaning any account
-      // past #200 on one cloud was permanently excluded from auto-sync with
-      // no error or indication anything was missing.
-      const [awsRes, gcpRes, azureRes] = await Promise.allSettled([
-        fetchAllPages((page, limit) => api.getAccounts({ page, limit })),
-        fetchAllPages((page, limit) => api.getGcpAccounts({ page, limit })),
-        fetchAllPages((page, limit) => api.getAzureAccounts({ page, limit })),
-      ]);
-      const accounts: { id: string; lastSync: string | null; provider: 'aws' | 'gcp' | 'azure'; name: string }[] = [];
-      if (awsRes.status === 'fulfilled') {
-        for (const a of awsRes.value) {
-          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'aws', name: a.connection_name ?? a.aws_account_id });
-        }
-      }
-      if (gcpRes.status === 'fulfilled') {
-        for (const a of gcpRes.value) {
-          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'gcp', name: a.connection_name ?? a.gcp_project_id });
-        }
-      }
-      if (azureRes.status === 'fulfilled') {
-        for (const a of azureRes.value) {
-          accounts.push({ id: a.id, lastSync: a.last_sync_at, provider: 'azure', name: a.connection_name ?? a.azure_subscription_id });
-        }
-      }
-
-      const now = Date.now();
-      const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
-      const staleAccounts = accounts.filter(a => {
-        if (runningIds.current.has(a.id)) return false;
-        if (!a.lastSync) return true; // Never synced
-        return now - new Date(a.lastSync).getTime() >= STALE_THRESHOLD_MS;
-      });
-
-      if (staleAccounts.length === 0) {
-        setAutoSyncStatus('done');
-        setAutoSyncMessage(`All ${accounts.length} account${accounts.length === 1 ? '' : 's'} are up to date.`);
-        setLastAutoSyncAt(new Date().toISOString());
-        syncingRef.current = false;
-        return;
-      }
-
-      setAutoSyncStatus('syncing');
-      setAutoSyncMessage(`Auto-syncing ${staleAccounts.length} account${staleAccounts.length === 1 ? '' : 's'}: ${staleAccounts.map(a => a.name).join(', ')}`);
-      setLastAutoSyncAt(new Date().toISOString());
-
-      // Trigger discovery for each stale account sequentially (not all at once
-      // to avoid overwhelming Cloudflare's free-tier CPU budget)
-      let synced = 0;
-      for (const account of staleAccounts) {
-        try {
-          startDiscovery(account.id, account.provider === 'gcp' ? 'gcpAccounts' : account.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
-          synced++;
-        } catch (err) {
-          // Continue with other accounts even if one fails
-        }
-      }
-
-      setAutoSyncStatus('done');
-      setAutoSyncMessage(`Auto-sync triggered for ${synced} of ${staleAccounts.length} stale account${staleAccounts.length === 1 ? '' : 's'}. Resources will update as scans complete.`);
-    } catch (err) {
-      setAutoSyncStatus('error');
-      setAutoSyncMessage(err instanceof Error ? err.message : 'Auto-sync failed.');
-    } finally {
-      syncingRef.current = false;
-    }
-  }, [startDiscovery, isAuthenticated, currentOrg]);
-
-  // Initialize auto-sync once org context is actually ready, then schedule
-  // every 24 hours -- gating the one-shot `autoSyncInitRef` guard on mount
-  // alone (the original condition) let this fire and capture a `runAutoSync`
-  // closure built from a still-null `currentOrg`; since the guard only ever
-  // lets this body run once, that stale closure would silently no-op forever
-  // rather than actually retrying once the org became ready a moment later.
-  useEffect(() => {
-    if (autoSyncInitRef.current) return;
-    if (!isAuthenticated || !currentOrg) return;
-    autoSyncInitRef.current = true;
-
-    // Run once org context is ready (checks if any account needs syncing now)
-    const initialDelay = setTimeout(() => {
-      void runAutoSync();
-    }, 3000); // Wait 3 seconds for the app to load
-
-    // Schedule every 24 hours
-    autoSyncTimerRef.current = setInterval(() => {
-      void runAutoSync();
-    }, 24 * 60 * 60 * 1000);
-
-    return () => {
-      clearTimeout(initialDelay);
-      if (autoSyncTimerRef.current) clearInterval(autoSyncTimerRef.current);
-    };
-  }, [runAutoSync]);
+  /**
+   * REMOVED 2026-09-09 (AWS connector audit AWS-P0-01, P0-A containment):
+   * a 3-second post-login sweep plus a 24-hour interval that started real
+   * provider discovery from the browser.
+   *
+   * It fetched every AWS/GCP/Azure connection, picked any whose last sync was
+   * over 24h old, and called startDiscovery on each -- so simply logging in
+   * could begin a 1,628-step scan. It did not filter to active connections,
+   * and its only guard was an in-memory per-tab Set, so two tabs or two users
+   * could start overlapping scans of the same account with no distributed
+   * lock, no checkpoint, and no way to resume when a tab closed.
+   *
+   * Nothing replaces it on the client, and nothing needs to: scheduled
+   * scanning is already server-owned and running -- `scheduled-scan-aws`
+   * daily, `scheduled-first-scan-aws` every 20 minutes for new and abandoned
+   * scans, plus the GCP equivalents. Staleness is the server's job.
+   *
+   * The state this drove (autoSyncStatus/autoSyncMessage/lastAutoSyncAt) was
+   * never read outside this provider, so no UI regresses.
+   *
+   * Manual discovery (startDiscovery above) is still browser-orchestrated and
+   * is deliberately left for Phase 3, which replaces it with a durable
+   * server-owned job. The audit separates these: P0-A containment stops the
+   * AUTOMATIC scans; server-owned workflows are P0-B.
+   */
 
   return <SyncContext.Provider value={{ syncStates, startSync, startDiscovery }}>{children}</SyncContext.Provider>;
 }
