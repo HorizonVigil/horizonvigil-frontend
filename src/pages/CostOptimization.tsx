@@ -680,7 +680,7 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           <p>{openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account, from your discovered resource inventory — idle instances, unattached volumes, unreleased IPs, stale snapshots, and rightsizing candidates identified from real CloudWatch utilization data. Reserved Instance, Savings Plan, and AWS's own rightsizing recommendations are separate — run "Sync Recommendations" on an AWS account's Recommendations tab to pull those in directly from AWS Cost Explorer's own analysis (real dollar figures, not estimated here). Savings Plan recommendations take AWS a little while to compute the first time — sync again shortly after if none appear immediately. Azure and GCP commitment recommendations are on the roadmap, not silently faked in the meantime — which is why those two clouds' Reserved Instances/Savings Plans tabs stay empty for now.</p>
-          <p className="mt-2">HorizonVigil only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you its details so you can action it yourself.</p>
+          <p className="mt-2">HorizonVigil's documented AWS setup is read-only — clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on most recommendations shows you the details so you can action them yourself. Rightsizing is the one exception: its detail view also offers Request Automated Resize, which files an approval + dry-run before HorizonVigil executes anything — it only succeeds if your connection's own IAM role happens to include the extra EC2 permissions that needs, beyond the read-only setup we document, and fails safely with a clear reason if it doesn't.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
             <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection below.</p>
           )}
@@ -1068,7 +1068,18 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         )}
       </div>
 
-      <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
+      {/* FIXED 2026-09-08 (live audit): this used to unconditionally say
+          "never runs these commands for you," directly contradicting the
+          Automated Resize section above it, which — for exactly this same
+          recommendation — can and does execute a real change using this
+          account's stored credentials once approved. The two paths need
+          different disclaimers, not one blanket claim that's only true for
+          one of them. */}
+      <p className="text-xs text-slate-400 dark:text-slate-500">
+        {cliCommands
+          ? "The CLI commands above are run by you, not HorizonVigil — copy them into your own terminal, then mark this done here. (Request Automated Resize above is the one exception, and only where your connection's own IAM role allows it.)"
+          : "HorizonVigil's documented AWS setup for this connection is read-only and doesn't run a change for you — action it yourself, then mark this done here."}
+      </p>
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
         <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
