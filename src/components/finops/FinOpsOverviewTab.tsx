@@ -12,7 +12,7 @@ import { StatCard } from '../StatCard';
 import { StatCardSkeleton, CardSkeleton } from '../Skeleton';
 import { Icon } from '../icons';
 import { useFilters, dateRangeToDays } from '../../lib/filterContext';
-import { api } from '../../lib/api';
+import { api, describeAvailability } from '../../lib/api';
 import { SectionBoundary } from '../cloudAccounts/overview/primitives';
 import {
   rangeToFromTo,
@@ -171,11 +171,21 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
     );
   }
 
-  const totalCost = d.analytics?.totalCost ?? 0;
-  const hasAnyBilling = totalCost > 0 || d.budgets.length > 0 || (d.cost?.monthToDate ?? 0) > 0;
+  /**
+   * `totalCost` is null when the server could not produce a trustworthy
+   * figure (AWS-P0-06). Coercing it to 0 here is exactly the bug: five of six
+   * production connections have no billing data at all, and every one of them
+   * rendered "$0". Keep it null and let the UI say why.
+   */
+  const costAvailability = d.analytics?.availability ?? null;
+  const totalCost = d.analytics?.totalCost ?? null;
+  const hasAnyBilling = (totalCost ?? 0) > 0 || d.budgets.length > 0 || (d.cost?.monthToDate ?? 0) > 0;
   const dailyLast = d.daily.at(-1)?.cost ?? 0;
   const anomalyCount = d.anomalies.filter((a) => a.status === 'open').length;
-  const spendChange = d.previousAnalytics ? percentChange(totalCost, d.previousAnalytics.totalCost) : null;
+  // A change percentage between two untrustworthy totals is itself
+  // untrustworthy, so it is only computed when BOTH periods are real numbers.
+  const prevTotal = d.previousAnalytics?.totalCost ?? null;
+  const spendChange = totalCost !== null && prevTotal !== null ? percentChange(totalCost, prevTotal) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -188,11 +198,29 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
 
       {/* KPI strip (spec §9) — dollar figures convert to `currency` when set; every other section stays USD (see this component's prop doc comment). */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/*
+          Total Spend is the headline financial claim on this page, and it was
+          the clearest instance of AWS-P0-06: with no billing data at all it
+          rendered "$0.00", indistinguishable from an account that genuinely
+          spent nothing. It now shows an em dash and states the reason, and
+          the delta is suppressed because a change against an untrustworthy
+          baseline is itself untrustworthy.
+        */}
         <StatCard
           label="Total Spend"
-          value={formatMoney(d.cost?.monthToDate ?? totalCost, currency, fxRates)}
+          value={
+            d.cost?.monthToDate !== undefined && d.cost?.monthToDate !== null
+              ? formatMoney(d.cost.monthToDate, currency, fxRates)
+              : totalCost !== null
+                ? formatMoney(totalCost, currency, fxRates)
+                : '—'
+          }
           icon="cost"
-          caption={dateRangeToDays(dateRange) === new Date().getDate() ? 'month to date' : `last ${dateRangeToDays(dateRange)}d`}
+          caption={
+            totalCost === null && (d.cost?.monthToDate === undefined || d.cost?.monthToDate === null)
+              ? (costAvailability ? describeAvailability(costAvailability) : 'No billing data available.')
+              : dateRangeToDays(dateRange) === new Date().getDate() ? 'month to date' : `last ${dateRangeToDays(dateRange)}d`
+          }
           delta={spendChange === null ? undefined : { value: `${spendChange > 0 ? '+' : ''}${spendChange}%`, direction: spendChange > 0 ? 'up' : spendChange < 0 ? 'down' : 'flat', goodDirection: 'down' }}
         />
         <StatCard label="Daily Spend" value={formatMoney(dailyLast, currency, fxRates)} icon="chart-line" caption="most recent day" />
@@ -232,7 +260,7 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
       </div>
 
       <SectionBoundary name="cost changes">
-        <CostChangesPanel increases={changes.increases} decreases={changes.decreases} hasPrevious={Boolean(d.previousAnalytics && d.previousAnalytics.totalCost > 0)} />
+        <CostChangesPanel increases={changes.increases} decreases={changes.decreases} hasPrevious={Boolean(prevTotal !== null && prevTotal > 0)} />
       </SectionBoundary>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

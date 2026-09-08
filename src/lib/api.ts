@@ -545,7 +545,7 @@ class ApiClient {
   getChargeback(params: { tagKey?: string; from?: string; to?: string; connectionIds?: string[] } = {}) { return this.get<CostAllocation & { currency: string; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/chargeback${qs({ tagKey: params.tagKey, from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`); }
   getShowback(params: { tagKey?: string; from?: string; to?: string; connectionIds?: string[] } = {}) { return this.get<CostAllocation & { billable: false; period: { from?: string; to?: string } }>('costManagement', `/api/cost-management/showback${qs({ tagKey: params.tagKey, from: params.from, to: params.to, connection_ids: params.connectionIds?.join(',') })}`); }
   getCostAnalytics(params: { from?: string; to?: string; region?: string; connectionIds?: string[] } = {}) {
-    return this.get<{ range: { from: string; to: string }; totalCost: number; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`);
+    return this.get<{ range: { from: string; to: string }; totalCost: number | null; availability: Availability; byService: Record<string, number>; byAccount: Record<string, number>; byRegion: Record<string, number> }>('costManagement', `/api/cost-management/analytics${qs({ from: params.from, to: params.to, region: params.region, connection_ids: params.connectionIds?.join(',') })}`);
   }
   getBudgets(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<Budget>>('costManagement', `/api/cost-management/budgets${qs(params)}`); }
   createBudget(data: { scopeType: BudgetScopeType; scopeId: string; name: string; monthlyLimit: number; alertThresholds?: number[] }) {
@@ -1211,6 +1211,50 @@ export interface DeploymentEvent {
 export interface ResourceMetric { id: string; connection_id: string; resource_id: string | null; resource_type_key: string; metric_name: string; namespace: string; unit: string | null; region: string; ts: string; value: number; created_at: string }
 
 export interface CostSnapshot { id: string; connection_id: string; account_id: string; usage_date: string; service: string; region: string | null; unblended_cost: string; usage_quantity: string | null; usage_unit: string | null; currency: string }
+/**
+ * Mirror of @horizonvigil/shared-lib's availability contract.
+ *
+ * The frontend is a Vite app and does not depend on shared-lib, so this is a
+ * deliberate, documented copy rather than an import. Kept minimal: the UI
+ * needs to branch on state and explain it, not recompute it -- the server
+ * decides availability, and `totalCost: null` is what enforces that a client
+ * cannot accidentally print a false zero.
+ */
+export type AvailabilityState =
+  | 'not_configured' | 'not_enabled' | 'unsupported' | 'validating' | 'available'
+  | 'partial' | 'stale' | 'permission_denied' | 'throttled' | 'failed' | 'disconnected';
+
+export interface Availability {
+  state: AvailabilityState;
+  reasonCode?: string;
+  source?: string[];
+  coverage?: { expected: number; covered: number };
+  freshness?: { observedAt: string | null; sloSeconds: number };
+}
+
+/** Customer-safe sentence for an availability state — mirrors describeAvailability() server-side. */
+export function describeAvailability(a: Availability): string {
+  switch (a.state) {
+    case 'not_configured':
+      return a.reasonCode === 'no_billing_data_collected'
+        ? 'No billing data has been collected for these accounts yet.'
+        : 'No source is configured for this data yet.';
+    case 'not_enabled': return 'This capability is not enabled for these accounts.';
+    case 'unsupported': return 'This capability is not supported here.';
+    case 'validating': return 'The connection is still being validated.';
+    case 'partial': {
+      const c = a.coverage;
+      return c ? `Partial data — ${c.covered} of ${c.expected} accounts reported.` : 'Only part of the requested scope could be collected.';
+    }
+    case 'stale': return 'This data is older than its freshness policy allows.';
+    case 'permission_denied': return 'The connected credential is missing a permission this data requires.';
+    case 'throttled': return 'The provider rate limited collection for this data.';
+    case 'failed': return 'The last collection attempt failed.';
+    case 'disconnected': return 'This connection is disconnected, so nothing is being collected.';
+    case 'available': return 'Collected successfully.';
+  }
+}
+
 export interface CostAllocation { tagKey: string; totalCost: number; buckets: { tagValue: string; totalCost: number }[] }
 export interface ResourceCostRow { resourceId: string; connectionId: string; resourceName: string | null; resourceType: string; region: string | null; totalCost: number; tags: Record<string, unknown> | null }
 export interface Budget {

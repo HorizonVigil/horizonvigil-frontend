@@ -188,7 +188,17 @@ export function CloudSecurity() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Connected Accounts" value={String(connections.length)} icon="cloud" />
             <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'good'} />
-            <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'good'} />
+            {/*
+              A zero here used to render in the "good" tone -- a green all-clear.
+              Verified 2026-09-09: there are ZERO V1 posture findings of ANY
+              kind in production (0 rows from aws_config / iam_access_analyzer
+              / gcp_scc / defender / security_hub against 4,075 V2 rows), so
+              that green zero was reporting "nothing is externally shared"
+              when in fact nothing had been evaluated. Neutral tone until
+              source coverage is proven, which lands with permission snapshots
+              in a later phase.
+            */}
+            <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'neutral'} />
             {/* The former "Risk Score" card read straight off the
                 vulnerability dashboard (V2 scanner findings) and rendered
                 100/100 as "good" on this page while the Posture tab called
@@ -244,9 +254,9 @@ export function CloudSecurity() {
             </div>
           )}
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            The most over-privileged identities across every connected account. <Link to="/cloud-accounts?tab=Identities" className="text-brand-600 dark:text-brand-400 hover:underline">View the full identity inventory →</Link>
+            The most over-privileged identities across every connected account. <Link to="/cloud-accounts?tab=Access" className="text-brand-600 dark:text-brand-400 hover:underline">View the full identity inventory →</Link>
           </p>
-          <DataTable columns={identityColumns} rows={riskyIdentities} rowKey={i => i.id} emptyMessage="No over-privileged identities found." />
+          <DataTable columns={identityColumns} rows={riskyIdentities} rowKey={i => i.id} emptyMessage="No over-privileged identities have been collected for the connected accounts." />
         </>
       )}
 
@@ -255,7 +265,7 @@ export function CloudSecurity() {
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             Resources IAM Access Analyzer flagged as shared outside your account or organization — a real, if partial, slice of "exposure." Full attack-path correlation (exposure + vulnerability + over-privileged identity on the same resource) isn't part of this release.
           </p>
-          <DataTable columns={findingColumns} rows={exposed} rowKey={f => f.id} emptyMessage="No externally-shared resources found." />
+          <DataTable columns={findingColumns} rows={exposed} rowKey={f => f.id} emptyMessage="No external-sharing findings have been collected. An empty list here is not proof that nothing is shared — it also looks like this when IAM Access Analyzer is not enabled on an account, or has not been evaluated yet." />
         </>
       )}
 
