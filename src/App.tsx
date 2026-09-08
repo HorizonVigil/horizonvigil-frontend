@@ -26,16 +26,13 @@ import { Resources } from './pages/Resources';
 import { ResourcesOverview } from './pages/resources/ResourcesOverview';
 import { ResourcesCategory } from './pages/resources/ResourcesCategory';
 import { FinOps } from './pages/FinOps';
-import { VulnerabilityManagement } from './pages/VulnerabilityManagement';
-import { VulnerabilityDetail } from './pages/VulnerabilityDetail';
-import { SourceInventoryCategory } from './pages/SourceInventoryCategory';
-import { SourceAssetDetail } from './pages/SourceAssetDetail';
-import { SecurityScanningCenter } from './pages/SecurityScanningCenter';
+// VulnerabilityManagement, VulnerabilityDetail, SourceInventoryCategory,
+// SourceAssetDetail, SecurityScanningCenter, ApplicationSecurity,
+// CodeSecurity, ContainerKubernetesSecurity, and InfrastructureSecurity were
+// removed here 2026-09-08 -- their routes now redirect to /cloud-security
+// (V1/V2 boundary, see the route block below). Not deleted from the repo:
+// still real, tested components, just no longer reachable from this router.
 import { CloudSecurity } from './pages/CloudSecurity';
-import { ApplicationSecurity } from './pages/ApplicationSecurity';
-import { CodeSecurity } from './pages/CodeSecurity';
-import { ContainerKubernetesSecurity } from './pages/ContainerKubernetesSecurity';
-import { InfrastructureSecurity } from './pages/InfrastructureSecurity';
 import { EksConsole } from './pages/EksConsole';
 import { GkeConsole } from './pages/GkeConsole';
 import { AksConsole } from './pages/AksConsole';
@@ -153,16 +150,26 @@ export default function App() {
                               one FinOps module (spec: no two separate top-level cost menus). */}
                           <Route path="/cost-management" element={<Navigate to="/finops?section=Cost+Management" replace />} />
                           <Route path="/cost-optimization" element={<Navigate to="/finops?section=Cost+Optimization" replace />} />
-                          <Route path="/vulnerability-management" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityManagement /></ProtectedRoute>} />
-                          <Route path="/vulnerability-management/findings/:id" element={<ProtectedRoute module="Vulnerability Management"><VulnerabilityDetail /></ProtectedRoute>} />
-                          <Route path="/source-inventory/:category" element={<ProtectedRoute module="Vulnerability Management"><SourceInventoryCategory /></ProtectedRoute>} />
-                          <Route path="/source-inventory/:category/:assetId" element={<ProtectedRoute module="Vulnerability Management"><SourceAssetDetail /></ProtectedRoute>} />
-                          <Route path="/security-scanning" element={<ProtectedRoute module="Vulnerability Management"><SecurityScanningCenter /></ProtectedRoute>} />
+                          {/* V1/V2 boundary (2026-09-08 audit): vulnerability scanning, CVEs,
+                              scanner orchestration, and attack paths are V2 -- gated out of V1
+                              navigation, public claims, and now direct routes too. Cloud
+                              Security survives as the sole real destination (posture,
+                              misconfigurations, exposure, identity risk, provider-native
+                              compliance evidence only -- see CloudSecurity.tsx's own removal of
+                              its former "Cloud Vulnerabilities" tab). These redirects exist for
+                              anyone with an old bookmark/deep link into the gated surface --
+                              "do not expose counts or records," so every one of them lands on
+                              the same notice rather than preserving the specific id/category. */}
+                          <Route path="/vulnerability-management" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/vulnerability-management/findings/:id" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/source-inventory/:category" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/source-inventory/:category/:assetId" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/security-scanning" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           <Route path="/cloud-security" element={<ProtectedRoute module="Vulnerability Management"><CloudSecurity /></ProtectedRoute>} />
-                          <Route path="/application-security" element={<ProtectedRoute module="Vulnerability Management"><ApplicationSecurity /></ProtectedRoute>} />
-                          <Route path="/code-security" element={<ProtectedRoute module="Vulnerability Management"><CodeSecurity /></ProtectedRoute>} />
-                          <Route path="/container-security" element={<ProtectedRoute module="Vulnerability Management"><ContainerKubernetesSecurity /></ProtectedRoute>} />
-                          <Route path="/infrastructure-security" element={<ProtectedRoute module="Vulnerability Management"><InfrastructureSecurity /></ProtectedRoute>} />
+                          <Route path="/application-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/code-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/container-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
+                          <Route path="/infrastructure-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           {/* Legacy — the single mixed-provider Clusters page was split into three provider-specific consoles. Just a redirect, nothing to protect. */}
                           <Route path="/clusters" element={<Navigate to="/clusters/aws" replace />} />
                           <Route path="/clusters/aws" element={<ProtectedRoute module="Clusters"><EksConsole /></ProtectedRoute>} />
