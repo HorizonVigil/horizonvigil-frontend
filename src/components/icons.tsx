@@ -209,7 +209,6 @@ export const NAV_ICON_MAP: Record<string, IconName> = {
   'Asset Inventory': 'resources',
   'Custom Dashboards': 'dashboard',
   'FinOps': 'cost',
-  'Cost Optimization': 'optimization',
   'Vulnerability Management': 'security',
   'Cloud Compliance': 'shield-check',
   'Security Scanning Center': 'target',

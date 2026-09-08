@@ -365,11 +365,14 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
       // Real -- each backed by its own scanner's persisted GET /v1/scans
       // history (Semgrep / Dependency-Check+Grype / Gitleaks+TruffleHog).
+      // FIXED 2026-09-08 (user-reported nav duplication): "Code
+      // Vulnerabilities" and "Dependencies" used to sit here too, as exact
+      // duplicates of SAST's and SCA's own `to` respectively -- four labels
+      // for two destinations in one group. Kept the scanner-type names
+      // (SAST/SCA), which read consistently with Secrets right below them.
       { label: 'SAST', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
       { label: 'SCA', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
-      { label: 'Dependencies', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
       { label: 'Secrets', to: tabLink(CODE_SEC, 'Secrets Detected'), real: true, group: 'Code Security' },
-      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
 
       // ── Container & Kubernetes ────────────────────────────────────────
       // Distinct from the operational Clusters module (pods/deployments/
@@ -382,9 +385,15 @@ export const NAV_MODULES: NavModule[] = [
       // here (not "Container Images") since that exact label is already
       // used by the AWS-native tab below -- same label-uniqueness
       // constraint as the Assets/Security Scanning renames above.
-      { label: 'Docker', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
+      // FIXED 2026-09-08 (user-reported nav duplication): this used to also
+      // carry "Docker" and "Container Vulnerabilities" as two more sibling
+      // entries in this same group, both pointing at this identical `to` --
+      // three links in a row landing on the exact same tab, unlike this
+      // module's other same-destination cases (AWS/Azure/GCP, Repository
+      // Inventory/Repositories, All Scans/Scanners), which are each spread
+      // across *different* groups as deliberate alternate entry points, not
+      // stacked three-deep in one. Consolidated to the one label.
       { label: 'Container Image Inventory', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
-      { label: 'Container Vulnerabilities', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
 
       // ── Infrastructure ────────────────────────────────────────────────
       { label: 'Infrastructure Overview', to: INFRA_SEC, real: true, group: 'Infrastructure' },
@@ -500,30 +509,33 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   // ── Cloud-only go-live shortcuts ──────────────────────────────────────
-  // Three thin top-level entries added for the cloud-only release so its
-  // nav can show "Cost Optimization"/"Cloud Security"/"Cloud Compliance" as
-  // their own items (per that release's spec) without duplicating any real
-  // page or restructuring the modules that already own this content. Each
-  // `to` points at content that already exists and is already reachable via
-  // FinOps/Vulnerability Management above -- these are extra doors into the
-  // same rooms, not new rooms. `real: false`-style hiding doesn't apply to
-  // modules (only NavChild) so there's nothing to flip once real; there's
-  // nothing unbuilt here to begin with. Not tagged hiddenInCloudOnlyMode --
-  // the whole point of these three is to be visible when that mode is on;
-  // outside cloud-only mode they're simply redundant with the entries their
-  // "home" module (FinOps / Vulnerability Management) already has, which is
-  // harmless (same destination either way). Cost Optimization shares
-  // FinOps's icon/RBAC key (FinOps is never hidden, so no leak risk); Cloud
-  // Security/Cloud Compliance deliberately do NOT share Vulnerability
-  // Management's -- see the comment on Cloud Security below for why that
-  // was tried first and caused a real Overview-widget leak.
-  {
-    label: 'Cost Optimization',
-    icon: 'cost', // shares FinOps's RBAC menu_key -- same page, same permission concern (see NavModule.icon doc).
-    section: 'Cloud Operations',
-    to: sectionTabLink(FINOPS, 'Cost Optimization', 'Recommendations'),
-    children: [],
-  },
+  // Two thin top-level entries added for the cloud-only release so its nav
+  // can show "Cloud Security"/"Cloud Compliance" as their own items (per
+  // that release's spec) without duplicating any real page or restructuring
+  // the module that actually owns this content (Vulnerability Management).
+  // Each `to` points at content that already exists -- these are extra
+  // doors into the same rooms, not new rooms. `real: false`-style hiding
+  // doesn't apply to modules (only NavChild) so there's nothing to flip once
+  // real; there's nothing unbuilt here to begin with. Not tagged
+  // hiddenInCloudOnlyMode -- the whole point of these two is to be visible
+  // when that mode is on, which is exactly when Vulnerability Management
+  // (their "home" module) is hidden, making them the sole door in rather
+  // than a duplicate. Deliberately do NOT share Vulnerability Management's
+  // icon -- see the comment on Cloud Security below for why that was tried
+  // first and caused a real Overview-widget leak.
+  //
+  // A third shortcut, "Cost Optimization" (sharing FinOps's icon, pointing
+  // at FinOps's own Cost Optimization > Recommendations tab), used to live
+  // here too -- removed 2026-09-08 (user-reported nav duplication) because
+  // FinOps, unlike Vulnerability Management, is never hidden in cloud-only
+  // mode. That made it a *permanent* duplicate rather than a stand-in for a
+  // hidden module: every real user in production (cloud-only mode is always
+  // on there) saw both a "FinOps" AND a "Cost Optimization" icon on the
+  // AppRail, landing on the exact same recommendations tab, with no state in
+  // which the shortcut was ever the only door in. FinOps's own sidebar
+  // already has a "Cost Optimization" group header plus every real tab
+  // underneath it (Savings Opportunities, Rightsizing, Idle Resources, ...)
+  // -- nothing was lost by removing the redundant top-level entry.
   {
     // Deliberately its OWN icon/RBAC key, NOT 'security' -- sharing
     // Vulnerability Management's icon here was tried first and caused a
