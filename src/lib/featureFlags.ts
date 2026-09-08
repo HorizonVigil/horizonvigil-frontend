@@ -34,3 +34,35 @@ export function isMockCheckoutEnabled(): boolean {
 export function isCloudOnlyMode(): boolean {
   return import.meta.env.VITE_CLOUD_ONLY_MODE === 'true';
 }
+
+/**
+ * Vulnerability/scanner data (V2) — the single gate every V1 surface must
+ * consult before reading `vulnerability_findings` or the vulnerability
+ * dashboard/attack-path endpoints.
+ *
+ * Why this exists as its own named capability rather than another scattered
+ * isCloudOnlyMode() call: the V1 scope decision (2026-09-08 production
+ * readiness audit) is that Cloud Security V1 is posture-only —
+ * misconfigurations, exposure, IAM risk and provider-native compliance
+ * evidence. CVEs, container-image findings, secrets/SAST/SCA/IaC scanner
+ * results, and vulnerability attack paths are V2. Gating the *routes*
+ * (App.tsx redirects, added earlier) was not sufficient: several V1
+ * surfaces read that data directly and kept rendering it after the routes
+ * were gated -- Overview's SignalCenter banner, Cloud Security's own
+ * Posture tab and risk score, the Issues queue, the Open Issues KPI, and a
+ * custom-dashboard widget. Verified against production 2026-09-08: all
+ * 4,075 open rows in vulnerability_findings come from trivy /
+ * scanner_trufflehog / scanner_checkov / scanner_grype / scanner_trivy /
+ * scanner_semgrep, i.e. 100% V2, and zero rows come from the V1 posture
+ * sources (aws_config, iam_access_analyzer, gcp_scc, defender). So in V1
+ * this data is not "mostly V2" -- it is entirely V2, and every count it
+ * produced on a V1 screen (167 critical, 3,615 findings, 3,619 issues)
+ * was V2 presented as V1 work.
+ *
+ * Tied to cloud-only mode because that is exactly the V1 release posture
+ * today; when vulnerability management is rebuilt for V2 this becomes its
+ * own entitlement rather than a build-time flag.
+ */
+export function isVulnerabilityDataEnabled(): boolean {
+  return !isCloudOnlyMode();
+}

@@ -7,7 +7,6 @@ import { Badge, severityTone } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { RoadmapPanel } from '../components/EmptyState';
 import { Icon } from '../components/icons';
-import { SecurityPostureSummary, type SecurityPostureDashboard } from '../components/SecurityPostureSummary';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
@@ -20,7 +19,15 @@ import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummar
 // RoadmapPanel pointer into Vulnerability Management, not real data of its
 // own -- that whole surface is now gated for V2 (see App.tsx's redirects),
 // so there's nothing left for this tab to honestly point at.
-const TABS = ['Overview', 'Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance', 'Multi-Cloud Coverage'] as const;
+// "Posture" removed 2026-09-08 (production-readiness audit): that tab
+// rendered SecurityPostureSummary straight off the vulnerability dashboard,
+// i.e. 3,615 scanner/CVE findings, 167 critical -- entirely V2 data on the
+// V1 posture page, and the same number this page's own Overview showed as
+// "100/100" (good) while the tab called it "100 High risk". V1 posture is
+// the real provider-native surfaces below (Misconfigurations, Identity &
+// Access Risk, Exposed Resources, provider evidence under Compliance); a V1
+// posture aggregation can earn a summary tab back once it exists.
+const TABS = ['Overview', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance', 'Multi-Cloud Coverage'] as const;
 type Tab = typeof TABS[number];
 const PROVIDERS = ['aws', 'gcp', 'azure'] as const;
 const PROVIDER_LABEL: Record<typeof PROVIDERS[number], string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
@@ -56,7 +63,6 @@ export function CloudSecurity() {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
 
-  const [dashboard, setDashboard] = useState<SecurityPostureDashboard | null>(null);
   const [misconfigs, setMisconfigs] = useState<VulnerabilityFinding[]>([]);
   const [exposed, setExposed] = useState<VulnerabilityFinding[]>([]);
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
@@ -87,8 +93,7 @@ export function CloudSecurity() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.allSettled([
-      api.getVulnerabilityDashboard(),
+    const [misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.allSettled([
       api.getFindingsBySource('aws-config', { limit: 50 }),
       api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
       api.getIdentitySummary(),
@@ -100,7 +105,6 @@ export function CloudSecurity() {
     ]);
 
     const failed: string[] = [];
-    if (dash.status === 'fulfilled') setDashboard(dash.value); else failed.push('risk score & posture summary');
     if (misconfig.status === 'fulfilled') setMisconfigs(misconfig.value.items); else failed.push('misconfigurations');
     if (exposedRes.status === 'fulfilled') setExposed(exposedRes.value.items); else failed.push('exposed resources');
     if (idSummary.status === 'fulfilled') setIdentitySummary(idSummary.value); else failed.push('identity summary');
@@ -185,7 +189,12 @@ export function CloudSecurity() {
             <StatCard label="Connected Accounts" value={String(connections.length)} icon="cloud" />
             <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'good'} />
             <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'good'} />
-            <StatCard label="Risk Score" value={dashboard ? `${dashboard.riskScore}/100` : '—'} icon="gauge" iconTone={dashboard && dashboard.riskScore >= 50 ? 'critical' : dashboard && dashboard.riskScore >= 20 ? 'warning' : 'good'} />
+            {/* The former "Risk Score" card read straight off the
+                vulnerability dashboard (V2 scanner findings) and rendered
+                100/100 as "good" on this page while the Posture tab called
+                the same 100 "High risk". Removed with that tab; a V1 score
+                needs a V1 population and one agreed direction first. */}
+            <StatCard label="Identities at Risk" value={identitySummary ? String(identitySummary.adminEquivalent + identitySummary.broad) : '—'} icon="key" iconTone={identitySummary && identitySummary.adminEquivalent > 0 ? 'critical' : 'good'} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -216,8 +225,6 @@ export function CloudSecurity() {
           </div>
         </div>
       )}
-
-      {tab === 'Posture' && dashboard && <SecurityPostureSummary dashboard={dashboard} variant="full" />}
 
       {tab === 'Misconfigurations' && (
         <>
