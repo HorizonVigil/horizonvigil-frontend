@@ -30,6 +30,7 @@ const sources = import.meta.glob(
     '../pages/CustomDashboards.tsx',
     '../components/cloudAccounts/OverviewPanel.tsx',
     '../components/cloudAccounts/overview/SecurityPanel.tsx',
+    '../pages/CostOptimization.tsx',
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
@@ -133,6 +134,32 @@ describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
     const src = code(source('pages/CustomDashboards.tsx'));
     expect(src).not.toMatch(/Open Security Findings/);
     expect(src).not.toMatch(/data\.openFindings\.toLocaleString/);
+  });
+});
+
+describe('no direct provider mutation is reachable in V1', () => {
+  // 2026-09-08 audits, P0: "No direct provider mutation ships in V1."
+  // Executing a resize used the SAME stored credential as read-only
+  // collection, with no separate execution identity, certified worker,
+  // canary, emergency stop, or provider-verified outcome.
+  const src = code(source('pages/CostOptimization.tsx'));
+
+  it('offers no automated-resize request action', () => {
+    expect(src).not.toMatch(/Request Automated Resize/);
+    expect(src).not.toMatch(/requestRemediation\(/);
+    expect(src).not.toMatch(/onRequestResize/);
+  });
+
+  it('runs no background poll or job against the gated remediation pathway', () => {
+    // The audits' definition of gating explicitly includes "no background
+    // fetch or job" -- an 8s interval silently polling a 403 would not pass.
+    expect(src).not.toMatch(/finishResizeRemediation\(/);
+    expect(src).not.toMatch(/listRemediation\(/);
+  });
+
+  it('still offers the V1-permitted alternatives (manual CLI guidance and a real IaC pull request)', () => {
+    expect(src).toMatch(/aws ec2 modify-instance-attribute/);
+    expect(src).toMatch(/openAutoPr\(/);
   });
 });
 
