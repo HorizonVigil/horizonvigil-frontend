@@ -887,7 +887,7 @@ export function Settings() {
         <div className="flex flex-col gap-4 max-w-2xl">
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-3">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Connect a GitHub repository</h3>
-            <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the CloudOps360 GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
+            <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the HorizonVigil GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
             <div className="flex gap-2">
               <input aria-label="GitHub installation ID" value={connectInstallationId} inputMode="numeric" maxLength={20} onChange={e => setConnectInstallationId(e.target.value)} placeholder="Installation ID, e.g. 12345678" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
               <button type="button" onClick={() => void handleConnectGit()} disabled={gitConnecting} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 disabled:opacity-50">{gitConnecting ? 'Connecting…' : 'Connect'}</button>

@@ -103,6 +103,16 @@ export function Pricing() {
               </tr>
             </tbody>
           </table>
+          {/* Added 2026-09-08 (live audit): SSO/SAML/uptime SLA were shown as
+              plain checkmarks/percentages above with no production-status
+              caveat anywhere on this page -- the only hedge language existed
+              in TermsOfService.tsx, which nobody reads before buying. SSO/
+              SAML do call a real Supabase Enterprise SSO API, but require a
+              customer-specific one-time IdP registration and a paid add-on
+              tier that isn't self-service yet. */}
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-3 max-w-2xl">
+            SSO and SAML SSO require a one-time identity-provider registration we complete with you — not self-service yet. Uptime SLA figures are targets, not a contractual guarantee below Enterprise; see our Terms of Service for the exact commitment at your plan.
+          </p>
         </div>
 
         <div className="text-center pb-24">

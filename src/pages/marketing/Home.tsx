@@ -10,12 +10,12 @@ const MODULES = [
   { name: 'Resources & Containers', desc: 'A live, searchable inventory across EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, and Artifact Registry.' },
   { name: 'Cost Management', desc: 'Real spend data with anomaly detection, broken down by account and service — not just a bill you scroll through.' },
   { name: 'Cost Optimization', desc: 'Specific savings recommendations with an exclusion workflow for what\'s intentional, plus one-click and Auto-PR remediation via your connected GitHub repos.' },
-  { name: 'Vulnerability Management', desc: 'Findings from across your fleet, deduplicated and triaged by real severity, not just a raw scanner feed.' },
-  { name: 'Issues', desc: 'Cost, security, and alert items that need attention, unified into one severity-sorted list — instead of checking three modules to know what\'s actually urgent.' },
+  { name: 'Cloud Security', desc: 'Posture, misconfigurations, exposure, and identity risk across every connected account, plus provider-native compliance evidence — not an independent framework certification.' },
+  { name: 'Issues', desc: 'Cost, security, and alert items that need attention, unified into one list — instead of checking three modules to know what\'s outstanding.' },
   { name: 'Clusters', desc: 'EKS and GKE in one view — workloads, node health, and cluster-level issues alongside everything else.' },
   { name: 'Monitoring & Alerts', desc: 'Resource-level metrics and alerting that already knows which account and org a resource belongs to.' },
-  { name: 'Automation', desc: 'One-click and scheduled remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail.' },
-  { name: 'Reports & Dashboards', desc: 'Custom dashboards and scheduled reports built from the same data your team already sees day to day.' },
+  { name: 'Automation', desc: 'One-click remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail. Every action starts from an explicit click today.' },
+  { name: 'Reports & Dashboards', desc: 'Custom dashboards and one-time report generation built from the same data your team already sees day to day.' },
   { name: 'Users & RBAC', desc: 'Org-scoped roles down to the individual account — the same access model backing every module above.' },
 ];
 
@@ -62,7 +62,7 @@ const SECURITY_FEATURES = [
 ];
 
 const FAQS = [
-  { q: 'Which clouds does HorizonVigil support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is planned but not yet built; we\'d rather ship two clouds well than three clouds half-finished.' },
+  { q: 'Which clouds does HorizonVigil support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is built but not yet available in production while we finish its deployment pipeline; we\'d rather ship it fully working than half-connected.' },
   { q: 'How does account access work?', a: 'For AWS, connect via a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. For GCP, connect via a service-account key or service-account impersonation.' },
   { q: 'Is there a free plan?', a: 'Yes. Free connects one cloud account for two users, with 7-day data retention — enough to see real value before you pay anything.' },
   { q: 'Can I cancel or change plans anytime?', a: 'Yes, from the in-app billing portal. Downgrades and cancellations take effect at the end of your current billing period; there\'s no lock-in contract below Enterprise.' },
@@ -188,7 +188,7 @@ function PlatformCapabilities() {
       <div className="max-w-6xl mx-auto px-5">
         <div className="text-center max-w-2xl mx-auto mb-14">
           <Eyebrow>Platform capabilities</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Twelve modules. One data model.</h2>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Eleven modules. One data model.</h2>
           <p className="text-slate-600 dark:text-slate-300 mt-4">Every module reads from the same connected accounts and the same org-scoped permissions — connect once, see everything.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -210,7 +210,7 @@ function CloudProviders() {
       <div className="text-center max-w-2xl mx-auto mb-14">
         <Eyebrow>Supported cloud providers</Eyebrow>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Real scanners, not a roadmap slide.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Azure support is planned; we're not listing it here until it's actually built.</p>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">Azure support is built but not yet available in production — we're not listing it as connectable here until its deployment is finished.</p>
       </div>
       <div className="grid sm:grid-cols-2 gap-6">
         {PROVIDERS.map(p => (
