@@ -13,7 +13,7 @@ import { api } from '../api';
 import { daysAgoISO } from '../format';
 import { dateRangeToDays, useFilters } from '../filterContext';
 import { scopedConnectionId } from './scope';
-import { isCloudOnlyMode } from '../featureFlags';
+import { isCloudOnlyMode, isVulnerabilityDataEnabled } from '../featureFlags';
 import { EMPTY_SIGNALS, scopeQueryKey, type Capabilities, type ContextSignals, type EffectiveScope } from './types';
 
 async function fetchSignals(scope: EffectiveScope, can: Capabilities, fromISO: string): Promise<ContextSignals> {
@@ -28,7 +28,15 @@ async function fetchSignals(scope: EffectiveScope, can: Capabilities, fromISO: s
   // gates the *widget* surfaces correctly via enabledModules -- this fixes
   // the one signal-fetching path that didn't go through that same gate.
   const wantIncidents = !isCloudOnlyMode() && can.has('incident.read');
-  const wantSecurity = can.has('security.read');
+  // Same class of bug as wantIncidents above, and the one the 2026-09-08
+  // production-readiness audit caught live: `security.read` alone kept
+  // fetching the V2 vulnerability dashboard and attack paths, so
+  // <SignalCenter> rendered "167 critical vulnerabilities open" (and an
+  // attack-path banner) on the V1 Overview, linking to routes that now
+  // redirect to a V2 notice. Every row behind those counts is V2 -- see
+  // isVulnerabilityDataEnabled()'s note on the verified production
+  // finding_source breakdown.
+  const wantSecurity = isVulnerabilityDataEnabled() && can.has('security.read');
   const wantCost = can.has('cost.read');
   const wantDevops = can.has('devops.read');
   const wantObs = can.has('observability.read');

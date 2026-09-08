@@ -562,7 +562,14 @@ export const NAV_MODULES: NavModule[] = [
     label: 'Cloud Compliance',
     icon: 'cloud-compliance',
     section: 'Cloud Operations',
-    to: tabLink(VULN, 'Compliance'),
+    // FIXED 2026-09-08 (production-readiness audit): this pointed at
+    // /vulnerability-management?tab=Compliance. Once that route started
+    // redirecting to the V2 notice, the redirect dropped the tab param, so
+    // the one nav entry named "Cloud Compliance" landed the user on Cloud
+    // Security's *Overview* tab instead of its Compliance tab -- a dead end
+    // introduced by the route gate itself. Cloud Security owns the real
+    // provider-native compliance evidence tab, so point straight at it.
+    to: tabLink(CLOUD_SEC, 'Compliance'),
     children: [],
   },
   {

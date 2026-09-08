@@ -34,8 +34,13 @@ function WidgetPreview({ widget, data }: { widget: { key: string; config: unknow
       return <StatCard label="Cost (Month to Date)" value={money(data.costMtd)} />;
     case 'kpi_resource_count':
       return <StatCard label="Resource Count" value={data.resourceTotal.toLocaleString()} />;
+    // V2 (2026-09-08 production-readiness audit): this counted
+    // vulnerability_findings, which in production is 100% scanner/CVE data.
+    // Kept as an explicit honest state rather than deleted so dashboards
+    // that already saved this widget degrade truthfully instead of silently
+    // falling through to a generic "preview not available".
     case 'kpi_open_findings':
-      return <StatCard label="Open Security Findings" value={data.openFindings.toLocaleString()} />;
+      return <EmptyState icon="shield-check-2" title="Not part of this release" description="Vulnerability and scanner findings are being redesigned for a future release. Cloud Security covers posture, exposure and identity risk." />;
     case 'resource_distribution_pie':
       return Object.keys(data.resourceByCategory).length > 0
         ? <Donut size={100} thickness={16} data={Object.entries(data.resourceByCategory).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} />

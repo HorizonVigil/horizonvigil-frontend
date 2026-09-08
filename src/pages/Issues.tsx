@@ -8,6 +8,7 @@ import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
 import { api, type CostRecommendation, type VulnerabilityFinding, type AlertRow } from '../lib/api';
+import { isVulnerabilityDataEnabled } from '../lib/featureFlags';
 
 type IssueSource = 'cost' | 'security' | 'alert';
 type UnifiedSeverity = 'critical' | 'high' | 'medium' | 'low';
@@ -104,17 +105,23 @@ export function Issues() {
     try {
       const connectionId = account === 'all' ? undefined : account;
 
+      // Security findings excluded from this V1 queue 2026-09-08
+      // (production-readiness audit): every open vulnerability_findings row
+      // in production is a scanner/CVE record (V2), so this triage list was
+      // ~3,615 CVEs burying the 4 real V1 items, and its per-row "Open in
+      // Vulnerability Management" action pointed at a route that now
+      // redirects to a V2 notice. Cost + alerts are the real V1 work
+      // sources until /my-work exists.
+      const wantSecurity = isVulnerabilityDataEnabled();
       const [cost, sec, al] = await Promise.all([
         api.getSavingsOpportunities({
           connectionId,
           status: 'open',
           limit: 200,
         }),
-        api.getFindings({
-          connection_id: connectionId,
-          status: 'open',
-          limit: 200,
-        }),
+        wantSecurity
+          ? api.getFindings({ connection_id: connectionId, status: 'open', limit: 200 })
+          : Promise.resolve({ items: [], pagination: { total: 0 } }),
         api.getActiveAlerts({
           connection_id: connectionId,
           limit: 200,
