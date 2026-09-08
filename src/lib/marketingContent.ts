@@ -53,14 +53,24 @@ export const MARKETING_PLANS: MarketingPlan[] = [
     tagline: 'For organizations that need SAML SSO and a real compliance story.',
     cloudAccounts: fmt(30), users: fmt(75), automations: fmt(250), retention: '365 days',
     support: 'Dedicated', sla: '99.9%', sso: true, samlSso: true, auditLog: true,
-    compliance: ['SOC 2 control mapping', 'CIS benchmark scanning', 'SIEM export'],
+    // Compliance framework mappings (SOC 2, CIS, SIEM export) removed
+    // 2026-09-08 -- confirmed zero implementation anywhere in the product
+    // (compliance_benchmarks has zero rows in production for any framework,
+    // and no SIEM export code exists at all). Same false-claim class already
+    // fixed on the homepage; this file was missed in that pass.
+    compliance: [],
   },
   {
     key: 'enterprise', name: 'Enterprise', monthlyCents: 0, annualCents: 0,
     tagline: 'Unlimited scale, dedicated infrastructure, and a named team on call.',
     cloudAccounts: fmt(-1), users: fmt(-1), automations: fmt(-1), retention: 'Custom',
     support: 'Dedicated', sla: '99.99%', sso: true, samlSso: true, auditLog: true,
-    compliance: ['SOC 2 Type II', 'ISO 27001 mapping', 'HIPAA-ready', 'Dedicated VPC', 'Customer-managed keys'],
+    // Removed 2026-09-08 -- same reason as Business above (SOC 2/ISO 27001/
+    // HIPAA: zero implementation). "Dedicated VPC" and "Customer-managed
+    // keys" also removed: no evidence of either anywhere in the codebase.
+    // Real, verified Enterprise differentiators stay in the fields above
+    // (SSO, SAML SSO, audit log, SLA, support tier, limits).
+    compliance: [],
   },
 ];
 

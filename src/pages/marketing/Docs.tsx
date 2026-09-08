@@ -18,11 +18,11 @@ const STEPS = [
   },
   {
     title: '4. Let discovery run',
-    body: 'The first sync builds your full resource inventory — this typically completes within a few minutes depending on account size. You can watch progress live from the account\'s Sync Center.',
+    body: 'The first sync builds your resource inventory — this typically completes within a few minutes depending on account size. You can watch progress live from the account\'s Sync Center.',
   },
   {
     title: '5. Explore your data',
-    body: 'Resources, Cost Management, Vulnerability Management, and Clusters all populate from the same sync — no separate setup per module. Invite teammates from Users & Organizations once you\'re ready to share access.',
+    body: 'Resources, Cost Management, Cloud Security, and Clusters all populate from the same sync — no separate setup per module. Invite teammates from Users & Organizations once you\'re ready to share access.',
   },
 ];
 
@@ -32,8 +32,8 @@ const MODULES = [
     desc: 'A live, searchable inventory across every connected account — EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, Artifact Registry, and more. Filter by account, region, service, or tag, and drill into any resource for its full configuration. EKS and GKE workloads and node health live under Clusters, one level deeper.',
   },
   {
-    name: 'Vulnerability Management',
-    desc: 'Findings from across your fleet, deduplicated and triaged by real severity rather than a raw scanner feed. Includes live compliance benchmark scoring against CIS AWS Foundations, PCI DSS, and ISO 27001, viewable per account under Vulnerability Management › Compliance.',
+    name: 'Cloud Security',
+    desc: 'Posture, misconfigurations, exposure, and identity risk across every connected account, plus provider-native compliance evidence (AWS Config conformance packs) — not an independent CIS/SOC 2/ISO 27001 certification. Vulnerability scanning and CVEs are being redesigned for a future release.',
   },
   {
     name: 'Cost Management',
@@ -45,23 +45,19 @@ const MODULES = [
   },
   {
     name: 'Automation',
-    desc: 'One-click and scheduled remediation — stop/start, right-sizing, and policy-driven fixes — with a full audit trail of who ran what, on which resource, and when. Requires editor role or above.',
+    desc: 'One-click remediation — stop/start, right-sizing, and policy-driven fixes — with a full audit trail of who ran what, on which resource, and when. Requires editor role or above. Scheduled/automatic triggering isn\'t live yet; every action today starts from a real, explicit click.',
   },
   {
     name: 'Reports',
-    desc: 'Custom dashboards and scheduled reports built from the same live data your team already sees day to day, so stakeholders get a snapshot without needing their own login.',
+    desc: 'Custom dashboards and one-time report generation (CSV/PDF) built from the same live data your team already sees day to day. Scheduled, recurring delivery isn\'t live yet — every report today is generated on demand.',
   },
   {
     name: 'Monitoring',
     desc: 'Resource-level metrics and alerting that already knows which account and organization a resource belongs to. Alert rules and notification routing live alongside it under Alerts.',
   },
   {
-    name: 'AI Copilot',
-    desc: 'Ask about your environment in plain language and get answers grounded in your actual connected-account data, with cited sources — not a generic model guessing at what you might have running.',
-  },
-  {
     name: 'Issues',
-    desc: 'Cost, security, and alert items that need attention, unified into one severity-sorted list — the fastest way to answer "what\'s actually urgent" without checking three modules separately.',
+    desc: 'Cost, security, and alert items that need attention, unified into one list — the fastest way to see what\'s outstanding without checking three modules separately.',
   },
 ];
 
