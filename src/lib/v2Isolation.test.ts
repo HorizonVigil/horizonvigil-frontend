@@ -31,6 +31,7 @@ const sources = import.meta.glob(
     '../components/cloudAccounts/OverviewPanel.tsx',
     '../components/cloudAccounts/overview/SecurityPanel.tsx',
     '../pages/CostOptimization.tsx',
+    '../pages/CloudAccounts.tsx',
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
@@ -160,6 +161,29 @@ describe('no direct provider mutation is reachable in V1', () => {
   it('still offers the V1-permitted alternatives (manual CLI guidance and a real IaC pull request)', () => {
     expect(src).toMatch(/aws ec2 modify-instance-attribute/);
     expect(src).toMatch(/openAutoPr\(/);
+  });
+});
+
+describe('destructive actions are protected (Phase 0.6)', () => {
+  // 2026-09-08 audits, P0: permanent purge removed a connection, its
+  // resources and all history behind one generic Confirm; bulk delete could
+  // do that to several accounts without ever naming them. Disposition:
+  // "Disable by default". Purge is now denied server-side in all three
+  // connectors; these assert the client can't offer it either.
+  const src = code(source('pages/CloudAccounts.tsx'));
+
+  it('offers no bulk permanent delete', () => {
+    expect(src).not.toMatch(/handleBulkDeletePermanently/);
+    expect(src).not.toMatch(/selected permanently/);
+  });
+
+  it('calls no permanent-delete API at all', () => {
+    expect(src).not.toMatch(/deleteAccountPermanently|deleteGcpAccountPermanently|deleteAzureAccountPermanently/);
+  });
+
+  it('keeps Disconnect, which is reversible and preserves history', () => {
+    expect(src).toMatch(/handleDisconnect/);
+    expect(src).toMatch(/handleBulkDisconnect/);
   });
 });
 
