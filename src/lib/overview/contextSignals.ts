@@ -13,11 +13,21 @@ import { api } from '../api';
 import { daysAgoISO } from '../format';
 import { dateRangeToDays, useFilters } from '../filterContext';
 import { scopedConnectionId } from './scope';
+import { isCloudOnlyMode } from '../featureFlags';
 import { EMPTY_SIGNALS, scopeQueryKey, type Capabilities, type ContextSignals, type EffectiveScope } from './types';
 
 async function fetchSignals(scope: EffectiveScope, can: Capabilities, fromISO: string): Promise<ContextSignals> {
   const connectionId = scopedConnectionId(scope);
-  const wantIncidents = can.has('incident.read');
+  // The Incidents module/backend is gone in cloud-only mode (see
+  // navConfig.ts's hiddenInCloudOnlyMode and, more fundamentally,
+  // cloudops-360's incidents Cloud Run service, deleted 2026-09-07) --
+  // can.has('incident.read') alone doesn't account for that (a raw menu
+  // permission grant can outlive a module's own nav visibility), so this
+  // fired a real, always-failing request on every Overview load for any
+  // user who happens to hold that permission. getEligibleMeta() already
+  // gates the *widget* surfaces correctly via enabledModules -- this fixes
+  // the one signal-fetching path that didn't go through that same gate.
+  const wantIncidents = !isCloudOnlyMode() && can.has('incident.read');
   const wantSecurity = can.has('security.read');
   const wantCost = can.has('cost.read');
   const wantDevops = can.has('devops.read');
