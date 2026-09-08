@@ -36,7 +36,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [currentOrg, setCurrentOrgState] = useState<OrganizationRow | null>(null);
   const [folders, setFolders] = useState<FolderRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
-  const [scope, setScope] = useState<Scope | null>(null);
+  const [scope, setScopeState] = useState<Scope | null>(null);
+  /**
+   * Mirror the picked scope onto the API client so every request carries
+   * X-Scope-Type / X-Scope-Id and the server resolves the permitted
+   * connection set itself (Phase 1). Without this the backend work is
+   * dormant: it defaults to org scope when no header arrives.
+   */
+  const setScope = useCallback((next: Scope | null) => {
+    setScopeState(next);
+    api.setActiveScope(next ? { type: next.type, id: next.id } : null);
+  }, []);
   const [menuPermissions, setMenuPermissions] = useState<Record<string, MenuPermissionLevel> | null>(null);
   const [resourceGrants, setResourceGrants] = useState<{ restricted: boolean; connectionIds: string[] } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
