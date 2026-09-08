@@ -98,8 +98,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   // The most recent resize_instance remediation request (if any) already
   // filed for this resource — lets the drawer show "Resize requested",
   // "Awaiting approval", etc. instead of offering a duplicate request.
-  const [resizeRequest, setResizeRequest] = useState<RemediationRequest | null>(null);
-  const [resizeRequesting, setResizeRequesting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tabError, setTabError] = useState<string | null>(null);
   const [anomalyError, setAnomalyError] = useState<string | null>(null);
@@ -113,7 +111,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
     if (!selected || selected.category !== 'rightsizing' || !selected.resource_id) {
       setSelectedResource(null);
       setSelectedCpuHistory([]);
-      setResizeRequest(null);
       return;
     }
 
@@ -127,28 +124,19 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
         metricName: 'CPUUtilization',
         limit: 60,
       }),
-      api.listRemediation({ connectionId: selected.connection_id }),
     ])
-      .then(([resource, metrics, remediation]) => {
+      .then(([resource, metrics]) => {
         if (cancelled) return;
 
         setSelectedResource(resource);
         setSelectedCpuHistory(
           [...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)),
         );
-        setResizeRequest(
-          remediation.items.find(
-            r =>
-              r.resource_id === selected.resource_id &&
-              r.action_type === 'resize_instance',
-          ) ?? null,
-        );
       })
       .catch(() => {
         if (cancelled) return;
         setSelectedResource(null);
         setSelectedCpuHistory([]);
-        setResizeRequest(null);
       })
       .finally(() => {
         if (!cancelled) setSelectedDetailLoading(false);
@@ -160,54 +148,13 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   }, [selected]);
 
 
-  // resize_instance's execute step can only ever safely issue StopInstances
-  // and stop there — AWS's stop is itself asynchronous, so a Worker
-  // invocation can't block waiting for it. Once a request lands in
-  // 'awaiting_stop', this polls finish-resize every few seconds (same "small
-  // step, caller drives the loop" shape as the sync/discovery polling
-  // elsewhere in this app) until the instance is confirmed stopped and the
-  // resize completes.
-  // Keyed on id+status (not the resizeRequest object itself) so the interval
-  // isn't torn down and rebuilt on every poll tick — setResizeRequest(updated)
-  // below produces a new object each time even when status hasn't changed,
-  // which would otherwise clear and never recreate the interval.
-  const resizeRequestId = resizeRequest?.id;
-  const resizeRequestStatus = resizeRequest?.status;
-  useEffect(() => {
-    if (!resizeRequestId || resizeRequestStatus !== 'awaiting_stop') return;
-
-    const interval = setInterval(() => {
-      void api
-        .finishResizeRemediation(resizeRequestId)
-        .then(updated => setResizeRequest(updated))
-        .catch(() => {
-          // Keep the current state. The next poll can recover from a transient
-          // API failure without interrupting the remediation workflow.
-        });
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [resizeRequestId, resizeRequestStatus]);
-
-  async function requestAutomatedResize(recommendation: CostRecommendation, targetInstanceType: string) {
-    if (!recommendation.resource_id) return;
-    const ok = await confirm(
-      `Request an automated resize to "${targetInstanceType}"? This goes through an approval + dry-run before anything actually runs against AWS. Once executed, the instance will stop, resize, and restart — there will be real downtime for that duration.`,
-    );
-    if (!ok) return;
-    setResizeRequesting(true);
-    try {
-      const created = await api.requestRemediation({
-        connectionId: recommendation.connection_id, resourceId: recommendation.resource_id, actionType: 'resize_instance',
-        recommendationId: recommendation.id, targetConfig: { targetInstanceType },
-      });
-      setResizeRequest(created);
-      toast('Resize requested — an admin needs to approve it in Automation → Remediation before it runs.', 'success');
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Could not request automated resize', 'error');
-    } finally {
-      setResizeRequesting(false);
-    }
-  }
+  // The resize polling interval and requestAutomatedResize() that lived here
+  // were removed in V1: they called finishResizeRemediation()/
+  // requestRemediation(), i.e. a background job and a provider-mutating
+  // request, against a pathway the server now denies fail-closed. The
+  // audits' definition of gating explicitly includes "no background fetch or
+  // job", so leaving a silent 8-second poll against a 403 would not have
+  // satisfied it.
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -680,7 +627,7 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
           <p>{openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account, from your discovered resource inventory — idle instances, unattached volumes, unreleased IPs, stale snapshots, and rightsizing candidates identified from real CloudWatch utilization data. Reserved Instance, Savings Plan, and AWS's own rightsizing recommendations are separate — run "Sync Recommendations" on an AWS account's Recommendations tab to pull those in directly from AWS Cost Explorer's own analysis (real dollar figures, not estimated here). Savings Plan recommendations take AWS a little while to compute the first time — sync again shortly after if none appear immediately. Azure and GCP commitment recommendations are on the roadmap, not silently faked in the meantime — which is why those two clouds' Reserved Instances/Savings Plans tabs stay empty for now.</p>
-          <p className="mt-2">HorizonVigil's documented AWS setup is read-only — clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on most recommendations shows you the details so you can action them yourself. Rightsizing is the one exception: its detail view also offers Request Automated Resize, which files an approval + dry-run before HorizonVigil executes anything — it only succeeds if your connection's own IAM role happens to include the extra EC2 permissions that needs, beyond the read-only setup we document, and fails safely with a clear reason if it doesn't.</p>
+          <p className="mt-2">HorizonVigil connects read-only and does not make changes to your cloud accounts. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> opens the recommendation's details so you can action it yourself — with exact CLI steps, or, for rightsizing, an optional pull request against your Terraform/Pulumi repository that you review and merge.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
             <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection below.</p>
           )}
@@ -721,9 +668,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
             onDismiss={() => void markDone(selected.id, 'dismissed')}
             onExclude={() => openExcludeModal(selected)}
             onNotifyOwner={() => openNotifyModal(selected)}
-            resizeRequest={resizeRequest}
-            resizeRequesting={resizeRequesting}
-            onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
             gitInstallations={gitInstallations}
           />
         ) : selected && (
@@ -840,17 +784,8 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
  * action it yourself" posture as the generic drawer — this composes real
  * commands from real data, it doesn't execute them.
  */
-const RESIZE_STATUS_LABEL: Record<RemediationRequest['status'], string> = {
-  pending_approval: 'Requested — awaiting admin approval', rejected: 'Request rejected', approved: 'Approved — awaiting dry-run',
-  dry_run_passed: 'Dry-run passed — awaiting execution', dry_run_failed: 'Dry-run failed', executing: 'Executing…',
-  awaiting_stop: 'Stopping instance…', completed: 'Resize completed', failed: 'Resize failed', rolled_back: 'Rolled back',
-};
-const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning' | 'critical' | 'neutral'> = {
-  pending_approval: 'neutral', rejected: 'critical', approved: 'neutral', dry_run_passed: 'neutral', dry_run_failed: 'critical',
-  executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
-};
 
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, resizeRequest, resizeRequesting, onRequestResize, gitInstallations }: {
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, gitInstallations }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -861,9 +796,6 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   onDismiss: () => void;
   onExclude: () => void;
   onNotifyOwner: () => void;
-  resizeRequest: RemediationRequest | null;
-  resizeRequesting: boolean;
-  onRequestResize: (targetInstanceType: string) => void;
   gitInstallations: GitInstallation[];
 }) {
   const currentType = typeof resource?.metadata.instanceType === 'string' ? resource.metadata.instanceType : null;
@@ -991,33 +923,22 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         )}
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Automated Resize</h3>
-          {resizeRequest && <Badge tone={RESIZE_STATUS_TONE[resizeRequest.status]}>{RESIZE_STATUS_LABEL[resizeRequest.status]}</Badge>}
-        </div>
-        {resizeRequest ? (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-500 dark:text-slate-400 space-y-1">
-            <p>Target: <span className="font-mono text-slate-700 dark:text-slate-200">{resizeRequest.target_config?.targetInstanceType ?? recommendedType}</span></p>
-            {resizeRequest.status === 'pending_approval' && <p>An admin needs to approve this in Automation → Remediation before it runs.</p>}
-            {resizeRequest.status === 'dry_run_failed' && <p>{resizeRequest.dry_run_result?.reason ?? 'The pre-execution dry-run failed — see Automation → Remediation for details.'}</p>}
-            {resizeRequest.status === 'awaiting_stop' && <p>Instance is stopping — this page checks progress automatically every few seconds, then resizes and restarts it once stopped.</p>}
-            {resizeRequest.status === 'failed' && <p>{resizeRequest.execution_result?.errorMessage ?? resizeRequest.execution_result?.reason ?? 'The resize failed — see Automation → Remediation for details.'}</p>}
-            {resizeRequest.status === 'completed' && <p>Resize completed successfully — the instance is running on {resizeRequest.target_config?.targetInstanceType}.</p>}
-            {resizeRequest.status === 'rejected' && <p>This request was rejected. Dismiss this recommendation or use the manual CLI steps below instead.</p>}
-          </div>
-        ) : recommendedType ? (
-          <>
-            <button type="button" onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-              {resizeRequesting ? 'Requesting…' : 'Request Automated Resize'}
-            </button>
-            <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. HorizonVigil executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
-          </>
-        ) : (
-          <p className="text-xs text-slate-400">Not enough resource detail to request an automated resize — see the manual CLI steps below instead.</p>
-        )}
-      </div>
+      {/* "Automated Resize" removed in V1 (2026-09-08 production-readiness
+          audits, P0: "No direct provider mutation ships in V1" / "Remove
+          from V1 -- offer manual guide, ticket, or IaC draft only until
+          execution credentials and governance are certified").
 
+          The concrete reason: executing a resize called StopInstances /
+          ModifyInstanceAttribute / StartInstances using the SAME stored
+          credential used for read-only collection. There is no separate
+          execution identity, certified worker, canary, emergency stop, or
+          provider-verified outcome. The server now denies the whole
+          remediation pathway fail-closed (connector-aws lib/capabilities.ts),
+          so leaving this button would only start a flow that cannot finish.
+
+          What remains here is exactly what the audits permit for V1: the
+          Auto-PR draft below (a real, verified GitHub App integration) and
+          the guided manual CLI steps. */}
       <div>
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Auto-PR (GitHub) — Terraform/Pulumi</div>
         {gitInstallations.length === 0 ? (
@@ -1077,7 +998,7 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           one of them. */}
       <p className="text-xs text-slate-400 dark:text-slate-500">
         {cliCommands
-          ? "The CLI commands above are run by you, not HorizonVigil — copy them into your own terminal, then mark this done here. (Request Automated Resize above is the one exception, and only where your connection's own IAM role allows it.)"
+          ? 'The CLI commands above are run by you, not HorizonVigil — copy them into your own terminal, then mark this done here.'
           : "HorizonVigil's documented AWS setup for this connection is read-only and doesn't run a change for you — action it yourself, then mark this done here."}
       </p>
 
