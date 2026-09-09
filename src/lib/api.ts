@@ -775,12 +775,11 @@ class ApiClient {
     return this.downloadRaw('reports', `/api/reports/reports/${id}/download`, `report-${id}`);
   }
   getScheduledReports(params: { category?: string; enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<ScheduledReport>>('reports', `/api/reports/scheduled${qs(params)}`); }
-  createScheduledReport(data: { name: string; reportCategory: string; scope?: unknown; cadence: string; recipients?: string[]; format?: string; nextRunAt?: string; enabled?: boolean }) {
-    return this.post<ScheduledReport>('reports', '/api/reports/scheduled', data);
-  }
-  updateScheduledReport(id: string, data: Partial<{ name: string; reportCategory: string; scope: unknown; cadence: string; recipients: string[]; format: string; nextRunAt: string; enabled: boolean }>) {
-    return this.put<ScheduledReport>('reports', `/api/reports/scheduled/${id}`, data);
-  }
+  // Phase 11 (§15.4): createScheduledReport/updateScheduledReport removed.
+  // The server refuses both -- there is no scheduler and no delivery worker
+  // -- so a client method for them is a call that can only ever fail.
+  // getScheduledReports and deleteScheduledReport are kept deliberately, so
+  // a schedule saved before this release can still be seen and removed.
   deleteScheduledReport(id: string) { return this.delete<{ deleted: string }>('reports', `/api/reports/scheduled/${id}`); }
   getExportCenter(params: { category?: string; status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ReportRow>>('reports', `/api/reports/export-center${qs(params)}`); }
 

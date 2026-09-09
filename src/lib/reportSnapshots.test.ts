@@ -18,7 +18,7 @@ import { NAV_MODULES } from './navConfig';
  *
  * Source-level assertions, the same technique v2Isolation.test.ts uses.
  */
-const sources = import.meta.glob(['../pages/Reports.tsx'], {
+const sources = import.meta.glob(['../pages/Reports.tsx', './api.ts'], {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -59,6 +59,21 @@ describe('scheduled reports are not offered', () => {
 
   it('never creates a schedule from the report form', () => {
     expect(reports).not.toMatch(/createScheduledReport/);
+  });
+
+  it('has no client method for creating or updating a schedule at all', () => {
+    // Not just unused from this page -- removed. A client method for an
+    // endpoint the server refuses is a call that can only ever fail, and
+    // leaving it invites the next feature to reach for it.
+    const client = code(source('/api.ts'));
+    expect(client).not.toMatch(/createScheduledReport/);
+    expect(client).not.toMatch(/updateScheduledReport/);
+  });
+
+  it('keeps the read and delete methods, so an old schedule can be removed', () => {
+    const client = code(source('/api.ts'));
+    expect(client).toMatch(/getScheduledReports/);
+    expect(client).toMatch(/deleteScheduledReport/);
   });
 
   it('still lets an org delete a schedule saved before this release', () => {
