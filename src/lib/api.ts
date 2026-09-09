@@ -774,6 +774,10 @@ class ApiClient {
   async downloadReport(id: string): Promise<{ blob: Blob; filename: string }> {
     return this.downloadRaw('reports', `/api/reports/reports/${id}/download`, `report-${id}`);
   }
+  /** §15.1 preview: what this report would contain, and whether it can be generated at all. Generates nothing. */
+  previewReport(data: { category: string; scope?: { connectionIds?: string[]; dateFrom?: string; dateTo?: string } }) {
+    return this.post<ReportPreview>('reports', '/api/reports/reports/preview', data);
+  }
   getScheduledReports(params: { category?: string; enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<ScheduledReport>>('reports', `/api/reports/scheduled${qs(params)}`); }
   // Phase 11 (§15.4): createScheduledReport/updateScheduledReport removed.
   // The server refuses both -- there is no scheduler and no delivery worker
@@ -1556,6 +1560,19 @@ export interface EscalationPolicy { id: string; org_id: string; name: string; st
 export interface MaintenanceWindow { id: string; org_id: string; connection_id: string | null; name: string; starts_at: string; ends_at: string; recurrence: unknown; created_by: string; created_at: string }
 
 export interface ReportRow { id: string; org_id: string; category: string; name: string; scope: unknown; format: string; status: 'pending' | 'generating' | 'delivered' | 'failed'; data_volume_mb: number | null; region: string | null; requested_by: string | null; generated_at: string | null; delivered_at: string | null; download_url: string | null; mime_type: string | null; error_message: string | null; created_at: string }
+/** §15.1/§15.3: the server's answer to "can this be generated, and over what". */
+export interface ReportPreview {
+  canGenerate: boolean;
+  /** Present only when generation is blocked — the reason a customer needs BEFORE clicking. */
+  blockedReason: { code: string; message: string } | null;
+  scope: { connectionIds: string[]; accountsInScope: number; dateFrom: string; dateTo: string | null };
+  timezone: string;
+  currency: string | null;
+  sourceCoverage: { source: string; state: string; reason?: string; rows: number; expectedConnections?: number; coveredConnections?: number }[];
+  completeness: { complete: boolean; reason: string | null; missing: string[] };
+  queryVersion: string;
+}
+
 export interface ScheduledReport { id: string; org_id: string; report_category: string; name: string; scope: unknown; cadence: string; recipients: string[]; format: string; next_run_at: string | null; enabled: boolean; created_at: string }
 
 export interface Member { roleGrantId: string; userId: string; role: Role; email: string | null; fullName: string | null; mfaEnabled: boolean; attributes: Record<string, unknown> }

@@ -76,6 +76,26 @@ describe('scheduled reports are not offered', () => {
     expect(client).toMatch(/deleteScheduledReport/);
   });
 
+  it('sends scope and period with the request, not just a name (§15.1)', () => {
+    // "The current name/category/format-only request is insufficient."
+    expect(reports).toMatch(/dateFrom/);
+    expect(reports).toMatch(/dateTo/);
+    expect(reports).toMatch(/scope: \{ dateFrom/);
+  });
+
+  it('previews before generating, so a refusal arrives before the click', () => {
+    // Without this, a cost report over an unconfigured billing source is a
+    // button press followed by a 409, and the reason lands after the
+    // decision rather than before it.
+    expect(reports).toMatch(/previewReport|loadPreview/);
+    expect(reports).toMatch(/canGenerate/);
+    expect(reports).toMatch(/blockedReason/);
+  });
+
+  it('disables the submit button when the server says it cannot generate', () => {
+    expect(reports).toMatch(/preview\?\.canGenerate === false/);
+  });
+
   it('still lets an org delete a schedule saved before this release', () => {
     // Removing the tab must not trap an org with a row it can neither run
     // nor delete. Renders only when such rows exist.

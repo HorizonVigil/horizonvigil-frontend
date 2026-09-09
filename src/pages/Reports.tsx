@@ -8,7 +8,7 @@ import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
-import { api, type ReportRow, type ScheduledReport } from '../lib/api';
+import { api, type ReportRow, type ScheduledReport, type ReportPreview } from '../lib/api';
 
 const CATEGORIES = ['cost', 'security', 'resource', 'operational', 'compliance', 'savings'] as const;
 type Category = typeof CATEGORIES[number];
@@ -55,6 +55,18 @@ export function Reports() {
   const [scheduled, setScheduled] = useState<ScheduledReport[]>([]);
   const [exportCenter, setExportCenter] = useState<ReportRow[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  /**
+   * §15.1: a report request is scope + period + format, not just a name.
+   *
+   * The preview matters more than the extra fields. Without it, a cost
+   * report over an unconfigured billing source is a button press followed
+   * by a refusal, and the reason arrives after the decision. With it, the
+   * reason arrives before.
+   */
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [preview, setPreview] = useState<ReportPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('cost');
   const [format, setFormat] = useState<'pdf' | 'csv' | 'xlsx'>('pdf');
@@ -197,8 +209,32 @@ export function Reports() {
     const tabCategory = TAB_CATEGORY[tab];
     setCategory(tabCategory ?? 'cost');
     setName('');
+    // Default to the current month, and say so in the field label rather
+    // than leaving the customer to guess what an empty period means.
+    setDateFrom(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)).toISOString().slice(0, 10));
+    setDateTo('');
+    setPreview(null);
     setModalOpen(true);
   }
+
+  /** Asks the server what this report would contain, and whether it can be generated at all. */
+  const loadPreview = useCallback(async (cat: Category, from: string, to: string) => {
+    setPreviewing(true);
+    try {
+      setPreview(await api.previewReport({ category: cat, scope: { dateFrom: from || undefined, dateTo: to || undefined } }));
+    } catch {
+      // A failed preview must not block generation -- the server applies the
+      // same gates on create, so the refusal still happens where it counts.
+      setPreview(null);
+    } finally {
+      setPreviewing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    void loadPreview(category, dateFrom, dateTo);
+  }, [modalOpen, category, dateFrom, dateTo, loadPreview]);
 
   async function createReport(e: React.FormEvent) {
     e.preventDefault();
@@ -223,7 +259,12 @@ export function Reports() {
     try {
       // One-time only. Recurring delivery has no worker behind it, and the
       // server refuses to save a schedule that would never fire (§15.4).
-      await api.createReport({ category, name: trimmedName, format });
+      await api.createReport({
+        category,
+        name: trimmedName,
+        format,
+        scope: { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
+      });
 
       setModalOpen(false);
       setName('');
@@ -490,8 +531,47 @@ export function Reports() {
               <option value="xlsx">Excel (.xlsx)</option>
             </select>
           </label>
-          <button type="submit" disabled={creating} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 disabled:opacity-50">
-            {creating ? 'Generating…' : 'Generate report'}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Period from</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="Report period start" disabled={creating}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Period to</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="Report period end" disabled={creating}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white" />
+              <span className="text-xs text-slate-400">Leave empty for up to now.</span>
+            </label>
+          </div>
+
+          {/* The preview. Its job is to move the refusal before the click. */}
+          {previewing ? (
+            <div className="h-16 rounded-lg bg-slate-100 dark:bg-slate-800 animate-pulse" />
+          ) : preview && (
+            <div className={`rounded-lg border p-3 text-xs flex flex-col gap-1.5 ${
+              preview.canGenerate
+                ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40'
+                : 'border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30'}`}>
+              <div className="font-medium text-slate-700 dark:text-slate-200">
+                {preview.scope.accountsInScope} account{preview.scope.accountsInScope === 1 ? '' : 's'} in scope
+                {preview.currency ? ` · ${preview.currency}` : ''} · {preview.timezone}
+              </div>
+              {preview.sourceCoverage.map(src => (
+                <div key={src.source} className="text-slate-500 dark:text-slate-400">
+                  {src.source}: {src.state.replace(/_/g, ' ')}{src.reason ? ` — ${src.reason}` : ''} ({src.rows} row{src.rows === 1 ? '' : 's'})
+                </div>
+              ))}
+              {!preview.completeness.complete && (
+                <div className="text-amber-700 dark:text-amber-400">{preview.completeness.reason}</div>
+              )}
+              {/* Why not, before the button rather than after it. */}
+              {!preview.canGenerate && preview.blockedReason && (
+                <div className="text-amber-700 dark:text-amber-400">{preview.blockedReason.message}</div>
+              )}
+            </div>
+          )}
+
+          <button type="submit" disabled={creating || preview?.canGenerate === false} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 disabled:opacity-50">
+            {creating ? 'Generating…' : preview?.canGenerate === false ? 'Cannot generate yet' : 'Generate report'}
           </button>
         </form>
       </Modal>
