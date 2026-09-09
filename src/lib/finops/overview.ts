@@ -160,9 +160,20 @@ const CATEGORY_LABEL: Record<string, string> = {
   savings_plan: 'Savings Plans',
 };
 
+/**
+ * Savings by category, counting only what can honestly be acted on (§9).
+ *
+ * Every open recommendation used to be summed here. On 2026-09-09 that meant
+ * this chart's bars were made entirely of four recommendations whose target
+ * instances had all been deleted — including one instance counted twice,
+ * under two mutually exclusive actions.
+ */
 export function optimizationByCategory(recs: CostRecommendation[]): BarDatum[] {
   const sums = new Map<string, number>();
-  for (const r of recs) sums.set(r.category, (sums.get(r.category) ?? 0) + r.potential_monthly_savings);
+  for (const r of recs) {
+    if (r.validity !== 'actionable') continue;
+    sums.set(r.category, (sums.get(r.category) ?? 0) + r.potential_monthly_savings);
+  }
   return [...sums.entries()]
     .map(([category, value]) => ({ label: CATEGORY_LABEL[category] ?? category.replace(/_/g, ' '), value }))
     .filter((d) => d.value > 0)

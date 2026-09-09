@@ -605,7 +605,10 @@ class ApiClient {
 
   // ── cost-optimization-api ────────────────────────────────────────────────
 
-  getCostOptimizationDashboard(connectionIds?: string[]) { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number; openAnomalies: number }>('costOptimization', `/api/cost-optimization/dashboard${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  /** `openRecommendations` and `totalPotentialMonthlySavings` count ONLY validity='actionable' rows; `recommendationBreakdown` says what was left out and why (§9). */
+  getCostOptimizationDashboard(connectionIds?: string[]) { return this.get<CostOptimizationDashboard>('costOptimization', `/api/cost-optimization/dashboard${qs({ connection_ids: connectionIds?.join(',') })}`); }
+  /** Re-judges every open recommendation against the estate as it is now, recording a stated reason on each. Writes; editor+. */
+  reevaluateRecommendations(connectionId?: string) { return this.post<{ connectionsScanned: number; evaluated: number; byValidity: Record<string, number>; actionableMonthlySavings: number }>('costOptimization', '/api/cost-optimization/reevaluate', connectionId ? { connectionId } : {}); }
   getSavingsOpportunities(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-opportunities${recQs(params)}`); }
   getRightsizing(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/rightsizing${recQs(params)}`); }
   getIdleResources(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/idle-resources${recQs(params)}`); }
@@ -1313,8 +1316,32 @@ export interface CostRecommendation {
   excluded_reason: ExclusionReason | null; excluded_justification: string | null; excluded_by: string | null; excluded_at: string | null; excluded_until: string | null;
   assigned_to: string | null; last_notified_at: string | null; last_notified_by: string | null;
   source: CostRecommendationSource; commitment_term: string | null; payment_option: string | null;
+  /**
+   * Whether this recommendation can honestly be acted on, and why (§9).
+   * `unevaluated` (or null, on a row written before the contract existed) is
+   * NOT a synonym for actionable — it means nobody has judged it yet.
+   */
+  validity: RecommendationValidity | null; validity_reason: string | null;
+  evidence_window_days: number | null; evidence_sample_count: number | null;
+  evidence_from: string | null; evidence_to: string | null;
+  action_group: string | null; target_state_at_evaluation: string | null;
+  rule_version: string | null; evaluated_at: string | null; expires_at: string | null; confidence: number | null;
+  savings_state: SavingsState | null; observed_monthly_savings: number | null; verified_at: string | null;
+  /** null when ownership could not be looked up — distinct from an owner of null, which means nobody owns it. */
+  ownership: RecommendationOwnership | null;
 }
-export type RecommendationListParams = { connectionId?: string; connectionIds?: string[]; category?: string; priority?: string; status?: string; page?: number; limit?: number }
+export type RecommendationValidity = 'unevaluated' | 'actionable' | 'insufficient_evidence' | 'target_changed' | 'target_gone' | 'superseded' | 'expired';
+/** A hypothesis (`identified`) and a measured outcome (`verified`) are different claims and are never summed together. */
+export type SavingsState = 'identified' | 'approved' | 'implemented' | 'observed' | 'verified' | 'not_realised';
+export interface OwnershipBinding { value: string; source: string }
+export interface RecommendationOwnership { owner: OwnershipBinding | null; team: OwnershipBinding | null; application: OwnershipBinding | null }
+export type RecommendationListParams = { connectionId?: string; connectionIds?: string[]; category?: string; priority?: string; status?: string; validity?: string; page?: number; limit?: number }
+export interface CostOptimizationDashboard {
+  openRecommendations: number; totalPotentialMonthlySavings: number; openAnomalies: number;
+  recommendationBreakdown?: { total: number; actionable: number; unevaluated: number; notActionable: number };
+  /** 'partial' whenever some open rows have never been judged — the savings figure is then incomplete, not merely small. */
+  savingsAvailability?: { state: string; reasonCode?: string; source?: string[]; coverage?: { expected: number; covered: number } };
+}
 /** Real EKS Kubernetes cost allocation — see k8sCostAllocation.ts (connector-aws) for the full OpenCost-technique methodology and why every excludedReason exists (never a fabricated $0). */
 export interface EksPodCostAllocation { podName: string; namespace: string; nodeName?: string; monthlyCost: number | null; excludedReason?: 'no_matching_node' | 'node_cost_unavailable' | 'node_allocatable_unknown' | 'no_cpu_request' }
 export interface EksCostAllocation {

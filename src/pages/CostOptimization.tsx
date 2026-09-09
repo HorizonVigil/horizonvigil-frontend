@@ -12,6 +12,7 @@ import { useToast } from '../lib/toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
 import { money as formatMoney } from '../lib/format';
+import { isActionable, isUnevaluated, validityLabel, validityTone, validityExplanation, evidenceSummary, ownershipSummary } from '../lib/recommendationDisplay';
 import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
 
@@ -321,9 +322,17 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   }
 
 
+  // The server counts only `actionable` recommendations here (§9). What it
+  // leaves out is reported separately rather than folded into the total, so
+  // "nothing to save" and "nothing has been checked" stay distinguishable.
   const potentialMonthly = dashboard?.totalPotentialMonthlySavings ?? 0;
   const potentialAnnual = potentialMonthly * 12;
   const openRecommendationsCount = dashboard?.openRecommendations ?? 0;
+  const unevaluatedCount = dashboard?.recommendationBreakdown?.unevaluated ?? 0;
+  const notActionableCount = dashboard?.recommendationBreakdown?.notActionable ?? 0;
+  /** A zero is only printable once every open row has actually been judged. */
+  const savingsProven = dashboard !== null && (potentialMonthly > 0 || unevaluatedCount === 0);
+  const savingsNote = unevaluatedCount > 0 ? `${unevaluatedCount} not checked yet` : undefined;
 
   async function markDone(
     id: string,
@@ -522,13 +531,33 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
     { key: 'resource', header: 'Resource', render: r => r.resource_id ?? '—', sortValue: r => r.resource_id ?? '' },
     { key: 'issue', header: 'Issue', render: r => r.issue, sortValue: r => r.issue },
     { key: 'action', header: 'Recommended Action', render: r => r.recommended_action, sortValue: r => r.recommended_action },
-    { key: 'savings', header: '$/mo Savings', render: r => money(r.potential_monthly_savings), sortValue: r => r.potential_monthly_savings },
+    {
+      key: 'savings', header: '$/mo Savings',
+      // A dollar figure on a recommendation that cannot be acted on is not a
+      // saving, so it is not printed as one. The number itself stays visible
+      // in the drawer with its reason — struck through here rather than
+      // hidden, since removing it would look like the row has no estimate.
+      render: r => isActionable(r)
+        ? money(r.potential_monthly_savings)
+        : <span className="text-slate-400 dark:text-slate-500 line-through" title={validityExplanation(r)}>{money(r.potential_monthly_savings)}</span>,
+      sortValue: r => r.potential_monthly_savings,
+    },
     { key: 'priority', header: 'Priority', render: r => <Badge tone={r.priority === 'high' ? 'critical' : r.priority === 'medium' ? 'warning' : 'good'}>{r.priority}</Badge>, sortValue: r => r.priority },
+    {
+      key: 'validity', header: 'Validity',
+      render: r => <Badge tone={validityTone(r)}>{validityLabel(r)}</Badge>,
+      sortValue: r => validityLabel(r),
+    },
   ];
   const actionsColumn: Column<CostRecommendation> = {
     key: 'actions', header: 'Actions', render: r => (
       <div className="flex gap-2 text-xs">
-        <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+        {/* Apply is offered only on a recommendation that is actually
+            actionable. Production served an Apply button on four rows whose
+            target instances had already been deleted. */}
+        {isActionable(r)
+          ? <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+          : <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-slate-500 dark:text-slate-400 hover:underline" title={validityExplanation(r)}>Why not?</button>}
         <button type="button" onClick={e => { e.stopPropagation(); openNotifyModal(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Notify Owner</button>
         <button type="button" onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
         <button type="button" onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} disabled={mutationId === r.id} className="text-slate-400 hover:underline">Dismiss</button>
@@ -596,9 +625,9 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Potential Monthly Savings" value={money(potentialMonthly)} />
-        <StatCard label="Annualized Savings" value={money(potentialAnnual)} />
-        <StatCard label="Open Opportunities" value={String(openRecommendationsCount)} />
+        <StatCard label="Potential Monthly Savings" value={savingsProven ? money(potentialMonthly) : '—'} caption={savingsNote} />
+        <StatCard label="Annualized Savings" value={savingsProven ? money(potentialAnnual) : '—'} caption={savingsNote} />
+        <StatCard label="Open Opportunities" value={String(openRecommendationsCount)} caption={notActionableCount > 0 ? `${notActionableCount} no longer actionable` : undefined} />
         <StatCard label="High Priority" value={String(highPriorityCount)} />
       </div>
 
@@ -625,7 +654,19 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
 
       {tab === 'Overview' ? (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-          <p>{openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
+          <p>
+            {openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts
+            {savingsProven ? `, worth ${money(potentialMonthly)}/month if fully applied.` : '.'}
+          </p>
+          {/* Counted separately, and said out loud. A recommendation whose
+              target has been deleted is not worth anything, and one nobody
+              has checked is not worth nothing either. */}
+          {notActionableCount > 0 && (
+            <p className="mt-2">{notActionableCount} further recommendation{notActionableCount === 1 ? ' is' : 's are'} no longer actionable — the resource changed or no longer exists, or the evidence behind it was too thin. {notActionableCount === 1 ? 'It is' : 'They are'} excluded from the savings figure. Open one to see why.</p>
+          )}
+          {unevaluatedCount > 0 && (
+            <p className="mt-2">{unevaluatedCount} recommendation{unevaluatedCount === 1 ? ' has' : 's have'} not been checked against your current resources yet, so {unevaluatedCount === 1 ? 'it is' : 'they are'} not counted in the savings figure either. Run "Sync Now" on the relevant AWS account to check {unevaluatedCount === 1 ? 'it' : 'them'}.</p>
+          )}
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account, from your discovered resource inventory — idle instances, unattached volumes, unreleased IPs, stale snapshots, and rightsizing candidates identified from real CloudWatch utilization data. Reserved Instance, Savings Plan, and AWS's own rightsizing recommendations are separate — run "Sync Recommendations" on an AWS account's Recommendations tab to pull those in directly from AWS Cost Explorer's own analysis (real dollar figures, not estimated here). Savings Plan recommendations take AWS a little while to compute the first time — sync again shortly after if none appear immediately. Azure and GCP commitment recommendations are on the roadmap, not silently faked in the meantime — which is why those two clouds' Reserved Instances/Savings Plans tabs stay empty for now.</p>
           <p className="mt-2">HorizonVigil connects read-only and does not make changes to your cloud accounts. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> opens the recommendation's details so you can action it yourself — with exact CLI steps, or, for rightsizing, an optional pull request against your Terraform/Pulumi repository that you review and merge.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
@@ -680,6 +721,7 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Issue</div>
               <div className="text-slate-700 dark:text-slate-200">{selected.issue}</div>
             </div>
+            <RecommendationEvidence recommendation={selected} />
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Recommended Action</div>
               <div className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 whitespace-pre-wrap">{selected.recommended_action}</div>
@@ -691,7 +733,14 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
             <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never makes this change for you — action it yourself in the AWS Console or CLI, then mark it done here.</p>
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button type="button" onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              {/* "Mark as done" asserts the customer carried out the action.
+                  Offering it on a recommendation whose target no longer
+                  exists invites a claim about work that could not have been
+                  done. Dismiss and Exclude stay available — those are how a
+                  customer clears an invalid row. */}
+              {isActionable(selected) && (
+                <button type="button" onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              )}
               <button type="button" onClick={() => openNotifyModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
               <button type="button" onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
               <button type="button" onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
@@ -770,6 +819,40 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
         )}
       </Modal>
       {confirmDialog}
+    </div>
+  );
+}
+
+/**
+ * Why this recommendation should (or should not) be believed (§9).
+ *
+ * Shown on every recommendation, not only the invalid ones. A customer
+ * cannot tell a sound recommendation from an unsound one if the basis is
+ * only ever mentioned when something is wrong — and production had no way to
+ * tell them apart at all: four rows pointing at deleted instances rendered
+ * exactly like a good one, Apply button included.
+ */
+function RecommendationEvidence({ recommendation }: { recommendation: CostRecommendation }) {
+  const actionable = isActionable(recommendation);
+  return (
+    <div className={`rounded-lg border p-3 text-xs flex flex-col gap-1.5 ${
+      actionable
+        ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40'
+        : 'border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30'}`}>
+      <div className="flex items-center gap-2">
+        <Badge tone={validityTone(recommendation)}>{validityLabel(recommendation)}</Badge>
+        {recommendation.evaluated_at && (
+          <span className="text-slate-400 dark:text-slate-500">Checked {new Date(recommendation.evaluated_at).toLocaleString()}</span>
+        )}
+      </div>
+      <p className="text-slate-600 dark:text-slate-300">{validityExplanation(recommendation)}</p>
+      <p className="text-slate-500 dark:text-slate-400">{evidenceSummary(recommendation)}</p>
+      <p className="text-slate-500 dark:text-slate-400">{ownershipSummary(recommendation)}</p>
+      {isUnevaluated(recommendation) && (
+        // Never presented as "fine" — an unchecked recommendation is exactly
+        // as unproven as it sounds, and the customer is told what to do next.
+        <p className="text-slate-500 dark:text-slate-400">Run a sync for this account to check it against your current resources.</p>
+      )}
     </div>
   );
 }
@@ -885,6 +968,8 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         <span className="text-xs text-slate-400 font-mono">{instanceId || recommendation.resource_id}</span>
       </div>
 
+      <RecommendationEvidence recommendation={recommendation} />
+
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -903,7 +988,15 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
             <tr>
               <td className="px-3 py-2 text-slate-500 dark:text-slate-400">Recommended</td>
               <td className="px-3 py-2 font-mono font-medium text-emerald-600 dark:text-emerald-400">{recommendedType ?? '—'}</td>
-              <td className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Save {money(recommendation.potential_monthly_savings)}/mo</td>
+              {/* "Save $X/mo" is a promise. It is only made for a
+                  recommendation that can actually be acted on — the figure is
+                  still shown otherwise, but as an estimate that no longer
+                  applies rather than money on the table. */}
+              {isActionable(recommendation) ? (
+                <td className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Save {money(recommendation.potential_monthly_savings)}/mo</td>
+              ) : (
+                <td className="px-3 py-2 text-right text-slate-400 dark:text-slate-500">{money(recommendation.potential_monthly_savings)}/mo estimated — not currently claimable</td>
+              )}
             </tr>
           </tbody>
         </table>
@@ -939,6 +1032,19 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           What remains here is exactly what the audits permit for V1: the
           Auto-PR draft below (a real, verified GitHub App integration) and
           the guided manual CLI steps. */}
+      {/* Both fix paths below produce a real change — a pull request against
+          the customer's infrastructure repository, or CLI commands they will
+          paste into a terminal. Neither should be offered for a
+          recommendation that is not actionable: production would have
+          happily drafted a PR resizing an instance that had been deleted
+          three weeks earlier. */}
+      {!isActionable(recommendation) ? (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Fix</div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">No fix is offered for this recommendation. {validityExplanation(recommendation)}</p>
+        </div>
+      ) : (
+      <>
       <div>
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Auto-PR (GitHub) — Terraform/Pulumi</div>
         {gitInstallations.length === 0 ? (
@@ -1001,9 +1107,16 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           ? 'The CLI commands above are run by you, not HorizonVigil — copy them into your own terminal, then mark this done here.'
           : "HorizonVigil's documented AWS setup for this connection is read-only and doesn't run a change for you — action it yourself, then mark this done here."}
       </p>
+      </>
+      )}
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-        <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        {/* See the generic drawer's copy of this: "mark as done" asserts the
+            customer performed the resize, which they cannot have done on an
+            instance that no longer exists. */}
+        {isActionable(recommendation) && (
+          <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        )}
         <button type="button" onClick={onNotifyOwner} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
         <button type="button" onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
         <button type="button" onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>

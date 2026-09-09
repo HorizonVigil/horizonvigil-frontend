@@ -202,10 +202,27 @@ export const MonthlyRunRateKpi: WidgetComponent = ({ ctx }) => {
     caption="projected" onClick={() => ctx.navigate('/finops?section=Cost+Management&tab=Forecast')} />;
 };
 
+/**
+ * Potential savings, which the server now computes from `actionable`
+ * recommendations only (§9).
+ *
+ * The zero case is the one that matters. Before this, every open row was
+ * summed regardless of whether it could be acted on, which is how "$8.88"
+ * came entirely from four recommendations pointing at deleted instances.
+ * Now that they are excluded the total is 0 — and a bare "$0.00" would be
+ * its own false claim while any recommendation is still unjudged. So a zero
+ * is only printed once every open row has actually been checked.
+ */
 export const PotentialSavingsKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-potential-savings', ctx, () => api.getCostOptimizationDashboard());
-  return <KpiValue label="Potential Savings" value={query.data ? money(query.data.totalPotentialMonthlySavings) : '—'} icon="optimization"
-    tone="good" caption="per month" onClick={() => ctx.navigate('/finops?section=Cost+Optimization')} />;
+  const data = query.data;
+  const unevaluated = data?.recommendationBreakdown?.unevaluated ?? 0;
+  const proven = data !== undefined && (data.totalPotentialMonthlySavings > 0 || unevaluated === 0);
+
+  return <KpiValue label="Potential Savings" value={proven ? money(data!.totalPotentialMonthlySavings) : '—'} icon="optimization"
+    tone="good"
+    caption={data === undefined ? 'per month' : unevaluated > 0 ? `${unevaluated} not checked yet` : 'per month'}
+    onClick={() => ctx.navigate('/finops?section=Cost+Optimization')} />;
 };
 
 export const CostAnomaliesKpi: WidgetComponent = ({ ctx }) => {
