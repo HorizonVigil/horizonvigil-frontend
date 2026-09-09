@@ -319,26 +319,33 @@ export function AwsAccountDetail() {
     if (!id) return;
     setCurSyncing(true);
     try {
-      setCurProgress('Finding your Cost & Usage Report…');
-      await api.discoverCur(id);
-      setCurProgress('Fetching this month\'s manifest…');
-      const { reportKeys } = await api.getCurManifest(id);
-      if (reportKeys.length === 0) {
-        toast('CUR report found, but no data files are published yet for this billing period.', 'error');
-        return;
-      }
-      for (let i = 0; i < reportKeys.length; i++) {
-        let skipRows = 0;
-        let done = false;
-        while (!done) {
-          setCurProgress(`Ingesting file ${i + 1} of ${reportKeys.length} — ${skipRows.toLocaleString()} rows so far…`);
-          const result = await api.ingestCurStep(id, reportKeys[i], skipRows);
-          skipRows = result.rowsProcessed;
-          done = result.done;
+      /**
+       * Server-owned now (Phase 7, §3.4). This used to run a `for` over every
+       * report file with an unbounded `while` over row chunks inside it,
+       * carrying the row offset in a local variable -- so closing the tab
+       * mid-ingest left the billing period partially ingested with nothing
+       * recording where it stopped. Partial cost data is worse than none,
+       * because it still renders as a number.
+       */
+      setCurProgress('Queueing ingestion…');
+      const run = await api.startCurRun(id);
+
+      for (;;) {
+        const state = await api.getCollectionRun(run.id);
+        if (['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELED'].includes(state.status)) {
+          if (state.status === 'SUCCEEDED') {
+            toast('Cost & Usage Report ingested — Cost Allocation, Chargeback and Showback now have real per-resource data.', 'success');
+          } else {
+            // PARTIALLY_SUCCEEDED is surfaced as a failure on purpose: a
+            // billing period missing files is incomplete cost data, and
+            // presenting it as done is the defect this phase removes.
+            toast(state.errorSummary ?? state.explanation, 'error');
+          }
+          break;
         }
+        setCurProgress(`${state.explanation} (${state.progress.completedSteps}/${state.progress.totalSteps} files)`);
+        await new Promise((r) => setTimeout(r, 5000));
       }
-      await api.finalizeCur(id);
-      toast('Cost & Usage Report synced — Cost Allocation, Chargeback, and Showback now have real per-resource data.', 'success');
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Cost & Usage Report sync failed', 'error');
     } finally {

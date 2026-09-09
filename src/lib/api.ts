@@ -271,6 +271,20 @@ class ApiClient {
     );
   }
 
+  /**
+   * Server-owned CUR ingestion (Phase 7, §3.4).
+   *
+   * Replaces the four methods that had the browser run a `for` over report
+   * files with an unbounded `while` over row chunks inside it. Closing the
+   * tab mid-ingest left the billing period partially ingested with nothing
+   * recording where it stopped.
+   */
+  startCurRun(id: string) {
+    return this.post<{ id: string; status: string; created: boolean; progress: { totalSteps: number; completedSteps: number; percent: number } }>(
+      'awsAccounts', `/api/aws-accounts/accounts/${id}/cur-runs`, {},
+    );
+  }
+
   getGcpAccounts(params: { status?: string; environment?: string; connectionMethod?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<GcpConnection>>('gcpAccounts', `/api/gcp-accounts/accounts${qs(params)}`);
   }
@@ -460,12 +474,6 @@ class ApiClient {
   executeGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/execute`); }
 
   // Cost & Usage Report (CUR) ingestion — real per-resource cost, populating resource_costs for the existing Cost Allocation/Chargeback/Showback pages in cost-management-api.
-  discoverCur(id: string) { return this.post<{ reportName: string; bucket: string; prefix: string; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/discover`); }
-  getCurManifest(id: string) { return this.get<{ billingPeriod: string; reportKeys: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/manifest`); }
-  ingestCurStep(id: string, reportKey: string, skipRows: number) {
-    return this.post<{ rowsProcessed: number; rowsIngestedThisBatch: number; done: boolean }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/ingest-step`, { reportKey, skipRows });
-  }
-  finalizeCur(id: string) { return this.post<{ syncedAt: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cur/finalize`); }
 
   // Canonical Identity model — AWS IAM users/roles today (GCP/Azure ingestion not built yet).
   getIdentities(params: { provider?: string; identityType?: string; privilegeLevel?: string; isHuman?: boolean; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {

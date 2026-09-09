@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
  * App.tsx invariants: the alternative is standing up the whole auth/org/API
  * stack to observe that a timer does NOT fire.
  */
-const sources = import.meta.glob(['./syncContext.tsx', '../components/ConnectAwsAccountWizard.tsx'], {
+const sources = import.meta.glob(['./syncContext.tsx', '../components/ConnectAwsAccountWizard.tsx', '../pages/AwsAccountDetail.tsx', './api.ts'], {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -104,5 +104,41 @@ describe('a duplicate account is reported, not silently rotated', () => {
     expect(wizardCode).toMatch(/status === 409/);
     expect(wizardCode).toMatch(/connection_already_exists/);
     expect(wizardCode).toMatch(/setDuplicate\(conflict\)/);
+  });
+});
+
+/**
+ * Phase 7 (§3.4): CUR ingestion was the worst browser loop in the product --
+ * a `for` over report files with an UNBOUNDED `while` over row chunks inside
+ * it, carrying the row offset in a local variable. Closing the tab mid-ingest
+ * left the billing period partially ingested with nothing recording where it
+ * stopped, and partial cost data still renders as a number.
+ */
+describe('CUR ingestion is server-owned', () => {
+  const detail = code(source('/AwsAccountDetail.tsx'));
+  const apiSrc = code(source('/api.ts'));
+
+  it('no longer loops report files or row chunks in the browser', () => {
+    expect(detail).not.toMatch(/ingestCurStep/);
+    expect(detail).not.toMatch(/skipRows/);
+    expect(detail).not.toMatch(/getCurManifest/);
+  });
+
+  it('removed the browser CUR orchestration client entirely', () => {
+    // Plain substring rather than a hand-built RegExp: the escaping in a
+    // template literal collapsed and silently produced an invalid pattern.
+    for (const m of ['discoverCur(', 'getCurManifest(', 'ingestCurStep(', 'finalizeCur(']) {
+      expect(apiSrc.includes(m), `${m} still present`).toBe(false);
+    }
+  });
+
+  it('starts a durable job and polls it instead', () => {
+    expect(apiSrc).toMatch(/startCurRun/);
+    expect(detail).toMatch(/api\.startCurRun\(id\)/);
+    expect(detail).toMatch(/api\.getCollectionRun\(run\.id\)/);
+  });
+
+  it('treats a partially ingested billing period as a failure, not success', () => {
+    expect(detail).toMatch(/PARTIALLY_SUCCEEDED/);
   });
 });
