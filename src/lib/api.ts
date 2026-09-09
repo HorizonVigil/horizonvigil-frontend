@@ -232,20 +232,44 @@ class ApiClient {
   // between AWS and GCP (both aws-accounts-api and gcp-accounts-api expose
   // the identical steps/run-step/finalize contract) via the `service` param
   // — syncContext.tsx's polling loop is provider-agnostic because of this.
-  getDiscoverySteps(id: string, service: CloudAccountService = 'awsAccounts') {
-    return this.get<{ steps: string[]; regions: string[]; scannerCount: number }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/steps`);
-  }
-  runDiscoveryStep(id: string, stepId: string, service: CloudAccountService = 'awsAccounts') {
-    return this.post<{ stepId: string; resourceCount: number; created: number; error?: string; errorSeverity?: 'error' | 'info' }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/run-step`, { stepId });
-  }
-  finalizeDiscovery(id: string, runStartedAt: string, stepErrors: { message: string; severity: 'error' | 'info' }[], service: CloudAccountService = 'awsAccounts', totalSteps = 0) {
-    return this.post<{ totalResources: number; deleted: number; categoryCounts: Record<string, number>; errors: { message: string; severity: 'error' | 'info' }[] }>(service, `${accountsPathPrefix(service)}/accounts/${id}/discovery/finalize`, { runStartedAt, stepErrors, totalSteps });
-  }
 
   // ── gcp-accounts-api ─────────────────────────────────────────────────────
   // GCP Phase 1: Compute Engine, Cloud Storage, Cloud SQL, GKE. Kept as its
   // own separate method set (not merged into the AWS ones above) — the
   // "Cloud Accounts" rename is a rename, not a unification; see navConfig.ts.
+
+  /**
+   * Durable collection runs (Phase 3, ADR 0001).
+   *
+   * These replace getDiscoverySteps/runDiscoveryStep/finalizeDiscovery, which
+   * had the BROWSER fetch a 1,628-step plan, loop one request per step in a
+   * tab, accumulate errors in memory, and post its own runStartedAt/
+   * stepErrors/totalSteps as authoritative job evidence. Closing the tab lost
+   * the run, and two tabs could scan the same account at once.
+   *
+   * The client's whole role now is: ask for a job, then watch it.
+   */
+  startCollectionRun(id: string, service: CloudAccountService = 'awsAccounts') {
+    return this.post<{ id: string; status: string; created: boolean; progress: { totalSteps: number; completedSteps: number; failedSteps: number; percent: number } }>(
+      service, `${accountsPathPrefix(service)}/accounts/${id}/collection-runs`, {},
+    );
+  }
+
+  getCollectionRun(runId: string, service: CloudAccountService = 'awsAccounts') {
+    return this.get<{ id: string; status: string; explanation: string; progress: { totalSteps: number; completedSteps: number; failedSteps: number; percent: number }; errorSummary: string | null; finishedAt: string | null }>(
+      service, `${accountsPathPrefix(service)}/collection-runs/${runId}`,
+    );
+  }
+
+  cancelCollectionRun(runId: string, service: CloudAccountService = 'awsAccounts') {
+    return this.post<{ id: string; status: string }>(service, `${accountsPathPrefix(service)}/collection-runs/${runId}/cancel`, {});
+  }
+
+  getCollectionRunSteps(runId: string, service: CloudAccountService = 'awsAccounts') {
+    return this.get<{ items: { step_id: string; status: string; error_message: string | null }[]; total: number }>(
+      service, `${accountsPathPrefix(service)}/collection-runs/${runId}/steps`,
+    );
+  }
 
   getGcpAccounts(params: { status?: string; environment?: string; connectionMethod?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<GcpConnection>>('gcpAccounts', `/api/gcp-accounts/accounts${qs(params)}`);

@@ -51,11 +51,19 @@ describe('the browser never starts provider scans on its own', () => {
     expect(sync).not.toMatch(/getGcpAccounts|getAzureAccounts|fetchAllPages/);
   });
 
-  it('still exposes user-initiated sync, which Phase 3 replaces with a server job', () => {
-    // Containment removes the AUTOMATIC scans; manual discovery is
-    // deliberately retained until a durable server job exists.
-    expect(sync).toMatch(/startDiscovery/);
-    expect(sync).toMatch(/startSync/);
+  it('no longer orchestrates steps from the browser at all (Phase 3)', () => {
+    // Phase 1 removed the AUTOMATIC scans; Phase 3 removed the manual step
+    // loop too. The client's whole role is now: ask for a job, watch it.
+    expect(sync).not.toMatch(/getDiscoverySteps|runDiscoveryStep|finalizeDiscovery/);
+    expect(sync).not.toMatch(/stepErrors/);
+    expect(sync).toMatch(/startCollectionRun/);
+    expect(sync).toMatch(/getCollectionRun/);
+  });
+
+  it('treats PARTIALLY_SUCCEEDED as not-done', () => {
+    // Presenting an incomplete collection as success is the defect
+    // AWS-P0-05 describes.
+    expect(sync).toMatch(/run\.status === 'SUCCEEDED' \? 'done' : 'error'/);
   });
 });
 

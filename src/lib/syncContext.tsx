@@ -90,53 +90,57 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
+  /**
+   * Starts a DURABLE, server-owned collection run and watches it (Phase 3,
+   * ADR 0001).
+   *
+   * What this replaces: the browser fetched a 1,628-step plan, called
+   * run-step once per step in a loop, accumulated errors in memory, and
+   * posted its own runStartedAt/stepErrors/totalSteps to finalize -- so the
+   * CLIENT defined what "succeeded" meant, and closing the tab lost the run.
+   *
+   * Now the client asks for a job and polls it. Closing the tab no longer
+   * stops anything: the worker owns the run, and reopening the page picks the
+   * status back up. Clicking twice is idempotent because the server returns
+   * the run already in flight rather than starting a second one.
+   */
   const startDiscovery = useCallback((connectionId: string, service: CloudAccountService = 'awsAccounts') => {
     if (runningIds.current.has(connectionId)) return;
     runningIds.current.add(connectionId);
-    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'Planning scan…' } }));
+    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'Queueing…' } }));
 
     (async () => {
-      const runStartedAt = new Date().toISOString();
-      const stepErrors: { message: string; severity: 'error' | 'info' }[] = [];
       try {
-        const { steps } = await withRetry(() => api.getDiscoverySteps(connectionId, service));
-        const total = steps.length || 1;
-        for (let done = 0; done < steps.length; done++) {
-          const stepId = steps[done];
-          setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done, total, stepId } }));
-          try {
-            const result = await withRetry(() => api.runDiscoveryStep(connectionId, stepId, service));
-            if (result.error) stepErrors.push({ message: `${stepId}: ${result.error}`, severity: result.errorSeverity ?? 'error' });
-          } catch (err) {
-            // Retries exhausted on a real network failure for this one step —
-            // record it and move on to the next step rather than losing the
-            // whole scan's progress over one bad step (Cross-Phase Standards'
-            // "preserve partial results ... instead of reporting false
-            // completeness" — the opposite, aborting outright, was the bug).
-            stepErrors.push({ message: `${stepId}: ${(err as Error).message || 'Network error'}`, severity: 'error' });
-          }
+        const started = await withRetry(() => api.startCollectionRun(connectionId, service));
+
+        // Unhurried on purpose: the worker advances a run in slices on a
+        // scheduler tick, so polling faster only adds load without surfacing
+        // progress any sooner.
+        const POLL_MS = 5000;
+        for (;;) {
+          const run = await withRetry(() => api.getCollectionRun(started.id, service));
+          const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELED'].includes(run.status);
+
+          setSyncStates(prev => ({
+            ...prev,
+            [connectionId]: {
+              status: terminal ? (run.status === 'SUCCEEDED' ? 'done' : 'error') : 'running',
+              done: run.progress.completedSteps,
+              total: Math.max(run.progress.totalSteps, 1),
+              stepId: terminal ? '' : run.explanation,
+              // PARTIALLY_SUCCEEDED surfaces as an error state on purpose: it
+              // means the collected data is incomplete, and presenting that as
+              // done is the exact defect this phase removes.
+              error: terminal && run.status !== 'SUCCEEDED' ? (run.errorSummary ?? run.explanation) : undefined,
+              warning: terminal && run.status === 'SUCCEEDED' ? run.explanation : undefined,
+            },
+          }));
+
+          if (terminal) break;
+          await new Promise(r => setTimeout(r, POLL_MS));
         }
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: steps.length, total, stepId: 'Finishing up…' } }));
-        const summary = await withRetry(() => api.finalizeDiscovery(connectionId, runStartedAt, stepErrors, service, steps.length));
-        // Recommendation generation and alert-rule evaluation used to fire
-        // from here (client-side, best-effort) after every interactive
-        // scan -- moved server-side into aws-accounts-api's runFinalize
-        // (discovery.ts), which every scan path now funnels through
-        // (interactive, daily sweep, abandoned-scan recovery), not just this
-        // one. Calling them again here would just be a redundant, racy
-        // duplicate of what the server already guarantees. See
-        // cloudops-connector-aws/src/lib/postScanHooks.ts.
-        const realErrors = stepErrors.filter(e => e.severity !== 'info');
-        setSyncStates(prev => ({
-          ...prev,
-          [connectionId]: {
-            status: realErrors.length > 0 ? 'error' : 'done', done: steps.length, total, stepId: '',
-            error: realErrors.length > 0 ? `${realErrors.length} scan step${realErrors.length === 1 ? '' : 's'} failed: ${realErrors[0].message}` : undefined,
-            warning: realErrors.length === 0 ? `Found ${summary.totalResources} resources${summary.deleted ? `, removed ${summary.deleted} no longer seen` : ''}.` : undefined,
-          },
-        }));
       } catch (err) {
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Discovery failed.' } }));
+        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Could not start collection.' } }));
       } finally {
         runningIds.current.delete(connectionId);
       }
