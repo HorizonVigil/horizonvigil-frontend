@@ -673,6 +673,26 @@ class ApiClient {
   getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images' | 'gcp-scc' | 'defender', params: { page?: number; limit?: number; severity?: string; status?: string; search?: string } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
   }
+  // ── Cloud Compliance (§10.2) — its own module, its own namespace ────────
+  // These replace getComplianceBenchmarks below, which reads a V2-namespaced
+  // endpoint backed by a six-column table with no evidence fields at all.
+  // The security service hosts both; only the path prefix differs.
+  getComplianceOverview() { return this.get<ComplianceOverview>('vulnerabilityManagement', '/api/cloud-compliance/overview'); }
+  getComplianceFrameworks() { return this.get<{ items: ComplianceFramework[]; availability: SourceAvailability; limitations: string }>('vulnerabilityManagement', '/api/cloud-compliance/frameworks'); }
+  getComplianceControls(params: { frameworkId?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ComplianceControl>>('vulnerabilityManagement', `/api/cloud-compliance/controls${qs(params)}`);
+  }
+  getComplianceEvidence(params: { controlId?: string; result?: string; page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ControlEvaluation>>('vulnerabilityManagement', `/api/cloud-compliance/evidence${qs(params)}`);
+  }
+  getComplianceExceptions(params: { page?: number; limit?: number } = {}) {
+    return this.get<Paginated<ComplianceException>>('vulnerabilityManagement', `/api/cloud-compliance/exceptions${qs(params)}`);
+  }
+
+  // ── Cloud Security V1 posture (§10.1) — off the V2 namespace ────────────
+  getPostureOverview() { return this.get<PostureOverview>('vulnerabilityManagement', '/api/cloud-security/posture/overview'); }
+  getPostureSources() { return this.get<{ connectionsInScope: number; surfaces: Record<string, SourceAvailability> }>('vulnerabilityManagement', '/api/cloud-security/posture/sources'); }
+
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ComplianceBenchmark>>('vulnerabilityManagement', `/api/vulnerability-management/compliance${qs(params)}`);
   }
@@ -1424,6 +1444,75 @@ export interface AttackPath {
 // is 0 (nothing evaluated yet, not the same as a 0% pass rate) - multiply by
 // 100 and null-check at render time, never call .toFixed() on it directly.
 export interface ComplianceBenchmark { id: string; connection_id: string; framework: 'cis_aws_foundations' | 'pci_dss' | 'iso_27001'; passed_checks: number; total_checks: number; last_evaluated_at: string; passRate: number | null }
+
+// ── Cloud Security posture + Cloud Compliance (§10.1, §10.2) ──────────────
+
+/**
+ * Whether the source behind a posture or compliance answer was actually
+ * evaluated. `canRenderZero` is the field that matters: absence of findings
+ * and absence of evaluation are indistinguishable from a row count, so the
+ * server decides from a live capability probe and says so here.
+ */
+export interface SourceAvailability {
+  state: string;
+  reasonCode: string | null;
+  byConnection: { connectionId: string; state: string; reasonCode: string | null; lastSuccessAt: string | null; sourceObservedAt: string | null }[];
+  coverage: { expected: number; covered: number };
+  canRenderZero: boolean;
+  message: string;
+}
+
+/** `count` is null whenever the source was not evaluated — never 0. */
+export interface MeasuredCount { count: number | null; availability: SourceAvailability }
+
+export interface PostureOverview {
+  misconfigurations: MeasuredCount;
+  exposures: MeasuredCount;
+  connectionsInScope: number;
+  scopeNote: string;
+}
+
+export interface ComplianceOverview {
+  /** null until real control evaluations exist. A score is a claim an auditor may read. */
+  score: number | null;
+  scoreBasis: { passed: number; failed: number; evaluated: number; formula: string } | null;
+  frameworks: number;
+  controlsEvaluated: number;
+  resultBreakdown: Record<string, number>;
+  availability: SourceAvailability;
+  limitations: string;
+  setupGuidance: string | null;
+}
+
+export interface ComplianceFramework {
+  id: string; framework_key: string; name: string; version: string; publisher: string | null;
+  evidence_basis: string; limitations: string; enabled: boolean;
+}
+
+export interface ComplianceControl {
+  id: string; framework_id: string; control_key: string; title: string; description: string | null;
+  test_source: string | null; test_identifier: string | null; severity: string | null;
+  evaluated: boolean; notEvaluatedReason: string | null;
+}
+
+/** The §10.2 evidence record: what ran, over what scope and period, and a checksum of the raw payload. */
+export interface ControlEvaluation {
+  id: string; control_id: string; connection_id: string | null;
+  scope_type: string; scope_id: string | null; covered_regions: string[] | null;
+  source: string; source_version: string | null; source_query: string | null;
+  result: 'passed' | 'failed' | 'not_evaluated' | 'not_applicable' | 'error' | 'permission_denied';
+  result_reason: string | null; resources_evaluated: number | null; resources_failing: number | null;
+  source_observed_at: string | null; period_start: string | null; period_end: string | null;
+  collected_at: string; freshness_slo_seconds: number;
+  raw_evidence_ref: string | null; raw_evidence_checksum: string | null;
+  reviewer_decision: string | null; reviewed_at: string | null; legal_hold: boolean;
+}
+
+export interface ComplianceException {
+  id: string; control_id: string; scope_type: string; scope_id: string | null;
+  justification: string; expires_at: string; approved_by: string | null; approved_at: string | null;
+  created_by: string | null; created_at: string; expired: boolean;
+}
 
 export interface AlertRow { id: string; org_id: string; connection_id: string | null; resource_id: string | null; rule_id: string | null; severity: 'critical' | 'high' | 'medium' | 'low'; alert_name: string; status: 'open' | 'acknowledged' | 'in_progress' | 'resolved'; triggered_at: string; acknowledged_at: string | null; resolved_at: string | null; metadata: Record<string, unknown> }
 

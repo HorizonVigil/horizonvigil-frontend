@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
@@ -10,7 +10,7 @@ import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
-import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type ComplianceBenchmark } from '../lib/api';
+import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary } from '../lib/api';
 
 // V1 scope decision (2026-09-08 audit): Cloud Security V1 is posture-only --
 // misconfigurations, exposure, identity risk, and provider-native compliance
@@ -25,9 +25,15 @@ import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummar
 // V1 posture page, and the same number this page's own Overview showed as
 // "100/100" (good) while the tab called it "100 High risk". V1 posture is
 // the real provider-native surfaces below (Misconfigurations, Identity &
-// Access Risk, Exposed Resources, provider evidence under Compliance); a V1
+// Access Risk, Exposed Resources); a V1
 // posture aggregation can earn a summary tab back once it exists.
-const TABS = ['Overview', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance', 'Multi-Cloud Coverage'] as const;
+// Phase 10 (§10.1/§10.3): 'Compliance' left this page for its own module at
+// /cloud-compliance. Two business domains sharing one route is what made
+// both sidebar entries mark themselves active. 'Multi-Cloud Coverage'
+// became 'Source Coverage': the audit's name for it, and the honest one --
+// the page answers "which sources have actually been evaluated", not
+// "how many clouds do you have".
+const TABS = ['Overview', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Source Coverage'] as const;
 type Tab = typeof TABS[number];
 const PROVIDERS = ['aws', 'gcp', 'azure'] as const;
 const PROVIDER_LABEL: Record<typeof PROVIDERS[number], string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
@@ -57,6 +63,17 @@ export function CloudSecurity() {
   }, [searchParams, setSearchParams]);
   const canSeeTab = useSubmenuAccess('cloud-security');
   const visibleTabs = TABS.filter(canSeeTab);
+  /**
+   * Phase 10: `?tab=Compliance` no longer exists on this page, and
+   * useTabParam would silently fall back to Overview — the exact dead end
+   * the previous move of this link produced. Forward it instead, so an old
+   * bookmark reaches the module it names.
+   */
+  const navigate = useNavigate();
+  const legacyComplianceTab = searchParams.get('tab') === 'Compliance';
+  useEffect(() => {
+    if (legacyComplianceTab) navigate('/cloud-compliance', { replace: true });
+  }, [legacyComplianceTab, navigate]);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const { connections } = useFilters();
   useEffect(() => {
@@ -67,7 +84,6 @@ export function CloudSecurity() {
   const [exposed, setExposed] = useState<VulnerabilityFinding[]>([]);
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
   const [riskyIdentities, setRiskyIdentities] = useState<CloudIdentity[]>([]);
-  const [benchmarks, setBenchmarks] = useState<ComplianceBenchmark[]>([]);
   // Real, persisted findings -- connector-gcp's Security Command Center scan
   // and connector-azure's Defender for Cloud scan both write into the same
   // vulnerability_findings table every other source does; this tab was the
@@ -93,13 +109,12 @@ export function CloudSecurity() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.allSettled([
+    const [misconfig, exposedRes, idSummary, admin, broad, gcpScc, defender] = await Promise.allSettled([
       api.getFindingsBySource('aws-config', { limit: 50 }),
       api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
       api.getIdentitySummary(),
       api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
       api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
-      api.getComplianceBenchmarks({ limit: 20 }),
       api.getFindingsBySource('gcp-scc', { limit: 50 }),
       api.getFindingsBySource('defender', { limit: 50 }),
     ]);
@@ -112,7 +127,6 @@ export function CloudSecurity() {
     const broadItems = broad.status === 'fulfilled' ? broad.value.items : [];
     if (admin.status === 'fulfilled' || broad.status === 'fulfilled') setRiskyIdentities([...adminItems, ...broadItems]);
     if (admin.status === 'rejected' || broad.status === 'rejected') failed.push('risky identities');
-    if (compliance.status === 'fulfilled') setBenchmarks(compliance.value.items); else failed.push('compliance benchmarks');
     if (gcpScc.status === 'fulfilled') setGcpFindings(gcpScc.value.items); else failed.push('GCP Security Command Center findings');
     if (defender.status === 'fulfilled') setAzureFindings(defender.value.items); else failed.push('Azure Defender findings');
 
@@ -146,7 +160,7 @@ export function CloudSecurity() {
         <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 px-4 py-3 mb-4 text-xs">
           <Icon name="info" size={15} className="text-slate-500 dark:text-slate-400 shrink-0 mt-0.5" />
           <p className="flex-1 text-slate-600 dark:text-slate-300">
-            Vulnerability scanning, CVEs, and scanner orchestration are being redesigned for a future release and aren't part of this view. Cloud Security here covers posture, misconfigurations, exposure, identity risk, and provider-native compliance evidence.
+            Vulnerability scanning, CVEs, and scanner orchestration are being redesigned for a future release and aren't part of this view. Cloud Security here covers posture, misconfigurations, exposure, and identity risk. Compliance evidence has its own module.
           </p>
           <button onClick={dismissV2Notice} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm leading-none shrink-0" aria-label="Dismiss">×</button>
         </div>
@@ -219,7 +233,7 @@ export function CloudSecurity() {
                       {providerConns.length === 0 ? 'Not connected' : `${connected} / ${providerConns.length} connected`}
                     </Badge>
                   </div>
-                  <button type="button" onClick={() => setTab('Multi-Cloud Coverage')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                  <button type="button" onClick={() => setTab('Source Coverage')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                     {providerConns.length === 0 ? 'Connect an account →' : 'View coverage →'}
                   </button>
                 </div>
@@ -230,7 +244,7 @@ export function CloudSecurity() {
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">OCI</span>
                 <Badge tone="neutral">No connector</Badge>
               </div>
-              <p className="text-xs text-slate-400">Not built yet — see Multi-Cloud Coverage.</p>
+              <p className="text-xs text-slate-400">Not built yet — see Source Coverage.</p>
             </div>
           </div>
         </div>
@@ -269,27 +283,7 @@ export function CloudSecurity() {
         </>
       )}
 
-      {tab === 'Compliance' && (
-        <>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Benchmark pass rates across connected accounts, from provider-native evidence (AWS Config conformance packs) — not an independent framework certification.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {benchmarks.length === 0 && <p className="text-xs text-slate-400 col-span-full">No benchmarks evaluated yet.</p>}
-            {benchmarks.map(b => (
-              <div key={b.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{b.framework.replace(/_/g, ' ').toUpperCase()}</div>
-                <div className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white mt-1">
-                  {b.passRate === null ? '—' : `${Math.round(b.passRate * 100)}%`}
-                </div>
-                <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{b.passed_checks} / {b.total_checks} checks passed</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {tab === 'Multi-Cloud Coverage' && (
+      {tab === 'Source Coverage' && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-slate-500 dark:text-slate-400">
             AWS posture is covered by the Misconfigurations/Exposed Resources tabs above (AWS Config + IAM Access Analyzer). GCP Security Command Center and Azure Defender for Cloud are real, connected sources too — OCI has no native posture connector built yet.

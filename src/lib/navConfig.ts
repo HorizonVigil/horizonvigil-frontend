@@ -138,6 +138,7 @@ const VULN = '/vulnerability-management';
 const SOURCE_INV = '/source-inventory';
 const SCANNING = '/security-scanning';
 const CLOUD_SEC = '/cloud-security';
+const CLOUD_COMPLIANCE = '/cloud-compliance';
 const APP_SEC = '/application-security';
 const CODE_SEC = '/code-security';
 const CONTAINER_SEC = '/container-security';
@@ -341,9 +342,9 @@ export const NAV_MODULES: NavModule[] = [
       // of the gcp-scc/defender source routes -- all three now point at the
       // real Multi-Cloud Coverage tab's per-provider breakdown rather than
       // being separate unbuilt tabs. OCI has no connector at all yet.
-      { label: 'AWS', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'Azure', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'GCP', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'AWS', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'Azure', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'GCP', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
       { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
       { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
       { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
@@ -562,14 +563,16 @@ export const NAV_MODULES: NavModule[] = [
     label: 'Cloud Compliance',
     icon: 'cloud-compliance',
     section: 'Cloud Operations',
-    // FIXED 2026-09-08 (production-readiness audit): this pointed at
-    // /vulnerability-management?tab=Compliance. Once that route started
-    // redirecting to the V2 notice, the redirect dropped the tab param, so
-    // the one nav entry named "Cloud Compliance" landed the user on Cloud
-    // Security's *Overview* tab instead of its Compliance tab -- a dead end
-    // introduced by the route gate itself. Cloud Security owns the real
-    // provider-native compliance evidence tab, so point straight at it.
-    to: tabLink(CLOUD_SEC, 'Compliance'),
+    // Phase 10 (§10.2/§10.3): now its own canonical route.
+    //
+    // History of this one line: it pointed at
+    // /vulnerability-management?tab=Compliance; when that route began
+    // redirecting to the V2 notice the tab param was dropped and the entry
+    // became a dead end, so it was repointed at Cloud Security's Compliance
+    // TAB. That fixed the dead end but left two nav entries resolving to
+    // /cloud-security, which is why both marked themselves aria-current.
+    // A query param cannot distinguish two modules; a route can.
+    to: CLOUD_COMPLIANCE,
     children: [],
   },
   {

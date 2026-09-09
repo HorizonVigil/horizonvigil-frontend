@@ -97,9 +97,29 @@ describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
     const tabs = src.match(/const TABS = \[([^\]]+)\]/);
     expect(tabs, 'TABS array not found').toBeTruthy();
     expect(tabs![1]).not.toMatch(/'Posture'/);
-    for (const kept of ['Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Compliance']) {
+    for (const kept of ['Misconfigurations', 'Identity & Access Risk', 'Exposed Resources']) {
       expect(tabs![1]).toContain(kept);
     }
+  });
+
+  it('Cloud Security no longer hosts Compliance (Phase 10, §10.1)', () => {
+    // Compliance is its own module now. Keeping it here is what made two
+    // sidebar entries resolve to /cloud-security and both mark themselves
+    // aria-current -- a query param cannot separate two business domains.
+    const src = code(source('pages/CloudSecurity.tsx'));
+    const tabs = src.match(/const TABS = \[([^\]]+)\]/);
+    expect(tabs![1]).not.toContain("'Compliance'");
+    // And it must not still be fetching the data that moved with it.
+    expect(src).not.toMatch(/getComplianceBenchmarks/);
+  });
+
+  it('renames Multi-Cloud Coverage to Source Coverage', () => {
+    // The audit's name, and the honest one: the tab answers which sources
+    // have been evaluated, not how many clouds exist.
+    const src = code(source('pages/CloudSecurity.tsx'));
+    const tabs = src.match(/const TABS = \[([^\]]+)\]/);
+    expect(tabs![1]).toContain('Source Coverage');
+    expect(tabs![1]).not.toContain('Multi-Cloud Coverage');
   });
 
   it('the Overview Recommended Actions widget excludes V2 critical findings', () => {
@@ -188,12 +208,23 @@ describe('destructive actions are protected (Phase 0.6)', () => {
 });
 
 describe('navigation does not dead-end into gated V2 routes', () => {
-  it('Cloud Compliance opens Cloud Security\'s Compliance tab, not the redirecting V2 route', () => {
+  it('Cloud Compliance has its own canonical route (Phase 10, §10.2)', () => {
     const mod = NAV_MODULES.find(m => m.label === 'Cloud Compliance');
     expect(mod).toBeTruthy();
-    // Previously /vulnerability-management?tab=Compliance, whose redirect
-    // dropped the tab and landed on Cloud Security Overview instead.
-    expect(mod!.to).toBe('/cloud-security?tab=Compliance');
+    // This link has moved twice. It was /vulnerability-management?tab=
+    // Compliance, whose redirect dropped the tab and landed on Cloud
+    // Security's Overview. It was then repointed at Cloud Security's
+    // Compliance TAB, which fixed the dead end but left two nav entries
+    // resolving to /cloud-security -- so both marked themselves active.
+    // Only a distinct route separates two modules.
+    expect(mod!.to).toBe('/cloud-compliance');
+  });
+
+  it('exactly one nav module resolves to /cloud-security', () => {
+    // The regression guard for the aria-current bug, asserted on the data
+    // rather than on the rendering.
+    const onCloudSecurity = NAV_MODULES.filter(m => m.to?.startsWith('/cloud-security'));
+    expect(onCloudSecurity.map(m => m.label)).toEqual(['Cloud Security']);
   });
 
   it('no cloud-only-visible module points at a gated /vulnerability-management route', () => {

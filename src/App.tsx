@@ -33,6 +33,7 @@ import { FinOps } from './pages/FinOps';
 // (V1/V2 boundary, see the route block below). Not deleted from the repo:
 // still real, tested components, just no longer reachable from this router.
 import { CloudSecurity } from './pages/CloudSecurity';
+import CloudCompliance from './pages/CloudCompliance';
 import { EksConsole } from './pages/EksConsole';
 import { GkeConsole } from './pages/GkeConsole';
 import { AksConsole } from './pages/AksConsole';
@@ -166,6 +167,20 @@ export default function App() {
                           <Route path="/source-inventory/:category/:assetId" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           <Route path="/security-scanning" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           <Route path="/cloud-security" element={<ProtectedRoute module="Vulnerability Management"><CloudSecurity /></ProtectedRoute>} />
+                          {/* Phase 10 (§10.2): Cloud Compliance is its own
+                              module at its own canonical route. It was a tab
+                              inside Cloud Security, which is why both sidebar
+                              entries marked themselves active — two business
+                              domains cannot share one route. The old
+                              query-tab deep link redirects so bookmarks
+                              survive. */}
+                          <Route path="/cloud-compliance" element={<ProtectedRoute module="Cloud Compliance"><CloudCompliance /></ProtectedRoute>} />
+                          {/* Bookmarks and in-app links that still carry the
+                              old tab param land on the new module rather than
+                              silently falling back to Cloud Security's
+                              Overview, which is what happened the last time
+                              this link moved. */}
+                          <Route path="/cloud-security/compliance" element={<Navigate to="/cloud-compliance" replace />} />
                           <Route path="/application-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           <Route path="/code-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
                           <Route path="/container-security" element={<Navigate to="/cloud-security?notice=vulnerability-management-is-v2" replace />} />
