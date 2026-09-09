@@ -146,25 +146,38 @@ export const ExposureWidget: WidgetComponent = ({ ctx }) => {
   );
 };
 
+/**
+ * Compliance on Overview (Phase 10, §10.3).
+ *
+ * Repointed from `/api/vulnerability-management/compliance` — a V1 widget
+ * reading a V2 namespace, and the last caller of that endpoint outside the
+ * route-gated V2 page itself.
+ *
+ * It also used to render a pass-rate percentage per framework, green above
+ * 80%. On this estate that table has zero rows, and the live probe says
+ * `compliance_config: not_enabled` because AWS Config has no configuration
+ * recorder. So the widget now reports whether anything has been evaluated
+ * before it reports any number, and the score stays an em dash until it has.
+ */
 export const ComplianceWidget: WidgetComponent = ({ ctx }) => {
-  const query = useWidgetQuery('compliance', ctx, () => api.getComplianceBenchmarks({ limit: 20 }));
+  const query = useWidgetQuery('compliance', ctx, () => api.getComplianceOverview());
   return (
-    <WidgetBody query={query} errorLabel="Compliance couldn't be loaded." emptyTitle="No benchmarks evaluated"
-      emptyIcon="check-square" isEmpty={(d) => d.items.length === 0}>
+    <WidgetBody query={query} errorLabel="Compliance couldn't be loaded." emptyTitle="Not evaluated"
+      emptyIcon="check-square" isEmpty={() => false}>
       {(d) => (
-        <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-          {d.items.map((b) => {
-            const pct = b.passRate === null ? null : Math.round(b.passRate * 100);
-            return (
-              <li key={b.id} className="flex items-center justify-between gap-2 py-2">
-                <span className="text-slate-700 dark:text-slate-200 uppercase text-xs">{b.framework.replace(/_/g, ' ')}</span>
-                <span className={`text-xs font-medium tabular-nums ${pct === null ? 'text-slate-400' : pct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {pct === null ? 'n/a' : `${pct}%`}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="flex flex-col gap-2 text-sm">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-xs text-slate-500 dark:text-slate-400">Controls passing</span>
+            <span className={`text-lg font-semibold tabular-nums ${d.score === null ? 'text-slate-400 dark:text-slate-500' : d.score >= 80 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+              {d.score === null ? '—' : `${d.score}%`}
+            </span>
+          </div>
+          {/* The reason, always. An em dash with no explanation is just a
+              different way of saying nothing. */}
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {d.score === null ? d.availability.message : `${d.scoreBasis?.passed ?? 0} of ${d.scoreBasis?.evaluated ?? 0} controls passing.`}
+          </p>
+        </div>
       )}
     </WidgetBody>
   );

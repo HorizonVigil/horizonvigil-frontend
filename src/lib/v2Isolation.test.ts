@@ -32,6 +32,7 @@ const sources = import.meta.glob(
     '../components/cloudAccounts/overview/SecurityPanel.tsx',
     '../pages/CostOptimization.tsx',
     '../pages/CloudAccounts.tsx',
+    '../components/overview/widgets/securityWidgets.tsx',
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
@@ -111,6 +112,25 @@ describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
     expect(tabs![1]).not.toContain("'Compliance'");
     // And it must not still be fetching the data that moved with it.
     expect(src).not.toMatch(/getComplianceBenchmarks/);
+  });
+
+  it('no V1 surface reads the V2-namespaced compliance endpoint (Phase 10, §10.3)', () => {
+    // getComplianceBenchmarks hits /api/vulnerability-management/compliance.
+    // V1 posture and compliance depending on a hole in the V2 gate is the
+    // arrangement Phase 10 exists to end. The V2 page itself may still call
+    // it -- that whole route is gated -- but no V1 surface may.
+    for (const file of ['pages/CloudSecurity.tsx', 'components/overview/widgets/securityWidgets.tsx']) {
+      expect(code(source(file)), `${file} still calls the V2 compliance endpoint`).not.toMatch(/getComplianceBenchmarks/);
+    }
+  });
+
+  it('the Overview compliance widget states why before it states a number', () => {
+    // It used to print a per-framework pass rate, green above 80%, from a
+    // table with zero rows. A score with nothing behind it is the most
+    // consequential false number this product could show.
+    const src = code(source('components/overview/widgets/securityWidgets.tsx'));
+    expect(src).toMatch(/getComplianceOverview/);
+    expect(src).toMatch(/availability\.message/);
   });
 
   it('renames Multi-Cloud Coverage to Source Coverage', () => {
