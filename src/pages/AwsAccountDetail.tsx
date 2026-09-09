@@ -179,30 +179,48 @@ export function AwsAccountDetail() {
     const requestId = ++loadRequestRef.current;
     setLoadError(null);
 
-    try {
-      const [conn, resourcesRes, costRes, creds] = await Promise.all([
-        api.getAccount(accountId),
-        api.getResourceInventory({ connectionId: accountId, limit: 200 }),
-        api.getCostExplorer({ connectionId: accountId, limit: 200 }),
-        api.getAccountCredentials(accountId),
-      ]);
+    /**
+     * AWS-P1-06: this was one `Promise.all` across four services, so a
+     * single failing dependency blanked the entire page -- a cost-service
+     * blip hid the resource inventory, the permissions tab and the
+     * connection itself. The identical defect was fixed in CloudSecurity.tsx
+     * by switching to allSettled; this is the same fix in the place the
+     * audit actually named.
+     *
+     * The account itself is the exception: without it there is no page to
+     * render, so its failure is still fatal. Everything else degrades to its
+     * own section rather than taking the page down, and the sections that
+     * did fail are NAMED -- "couldn't load" with no subject leaves the
+     * reader unable to tell an empty inventory from a failed one.
+     */
+    const [connRes, resourcesRes, costRes, credsRes] = await Promise.allSettled([
+      api.getAccount(accountId),
+      api.getResourceInventory({ connectionId: accountId, limit: 200 }),
+      api.getCostExplorer({ connectionId: accountId, limit: 200 }),
+      api.getAccountCredentials(accountId),
+    ]);
 
-      if (requestId !== loadRequestRef.current) return;
+    if (requestId !== loadRequestRef.current) return;
 
-      setConnection(conn);
-      setResources(resourcesRes.items);
-      setCostSnapshots(costRes.items);
-      setCredentials(creds);
-    } catch (err) {
-      if (requestId !== loadRequestRef.current) return;
+    if (connRes.status === 'rejected') {
+      const err = connRes.reason;
       setLoadError(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Failed to load the AWS account.',
+        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load the AWS account.',
       );
+      return;
     }
+    setConnection(connRes.value);
+
+    const failed: string[] = [];
+    if (resourcesRes.status === 'fulfilled') setResources(resourcesRes.value.items); else failed.push('resource inventory');
+    if (costRes.status === 'fulfilled') setCostSnapshots(costRes.value.items); else failed.push('cost data');
+    if (credsRes.status === 'fulfilled') setCredentials(credsRes.value); else failed.push('credential summary');
+
+    setLoadError(
+      failed.length > 0
+        ? `Couldn't load: ${failed.join(', ')}. Everything else on this page is real, loaded data.`
+        : null,
+    );
   }, [id]);
 
 

@@ -438,7 +438,12 @@ class ApiClient {
 
   getAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${id}/activity${qs(params)}`); }
   getAwsAccountsActivity(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/activity${qs(params)}`); }
-  getAccountCloudTrailEvents(id: string, params: { region?: string; attributeKey?: string; attributeValue?: string; from?: string; to?: string; nextToken?: string } = {}) {
+  /**
+   * AWS-P1-05: defaults to configuration CHANGES. Pass includeReadOnly to
+   * get the full audit view including Describe/List/Get traffic, which
+   * outnumbers real changes by orders of magnitude.
+   */
+  getAccountCloudTrailEvents(id: string, params: { region?: string; attributeKey?: string; attributeValue?: string; from?: string; to?: string; nextToken?: string; includeReadOnly?: boolean } = {}) {
     return this.get<{ events: CloudTrailEvent[]; nextToken: string | null; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cloudtrail-events${qs(params)}`);
   }
 
