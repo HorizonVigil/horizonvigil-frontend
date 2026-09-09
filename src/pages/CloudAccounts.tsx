@@ -1121,6 +1121,9 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   onDisconnect: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Disconnect is a soft status flip, so a disconnected row is still listed;
+  // what must change is which actions it offers.
+  const isDisconnected = row.status === 'disconnected';
   const { toast } = useToast();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1217,13 +1220,28 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           style={{ position: 'fixed', top: coords.top, left: coords.left, width: 224 }}
           className="z-50 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]"
         >
-          <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources for this account right now">
-            {syncing ? 'Syncing…' : 'Sync Now'}
-          </button>
-          {row.provider === 'aws' && (
+          {/*
+            Actions are state-aware (§12.1). A DISCONNECTED connection was
+            still offering Sync Now, Validate Permissions and Disconnect --
+            all three are meaningless for it, and the server now refuses a
+            collection run on a disconnected connection anyway (409). Offering
+            a control whose only outcome is an error is the "never expose half
+            a workflow" rule in miniature.
+          */}
+          {!isDisconnected && (
+            <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Queues a server-side collection run for this account. It keeps running if you close this tab.">
+              {syncing ? 'Syncing…' : 'Sync Now'}
+            </button>
+          )}
+          {row.provider === 'aws' && !isDisconnected && (
             <button role="menuitem" onClick={() => { setOpen(false); onValidate(); }} disabled={validating} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks">
               {validating ? 'Validating…' : 'Validate Permissions'}
             </button>
+          )}
+          {isDisconnected && (
+            <div className="px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400">
+              Disconnected — nothing is collected for this account. Reconnect it to resume.
+            </div>
           )}
           {row.provider === 'aws' && (
             <button role="menuitem" onClick={openConsole} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Opens the AWS Console using your browser's current AWS sign-in session">
@@ -1238,7 +1256,12 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
             <button role="menuitem" onClick={() => { setOpen(false); onUpdateCredentials(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Update Credentials</button>
           )}
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
-          <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
+          {/* Disconnecting an already-disconnected connection is a no-op that
+              looks like a destructive action. Hidden rather than disabled, so
+              the menu reflects what is actually possible. */}
+          {!isDisconnected && (
+            <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
+          )}
           {/* Phase 0.6 (2026-09-08 audits, P0 "Disable by default"): permanent
               purge is gated server-side until it has an impact preview with
               authoritative object counts, dependency/retention and legal-hold
