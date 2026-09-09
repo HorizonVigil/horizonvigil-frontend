@@ -658,7 +658,9 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Compliance Reports', to: tabLink(REPORTS, 'Compliance Reports'), real: true },
       { label: 'Inventory Reports', to: tabLink(REPORTS, 'Inventory Reports'), real: true },
       { label: 'Savings Reports', to: tabLink(REPORTS, 'Savings Reports'), real: true },
-      { label: 'Scheduled Reports', to: tabLink(REPORTS, 'Scheduled Reports'), real: true, minRole: 'editor' },
+      // Phase 11 (§15.4): removed. There is no scheduler and no delivery
+      // worker behind it, and the server now refuses to save a schedule --
+      // leaving the nav entry would route users to a 403.
       { label: 'Export Center', to: tabLink(REPORTS, 'Export Center'), real: true },
     ],
   },

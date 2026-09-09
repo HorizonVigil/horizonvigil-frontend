@@ -24,7 +24,14 @@ const CATEGORY_LABELS: Record<Category, string> = {
   savings: 'Savings Opportunities',
 };
 
-const TABS = ['Executive Reports', 'Cost Reports', 'Security Reports', 'Compliance Reports', 'Inventory Reports', 'Savings Reports', 'Scheduled Reports', 'Export Center'] as const;
+// Phase 11 (§15.4): 'Scheduled Reports' removed. These endpoints have
+// always been storage-only -- no cron trigger, no delivery worker -- and the
+// tab said so in amber text while still offering a "New Report" button that
+// saved a schedule which would never fire. §15.4: "Do not save schedules
+// that will never execute." A warning next to a working button is not a
+// gate; the server now refuses the write, and the tab that offered it is
+// gone rather than left to produce a 403.
+const TABS = ['Executive Reports', 'Cost Reports', 'Security Reports', 'Compliance Reports', 'Inventory Reports', 'Savings Reports', 'Export Center'] as const;
 type Tab = typeof TABS[number];
 
 const TAB_CATEGORY: Record<Tab, Category | null> = {
@@ -34,7 +41,6 @@ const TAB_CATEGORY: Record<Tab, Category | null> = {
   'Compliance Reports': 'compliance',
   'Inventory Reports': 'resource',
   'Savings Reports': 'savings',
-  'Scheduled Reports': null,
   'Export Center': null,
 };
 
@@ -52,7 +58,6 @@ export function Reports() {
   const [name, setName] = useState('');
   const [category, setCategory] = useState<Category>('cost');
   const [format, setFormat] = useState<'pdf' | 'csv' | 'xlsx'>('pdf');
-  const [cadence, setCadence] = useState('one_time');
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -191,7 +196,6 @@ export function Reports() {
   function openNewReport() {
     const tabCategory = TAB_CATEGORY[tab];
     setCategory(tabCategory ?? 'cost');
-    setCadence(tab === 'Scheduled Reports' ? 'weekly' : 'one_time');
     setName('');
     setModalOpen(true);
   }
@@ -217,20 +221,9 @@ export function Reports() {
     setLoadError(null);
 
     try {
-      if (cadence === 'one_time') {
-        await api.createReport({
-          category,
-          name: trimmedName,
-          format,
-        });
-      } else {
-        await api.createScheduledReport({
-          name: trimmedName,
-          reportCategory: category,
-          cadence,
-          format,
-        });
-      }
+      // One-time only. Recurring delivery has no worker behind it, and the
+      // server refuses to save a schedule that would never fire (§15.4).
+      await api.createReport({ category, name: trimmedName, format });
 
       setModalOpen(false);
       setName('');
@@ -431,16 +424,19 @@ export function Reports() {
         </>
       )}
 
-      {tab === 'Scheduled Reports' && (
-        <>
-          <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
-            Scheduling isn't wired to a delivery engine yet — these are saved for later, but nothing generates or gets emailed automatically until that exists. Use "one time" in New Report to generate a report right now.
+      {/* Phase 11 (§15.4): the Scheduled Reports tab is gone, but any
+          schedule saved before this release must still be removable --
+          otherwise an org is left with a row it can neither run nor delete.
+          Renders only when such rows exist; on an estate with none (verified
+          in production: zero rows) nothing shows. */}
+      {scheduled.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4">
+          <h3 className="text-sm font-medium text-slate-800 dark:text-slate-100 mb-1">Saved schedules from a previous release</h3>
+          <p className="text-xs text-slate-600 dark:text-slate-300 mb-3">
+            Recurring report delivery is not available, and these were never generating or sending anything. They are listed here so you can remove them.
           </p>
-          <div className="flex justify-end mb-3">
-            <button type="button" onClick={openNewReport} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-2">New Report</button>
-          </div>
-          <DataTable columns={scheduledColumns} rows={scheduled} rowKey={s => s.id} emptyMessage="No scheduled reports." />
-        </>
+          <DataTable columns={scheduledColumns} rows={scheduled} rowKey={s => s.id} />
+        </div>
       )}
 
       {tab === 'Export Center' && (
@@ -494,19 +490,8 @@ export function Reports() {
               <option value="xlsx">Excel (.xlsx)</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm"><span className="text-slate-600 dark:text-slate-300">Schedule</span>
-            <select
-              value={cadence}
-              onChange={e => setCadence(e.target.value)}
-              aria-label="Report schedule"
-              disabled={creating}
-              className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
-              {['one_time', 'daily', 'weekly', 'monthly', 'quarterly'].map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
-            </select>
-            {cadence !== 'one_time' && <span className="text-xs text-amber-600 dark:text-amber-400">Recurring delivery isn't built yet — this saves the schedule, but nothing will be generated or emailed automatically until it is. Use "one time" to generate and download a report right now.</span>}
-          </label>
           <button type="submit" disabled={creating} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium py-2 disabled:opacity-50">
-            {creating ? (cadence === 'one_time' ? 'Generating…' : 'Saving…') : 'Create'}
+            {creating ? 'Generating…' : 'Generate report'}
           </button>
         </form>
       </Modal>
