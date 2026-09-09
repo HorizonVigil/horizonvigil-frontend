@@ -6,15 +6,15 @@ import { MARKETING_PLANS, formatPrice, CONTACT_SALES_HREF, BOOK_DEMO_HREF } from
 import { scrollToSection } from '../../lib/scrollToSection';
 
 const MODULES = [
-  { name: 'Cloud Accounts', desc: 'Connect AWS accounts and GCP projects once — access-key, cross-account role, or service-account impersonation, your choice.' },
+  { name: 'Cloud Accounts', desc: 'Connect AWS accounts and GCP projects once. AWS uses an access key today; cross-account role support is built but not yet certified, so it stays switched off.' },
   { name: 'Resources & Containers', desc: 'A live, searchable inventory across EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, and Artifact Registry.' },
   { name: 'Cost Management', desc: 'Real spend data with anomaly detection, broken down by account and service — not just a bill you scroll through.' },
-  { name: 'Cost Optimization', desc: 'Specific savings recommendations with an exclusion workflow for what\'s intentional, plus one-click and Auto-PR remediation via your connected GitHub repos.' },
+  { name: 'Cost Optimization', desc: 'Savings recommendations that show the evidence behind them, with an exclusion workflow for what\'s intentional. HorizonVigil never changes your cloud for you — it gives you the exact commands, or opens an Auto-PR against a connected GitHub repo.' },
   { name: 'Cloud Security', desc: 'Posture, misconfigurations, exposure, and identity risk across every connected account, plus provider-native compliance evidence — not an independent framework certification.' },
   { name: 'Issues', desc: 'Cost, security, and alert items that need attention, unified into one list — instead of checking three modules to know what\'s outstanding.' },
   { name: 'Clusters', desc: 'EKS and GKE in one view — workloads, node health, and cluster-level issues alongside everything else.' },
   { name: 'Monitoring & Alerts', desc: 'Resource-level metrics and alerting that already knows which account and org a resource belongs to.' },
-  { name: 'Automation', desc: 'One-click remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail. Every action starts from an explicit click today.' },
+  { name: 'Automation', desc: 'Scheduled jobs and policy rules with a full audit trail. HorizonVigil connects read-only and does not execute changes in your cloud — actions are handed off as commands, tickets, or a pull request you review.' },
   { name: 'Reports & Dashboards', desc: 'Custom dashboards and one-time report generation built from the same data your team already sees day to day.' },
   { name: 'Users & RBAC', desc: 'Org-scoped roles down to the individual account — the same access model backing every module above.' },
 ];
@@ -35,7 +35,7 @@ const AI_FEATURES = [
   { title: 'Cost anomaly detection', desc: 'Spend that breaks from an account\'s own baseline is flagged automatically, before it shows up as a surprise on the bill.' },
   { title: 'Savings recommendations', desc: 'Idle and oversized resources are surfaced with a specific, actionable fix — not a generic "reduce costs" tip.' },
   { title: 'Finding prioritization', desc: 'Vulnerability and misconfiguration findings are ranked by real exposure, so triage starts with what actually matters.' },
-  { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline, one click from being applied.' },
+  { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline with the exact commands to run — HorizonVigil does not apply them for you.' },
 ];
 
 // Deliberately not claiming CIS/PCI DSS/ISO 27001/SOC 2/HIPAA as live scored
@@ -63,7 +63,7 @@ const SECURITY_FEATURES = [
 
 const FAQS = [
   { q: 'Which clouds does HorizonVigil support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is built but not yet available in production while we finish its deployment pipeline; we\'d rather ship it fully working than half-connected.' },
-  { q: 'How does account access work?', a: 'For AWS, connect via a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. For GCP, connect via a service-account key or service-account impersonation.' },
+  { q: 'How does account access work?', a: 'For AWS, connect via a scoped read-only access key. Cross-account IAM role support is built but not yet certified, so it is switched off until it is. For GCP, connect via a service-account key or service-account impersonation.' },
   { q: 'Is there a free plan?', a: 'Yes. Free connects one cloud account for two users, with 7-day data retention — enough to see real value before you pay anything.' },
   { q: 'Can I cancel or change plans anytime?', a: 'Yes, from the in-app billing portal. Downgrades and cancellations take effect at the end of your current billing period; there\'s no lock-in contract below Enterprise.' },
   { q: 'What happens to my data if I downgrade?', a: 'Nothing is deleted. Your resource inventory and history stay intact — only your data-retention window and included limits change to match the new plan.' },
@@ -74,14 +74,17 @@ const FAQS = [
 // shipped capability (matches Docs.tsx / MODULES / AI_FEATURES wording
 // exactly). Deliberately does NOT borrow the "governed autonomy ladder"
 // framing from larger vision documents (simulate/approve/execute/rollback
-// stages) -- that policy-approval workflow doesn't exist in the product;
-// remediation today is an explicit one-click action, which is what stage 4
-// actually says.
+// stages) -- that policy-approval workflow doesn't exist in the product.
+// Nor does remediation: provider mutation is server-denied in V1 (every
+// remediation endpoint returns 403), so stage 4 is a hand-off, not an
+// action. This comment previously said "remediation today is an explicit
+// one-click action" and was the justification for the copy above it --
+// both were describing a capability the server refuses.
 const HOW_IT_WORKS = [
-  { stage: 'Connect', desc: 'Link an AWS account or GCP project with a scoped access key, a cross-account IAM role, or service-account impersonation. Read-only by default — automation is a separate, explicit opt-in.' },
+  { stage: 'Connect', desc: 'Link an AWS account with a scoped access key, or a GCP project with service-account impersonation. Read-only — HorizonVigil never gets write access to your cloud.' },
   { stage: 'Discover', desc: 'A live, searchable inventory builds automatically across every connected account — EC2, S3, RDS, Compute Engine, Cloud SQL, GKE, Artifact Registry, and more.' },
   { stage: 'Detect', desc: 'Cost anomalies, misconfigurations, and exposure are surfaced automatically and ranked by real impact — not a raw feed you sort through yourself.' },
-  { stage: 'Remediate', desc: 'Apply a fix in one click, or open an Auto-PR against a connected GitHub repo for changes your team would rather review first.' },
+  { stage: 'Hand off', desc: 'Take the exact commands to run yourself, or open an Auto-PR against a connected GitHub repo. HorizonVigil does not make the change for you.' },
   { stage: 'Audit', desc: 'Every action — who ran it, on what resource, and when — is logged automatically, with no separate compliance tool to bolt on.' },
 ];
 
@@ -171,8 +174,8 @@ function Hero() {
     { label: '3 accounts connected', tone: 'neutral' as const },
     { label: '1,204 resources discovered', tone: 'neutral' as const },
     { label: 'Cost anomaly: +34% in us-east-1', tone: 'warn' as const },
-    { label: '12 findings prioritized by exposure', tone: 'warn' as const },
-    { label: 'Remediation applied — audit logged', tone: 'good' as const },
+    { label: '6 misconfigurations found', tone: 'warn' as const },
+    { label: 'Fix handed off — audit logged', tone: 'good' as const },
   ];
   const toneClass: Record<'neutral' | 'warn' | 'good', string> = {
     neutral: 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300',
@@ -510,8 +513,8 @@ function ComplianceBenchmarks() {
     <Section>
       <div className="text-center max-w-2xl mx-auto mb-14">
         <Eyebrow>Compliance</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Real signal from AWS Config, today.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Every connected AWS account's Config rules and conformance packs are surfaced as findings you can see at any time — under Vulnerability Management › Compliance. Independent framework scoring is on the roadmap.</p>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Provider-native compliance evidence.</h2>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">If you enable AWS Config with a conformance pack, its rule results are collected as control evidence under Cloud Compliance — each with the scope, the exact check, and when it was observed. Until Config is recording, the module says so rather than showing a score. Provider checks are not an independent framework certification.</p>
       </div>
       <div className="grid sm:grid-cols-3 gap-5">
         {COMPLIANCE_BENCHMARKS.map(b => (
@@ -540,7 +543,7 @@ function DocsPreview() {
             <Eyebrow>Documentation</Eyebrow>
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Technical detail, before you sign up.</h2>
             <p className="text-slate-600 dark:text-slate-300 mt-4 max-w-xl">
-              Connect an AWS account with a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. Connect a GCP project with a service-account key or service-account impersonation. Either way, HorizonVigil only requests read access unless you separately enable automation.
+              Connect an AWS account with a scoped, read-only access key. Cross-account IAM role support is built but not yet certified, so it stays switched off until it is. Connect a GCP project with a service-account key or service-account impersonation. Either way, HorizonVigil only requests read access unless you separately enable automation.
             </p>
           </div>
           <div className="flex lg:justify-end">
@@ -557,7 +560,7 @@ function DocsPreview() {
 function ProductPreview() {
   const panels = [
     { label: 'Cost Management', rows: ['Monthly spend by account', 'Anomaly: +34% in us-east-1', '3 savings recommendations'] },
-    { label: 'Vulnerability Management', rows: ['12 critical findings', 'Deduped from 4 accounts', 'Prioritized by exposure'] },
+    { label: 'Cloud Security', rows: ['Misconfigurations by account', 'Externally shared resources', 'Identity & access risk'] },
     { label: 'Resources', rows: ['1,204 resources tracked', 'Across 8 connected accounts', 'AWS + GCP, one view'] },
   ];
   return (

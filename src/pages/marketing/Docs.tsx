@@ -10,7 +10,7 @@ const STEPS = [
   },
   {
     title: '2. Connect an AWS account',
-    body: 'From Cloud Accounts, choose "Connect AWS Account" and pick a method: a scoped access key (fastest to set up) or a cross-account IAM role (no long-lived key stored — recommended for production). Either way, HorizonVigil only requests read access unless you separately enable automation.',
+    body: 'From Cloud Accounts, choose "Connect AWS Account". AWS connections use a scoped access key today. Cross-account IAM role support is built but not yet certified, so the option is disabled until it is (no long-lived key stored is the goal for production). Either way, HorizonVigil only requests read access unless you separately enable automation.',
   },
   {
     title: '3. Or connect a GCP project',
@@ -41,11 +41,11 @@ const MODULES = [
   },
   {
     name: 'Cost Optimization',
-    desc: 'Specific savings recommendations for idle and oversized resources, with an exclusion workflow for spend that\'s intentional. Fixes apply one-click, or as an Auto-PR against a connected GitHub repo for changes you want reviewed first.',
+    desc: 'Specific savings recommendations for idle and oversized resources, with an exclusion workflow for spend that\'s intentional. HorizonVigil connects read-only and never applies a fix for you: you get the exact commands, or an Auto-PR against a connected GitHub repo for changes you want reviewed first.',
   },
   {
     name: 'Automation',
-    desc: 'One-click remediation — stop/start, right-sizing, and policy-driven fixes — with a full audit trail of who ran what, on which resource, and when. Requires editor role or above. Scheduled/automatic triggering isn\'t live yet; every action today starts from a real, explicit click.',
+    desc: 'Scheduled jobs and policy rules with a full audit trail of who did what, on which resource, and when. HorizonVigil does not execute changes in your cloud — every fix is handed off to you as commands, a ticket, or a pull request. Requires editor role or above. Scheduled/automatic triggering isn\'t live yet; every action today starts from a real, explicit click.',
   },
   {
     name: 'Reports',

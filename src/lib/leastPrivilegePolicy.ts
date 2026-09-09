@@ -1,11 +1,52 @@
-// §7.3 hardened least-privilege policy — read-only everywhere, no object/secret
-// content access. Offered as the "custom policy" alternative to ReadOnlyAccess +
-// SecurityAudit in the connection wizard.
+/**
+ * The collection role's IAM policy.
+ *
+ * Acceptance condition 12: "Collection roles contain no execution or
+ * credential-producing permission." The audit named one violation
+ * (`redshift:GetClusterCredentials`, which mints temporary database
+ * credentials) plus "broad log-reading actions". Auditing all 177 actions
+ * found eight worth acting on, and three of them were reachable ways to
+ * obtain credentials or secret-bearing content from a role advertised to
+ * customers as read-only:
+ *
+ *   REMOVED (all three were unused by any scanner):
+ *     redshift:GetClusterCredentials       mints temporary DB credentials
+ *     ec2:GetConsoleOutput                 boot logs routinely carry secrets
+ *     iam:GenerateServiceLastAccessedDetails  job-producing write, never called
+ *
+ *   NARROWED (the wildcard reached further than the caller needed):
+ *     apigateway:GET on "*"   ->  scoped to /restapis and /v2/apis.
+ *                                 `apigateway:GET` on "*" includes
+ *                                 GET /apikeys, which returns API key VALUES.
+ *                                 The scanner only ever requests the two
+ *                                 collection paths.
+ *     codebuild:BatchGet*     ->  codebuild:BatchGetProjects. BatchGet* also
+ *                                 matches BatchGetBuilds, which exposes build
+ *                                 logs and environment variables.
+ *     logs:Get*               ->  removed. GetLogEvents returns raw log lines
+ *                                 and no scanner calls it.
+ *
+ *   KEPT, with the rationale the build prompt requires for job-producing
+ *   read support:
+ *     iam:GenerateCredentialReport  IAM will not return a credential report
+ *                                   until one has been generated; the report
+ *                                   is account-level MFA/key-age metadata,
+ *                                   not credentials. Called by scanners/iam.ts.
+ *     logs:FilterLogEvents          Powers the on-demand log viewer
+ *                                   (routes/logs.ts), scoped per request to
+ *                                   one resource. This does read log content,
+ *                                   which is why it is named here rather than
+ *                                   hidden inside a `logs:*` wildcard.
+ *
+ * Everything else is List/Describe/Get metadata. The policy still grants no
+ * s3:GetObject, no secretsmanager:GetSecretValue, and no mutating action
+ * anywhere.
+ */
 export const LEAST_PRIVILEGE_POLICY = `{
   "Version": "2012-10-17",
   "Statement": [
     { "Sid": "ComputeNetworkStorage", "Effect": "Allow", "Action": [
-      "ec2:Describe*", "ec2:GetEbsEncryptionByDefault", "ec2:GetConsoleOutput",
+      "ec2:Describe*", "ec2:GetEbsEncryptionByDefault",
       "elasticloadbalancing:Describe*", "autoscaling:Describe*",
       "s3:List*", "s3:GetBucket*", "s3:GetObjectTagging", "s3:GetLifecycleConfiguration",
       "s3:GetEncryptionConfiguration", "s3:GetBucketPolicyStatus", "s3:GetBucketPublicAccessBlock",
@@ -16,7 +57,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
     ], "Resource": "*" },
     { "Sid": "DatabasesAndCaching", "Effect": "Allow", "Action": [
       "rds:Describe*", "rds:List*", "dynamodb:Describe*", "dynamodb:List*",
-      "elasticache:Describe*", "redshift:Describe*", "redshift:GetClusterCredentials",
+      "elasticache:Describe*", "redshift:Describe*",
       "memorydb:Describe*", "redshift-serverless:ListWorkgroups", "timestream:List*", "timestream:Describe*"
     ], "Resource": "*" },
     { "Sid": "AnalyticsAndDataPipelines", "Effect": "Allow", "Action": [
@@ -26,7 +67,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "dms:Describe*", "lakeformation:List*"
     ], "Resource": "*" },
     { "Sid": "DevOpsCiCdAndMl", "Effect": "Allow", "Action": [
-      "codebuild:List*", "codebuild:BatchGet*", "codepipeline:List*",
+      "codebuild:List*", "codebuild:BatchGetProjects", "codepipeline:List*",
       "cognito-idp:List*", "cognito-identity:List*", "sagemaker:List*",
       "codecommit:List*", "codecommit:BatchGetRepositories",
       "codedeploy:List*", "codedeploy:BatchGetApplications", "codeartifact:List*"
@@ -35,8 +76,12 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "eks:Describe*", "eks:List*", "ecs:Describe*", "ecs:List*", "lambda:List*", "lambda:Get*",
       "cloudformation:Describe*", "cloudformation:List*", "cloudformation:Get*",
       "events:List*", "events:Describe*", "states:List*", "states:Describe*",
-      "batch:Describe*", "elasticbeanstalk:Describe*", "apigateway:GET", "appsync:List*"
+      "batch:Describe*", "elasticbeanstalk:Describe*", "appsync:List*"
     ], "Resource": "*" },
+    { "Sid": "ApiGatewayInventoryOnly", "Effect": "Allow", "Action": ["apigateway:GET"], "Resource": [
+      "arn:aws:apigateway:*::/restapis", "arn:aws:apigateway:*::/restapis/*",
+      "arn:aws:apigateway:*::/apis", "arn:aws:apigateway:*::/apis/*"
+    ] },
     { "Sid": "NetworkingEdgeDns", "Effect": "Allow", "Action": [
       "route53:List*", "route53:Get*", "cloudfront:List*", "cloudfront:Get*",
       "acm:List*", "acm:Describe*", "wafv2:List*", "wafv2:Get*",
@@ -46,7 +91,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
       "appmesh:Describe*", "ses:List*", "mq:List*"
     ], "Resource": "*" },
     { "Sid": "IdentityAndKms", "Effect": "Allow", "Action": [
-      "iam:List*", "iam:Get*", "iam:GenerateCredentialReport", "iam:GenerateServiceLastAccessedDetails",
+      "iam:List*", "iam:Get*", "iam:GenerateCredentialReport",
       "kms:List*", "kms:Describe*", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus",
       "secretsmanager:List*", "secretsmanager:DescribeSecret", "organizations:List*", "organizations:Describe*",
       "sts:GetCallerIdentity"
@@ -62,7 +107,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
     ], "Resource": "*" },
     { "Sid": "MonitoringAndOps", "Effect": "Allow", "Action": [
       "cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*",
-      "logs:Describe*", "logs:Get*", "logs:FilterLogEvents",
+      "logs:Describe*", "logs:FilterLogEvents",
       "cloudtrail:Describe*", "cloudtrail:Get*", "cloudtrail:List*", "cloudtrail:LookupEvents",
       "ssm:Describe*", "ssm:List*", "ssm:Get*", "health:Describe*"
     ], "Resource": "*" },
