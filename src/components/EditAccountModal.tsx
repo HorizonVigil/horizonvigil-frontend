@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Modal } from './Modal';
 import type { Environment } from '../lib/api';
+import { regionsForPartitionOf } from '../lib/awsRegions';
 
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
-const REGIONS = [
-  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-  'ca-central-1', 'sa-east-1',
-  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
-  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
-  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
-];
+
 const SUPPORT_PLANS = ['Basic', 'Developer', 'Business', 'Enterprise On-Ramp', 'Enterprise'];
 
 export interface EditAccountFields {
@@ -48,6 +43,17 @@ export function EditAccountModal({
   const [plan, setPlan] = useState(supportPlan ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Narrowed to the partition this connection already lives in, derived from
+   * its CURRENT default region rather than from whatever the user is midway
+   * through selecting -- otherwise the option list would shift underneath
+   * them as they scroll it.
+   *
+   * Credentials are issued within one partition, so offering a commercial
+   * connection a GovCloud region is offering a choice guaranteed to fail.
+   */
+  const regionOptions = regionsForPartitionOf(defaultRegion);
 
   useEffect(() => {
     if (!open) return;
@@ -100,7 +106,11 @@ export function EditAccountModal({
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-slate-600 dark:text-slate-300">Default Region</span>
             <select value={region} onChange={e => setRegion(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
-              {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              {/* The saved region is always offered, even if it is not in
+                  the list -- an opt-in region AWS added after this shipped
+                  must not silently disappear from a connection that uses it. */}
+              {(regionOptions.includes(region) ? regionOptions : [region, ...regionOptions])
+                .map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </label>
         )}

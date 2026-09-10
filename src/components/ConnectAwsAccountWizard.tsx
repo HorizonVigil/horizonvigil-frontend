@@ -4,21 +4,10 @@ import { api, type ProjectRow, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
 import { useSync } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
+import { AWS_REGION_GROUPS, DEFAULT_SCAN_REGIONS, partitionForRegion } from '../lib/awsRegions';
 
-// Every AWS region enabled by default (no opt-in required) — this list
-// previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
-// among others, so a connected account's real EC2 instances there never
-// showed up anywhere in discovery. The backend also independently confirms
-// a new connection's real enabled regions via ec2:DescribeRegions at
-// connect time (including any opt-in regions), so this list just needs to
-// cover the common case for the checklist UI, not be exhaustive.
-const REGIONS = [
-  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-  'ca-central-1', 'sa-east-1',
-  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
-  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
-  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
-];
+// Region lists now live in lib/awsRegions.ts, grouped by partition -- see
+// the note there on why the scan path was never limited by this list.
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 
 export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }: { open: boolean; onClose: () => void; onConnected: () => void; projects: ProjectRow[] }) {
@@ -34,7 +23,21 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   // Lambda, ...) — defaults to all standard regions so an account isn't
   // silently limited to just its primary region with no indication anything
   // else was skipped.
-  const [scanRegions, setScanRegions] = useState<string[]>(REGIONS);
+  const [scanRegions, setScanRegions] = useState<string[]>([...DEFAULT_SCAN_REGIONS]);
+
+  /**
+   * Scan regions are limited to the partition the chosen default region
+   * belongs to.
+   *
+   * AWS credentials are issued within one partition -- a commercial access
+   * key cannot reach `cn-north-1`, and a GovCloud key cannot reach
+   * `us-east-1`. Offering every region in one flat list would offer choices
+   * guaranteed to produce permission errors on every scan, and a wall of
+   * those is its own false signal about the account's health.
+   */
+  const selectedPartition = partitionForRegion(form.defaultRegion);
+  const selectableRegions = AWS_REGION_GROUPS.find(g => g.partition === selectedPartition)?.regions ?? [];
+  const partitionNote = AWS_REGION_GROUPS.find(g => g.partition === selectedPartition)?.note ?? null;
   const [error, setError] = useState<string | null>(null);
   /** Set when the server reports 409 connection_already_exists — the wizard shows the existing connection instead of mutating it. */
   const [duplicate, setDuplicate] = useState<{ id: string; name: string; status: string } | null>(null);
@@ -188,7 +191,11 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-slate-600 dark:text-slate-300">Default Region</span>
           <select value={form.defaultRegion} onChange={e => setForm(f => ({ ...f, defaultRegion: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
-            {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+            {AWS_REGION_GROUPS.map(g => (
+              <optgroup key={g.partition} label={g.label}>
+                {g.regions.map(r => <option key={r} value={r}>{r}</option>)}
+              </optgroup>
+            ))}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -201,12 +208,15 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm text-slate-600 dark:text-slate-300">Regions to Scan</span>
             <div className="flex gap-2 text-xs">
-              <button type="button" onClick={() => setScanRegions(REGIONS)} className="text-brand-600 dark:text-brand-400 hover:underline">All</button>
+              <button type="button" onClick={() => setScanRegions([...selectableRegions])} className="text-brand-600 dark:text-brand-400 hover:underline">All</button>
               <button type="button" onClick={() => setScanRegions([])} className="text-brand-600 dark:text-brand-400 hover:underline">None</button>
             </div>
           </div>
+          {partitionNote && (
+            <p className="mb-1 text-xs text-amber-700 dark:text-amber-400">{partitionNote}</p>
+          )}
           <div className="grid grid-cols-3 gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 p-2">
-            {REGIONS.map(r => (
+            {selectableRegions.map(r => (
               <label key={r} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
                 <input type="checkbox" checked={scanRegions.includes(r)} onChange={() => toggleRegion(r)} />
                 {r}
