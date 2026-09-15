@@ -3,7 +3,11 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 const DEMO_DATA_KEY = 'horizonvigil_demo_data';
 
 function getInitialEnabled(): boolean {
-  return localStorage.getItem(DEMO_DATA_KEY) === 'on';
+  try {
+    return localStorage.getItem(DEMO_DATA_KEY) === 'on';
+  } catch {
+    return false;
+  }
 }
 
 interface DemoDataContextType {
@@ -26,7 +30,11 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabledState] = useState<boolean>(getInitialEnabled);
 
   useEffect(() => {
-    localStorage.setItem(DEMO_DATA_KEY, enabled ? 'on' : 'off');
+    try {
+      localStorage.setItem(DEMO_DATA_KEY, enabled ? 'on' : 'off');
+    } catch {
+      // Demo mode remains active until this tab is closed.
+    }
   }, [enabled]);
 
   const setEnabled = useCallback((next: boolean) => setEnabledState(next), []);

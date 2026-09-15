@@ -17,13 +17,16 @@ COPY . .
 # environment variables take precedence over .env files in Vite, so an empty
 # ENV would blank out the real URLs from .env.production.
 #
-# npx vite build directly, not `npm run build` (= tsc -b && vite build) --
-# matches the original monorepo's Cloudflare pipeline, see deploy.yml for why.
-RUN npx vite build --mode production
+# The package build script runs the TypeScript gate before bundling. Keep the
+# image build on the exact same release path as CI so an image can never ship
+# code that CI would reject.
+RUN npm run build
 
 FROM node:22-slim
 WORKDIR /app
-RUN npm install -g serve@14
+# Pin the runtime server so the image is reproducible and never resolves a
+# package when Cloud Run starts it.
+RUN npm install --global --no-audit --no-fund serve@14.2.4
 COPY --from=build /app/dist ./dist
 # Run as an unprivileged user — the container only serves static files, so it
 # never needs root. This is a production hardening step, not cosmetic.

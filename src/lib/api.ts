@@ -45,6 +45,7 @@ function accountsPathPrefix(service: CloudAccountService): string {
 }
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   status: number;
@@ -53,6 +54,14 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.body = body;
+  }
+}
+
+/** A client-side timeout is retryable; unlike a 4xx response, it says nothing about the request's validity. */
+export class RequestTimeoutError extends Error {
+  constructor() {
+    super('The request took too long. Please try again.');
+    this.name = 'RequestTimeoutError';
   }
 }
 
@@ -101,13 +110,56 @@ function recQs(params: RecommendationListParams): string {
   return qs({ ...rest, connection_ids: connectionIds?.join(',') });
 }
 
+function getStoredOrgId(): string | null {
+  try {
+    return localStorage.getItem(CURRENT_ORG_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browsers. The selected
+    // org remains usable for this tab; it simply will not survive a reload.
+    return null;
+  }
+}
+
+function persistOrgId(orgId: string | null): void {
+  try {
+    if (orgId) localStorage.setItem(CURRENT_ORG_STORAGE_KEY, orgId);
+    else localStorage.removeItem(CURRENT_ORG_STORAGE_KEY);
+  } catch {
+    // Persistence is an enhancement, never a reason to make the app unusable.
+  }
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort(init.signal?.reason);
+
+  if (init.signal) {
+    if (init.signal.aborted) onAbort();
+    else init.signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new RequestTimeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 class ApiClient {
-  private currentOrgId: string | null = localStorage.getItem(CURRENT_ORG_STORAGE_KEY);
+  private currentOrgId: string | null = getStoredOrgId();
 
   setCurrentOrgId(orgId: string | null) {
     this.currentOrgId = orgId;
-    if (orgId) localStorage.setItem(CURRENT_ORG_STORAGE_KEY, orgId);
-    else localStorage.removeItem(CURRENT_ORG_STORAGE_KEY);
+    persistOrgId(orgId);
   }
   getCurrentOrgId(): string | null {
     return this.currentOrgId;
@@ -153,7 +205,7 @@ class ApiClient {
       ...(await this.authHeaders()),
       ...((options.headers as Record<string, string>) || {}),
     };
-    const response = await fetch(url, { ...options, headers });
+    const response = await fetchWithTimeout(url, { ...options, headers });
     const body = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null;
     if (!response.ok || !body?.ok) {
       throw new ApiError(response.status, body?.error || response.statusText || 'Request failed', body);
@@ -176,7 +228,7 @@ class ApiClient {
   /** For the two endpoints that return a raw file instead of the {ok,data} envelope (CSV export, report download). */
   private async downloadRaw(service: Service, path: string, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
     const baseUrl = SERVICE_URLS[service];
-    const response = await fetch(`${baseUrl}${path}`, { headers: await this.authHeaders() });
+    const response = await fetchWithTimeout(`${baseUrl}${path}`, { headers: await this.authHeaders() });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
       throw new ApiError(response.status, error.error || 'Download failed', error);

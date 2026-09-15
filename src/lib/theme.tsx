@@ -4,8 +4,12 @@ const THEME_KEY = 'horizonvigil_theme';
 type Theme = 'light' | 'dark';
 
 function getInitialTheme(): Theme {
-  const stored = localStorage.getItem(THEME_KEY);
-  if (stored === 'light' || stored === 'dark') return stored;
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // Privacy-restricted browsers can deny storage access; keep the default.
+  }
   return 'dark'; // spec: dark mode by default
 }
 
@@ -21,7 +25,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem(THEME_KEY, theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Theme still applies for the active tab when persistence is unavailable.
+    }
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
