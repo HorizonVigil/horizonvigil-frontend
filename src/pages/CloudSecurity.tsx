@@ -10,8 +10,9 @@ import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
-import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type IdentityRisk } from '../lib/api';
+import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type IdentityRisk, type PostureCheckReport } from '../lib/api';
 import { CredentialRiskCell, RiskFactorList } from '../components/cloudSecurity/CredentialRiskCell';
+import { DerivedPostureChecks } from '../components/cloudSecurity/DerivedPostureChecks';
 
 // V1 scope decision (2026-09-08 audit): Cloud Security V1 is posture-only --
 // misconfigurations, exposure, identity risk, and provider-native compliance
@@ -85,6 +86,8 @@ export function CloudSecurity() {
   const [exposed, setExposed] = useState<VulnerabilityFinding[]>([]);
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
   const [riskyIdentities, setRiskyIdentities] = useState<IdentityRisk[]>([]);
+  /** Null means the checks could not be read -- rendered as such, never as clean. */
+  const [postureChecks, setPostureChecks] = useState<PostureCheckReport | null>(null);
   // Real, persisted findings -- connector-gcp's Security Command Center scan
   // and connector-azure's Defender for Cloud scan both write into the same
   // vulnerability_findings table every other source does; this tab was the
@@ -110,7 +113,7 @@ export function CloudSecurity() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [misconfig, exposedRes, idSummary, risks, gcpScc, defender] = await Promise.allSettled([
+    const [misconfig, exposedRes, idSummary, risks, checks, gcpScc, defender] = await Promise.allSettled([
       api.getFindingsBySource('aws-config', { limit: 50 }),
       api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
       api.getIdentitySummary(),
@@ -122,6 +125,7 @@ export function CloudSecurity() {
        * the Overview and the rows in this table cannot disagree.
        */
       api.getIdentityRisks({ limit: 25 }),
+      api.getPostureChecks(),
       api.getFindingsBySource('gcp-scc', { limit: 50 }),
       api.getFindingsBySource('defender', { limit: 50 }),
     ]);
@@ -136,6 +140,9 @@ export function CloudSecurity() {
       // risk, and listing it would dilute the ones that are.
       setRiskyIdentities(risks.value.items.filter((i) => i.riskFactors.length > 0));
     } else failed.push('identity risks');
+    // Not added to `failed`: the block states its own unavailability, and
+    // saying it twice would read as two separate problems.
+    setPostureChecks(checks.status === 'fulfilled' ? checks.value : null);
     if (gcpScc.status === 'fulfilled') setGcpFindings(gcpScc.value.items); else failed.push('GCP Security Command Center findings');
     if (defender.status === 'fulfilled') setAzureFindings(defender.value.items); else failed.push('Azure Defender findings');
 
@@ -266,8 +273,22 @@ export function CloudSecurity() {
 
       {tab === 'Misconfigurations' && (
         <>
+          {/*
+            Two blocks, deliberately not merged. AWS Config's evaluations are
+            AWS's own assertion and can go to an auditor; the derived checks
+            below are HorizonVigil's, computed from collected inventory.
+            Blending them would launder one provenance into the other.
+          */}
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">AWS Config rule evaluations, re-presented as a posture/risk view of the same real findings behind Vulnerability Management's AWS Config tab.</p>
-          <DataTable columns={findingColumns} rows={misconfigs} rowKey={f => f.id} emptyMessage="No misconfigurations found." />
+          <DataTable
+            columns={findingColumns}
+            rows={misconfigs}
+            rowKey={f => f.id}
+            emptyMessage="No AWS Config evaluations have been collected. This is not the same as a clean estate — see the configuration checks below."
+          />
+          <div className="mt-4">
+            <DerivedPostureChecks report={postureChecks} />
+          </div>
         </>
       )}
 

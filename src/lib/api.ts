@@ -807,6 +807,18 @@ class ApiClient {
     );
   }
 
+  /**
+   * AWS-16 posture derived from collected configuration.
+   *
+   * Deliberately distinct from getPostureFindings(): those are provider-native
+   * (AWS Config, Access Analyzer) and auditable as AWS's own assertion. These
+   * are HorizonVigil's, computed from inventory, and the UI must not blend the
+   * two.
+   */
+  getPostureChecks() {
+    return this.get<PostureCheckReport>('vulnerabilityManagement', '/api/cloud-security/posture/checks');
+  }
+
   getPostureSources() { return this.get<{ connectionsInScope: number; surfaces: Record<string, SourceAvailability> }>('vulnerabilityManagement', '/api/cloud-security/posture/sources'); }
 
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
@@ -1233,6 +1245,30 @@ export interface IdentityRisk extends Omit<CloudIdentity, 'metadata'> {
     oldestActiveKeyAgeDays: number | null;
     neverUsedActiveKeys: number;
   };
+}
+
+/** A derived posture rule's verdict. See ApiClient.getPostureChecks. */
+export interface PostureCheckResult {
+  key: string;
+  title: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  rationale: string;
+  requires: string[];
+  /** Three of these produce zero failures and only PASS means nothing is wrong. */
+  outcome: 'FAIL' | 'PASS' | 'NOT_APPLICABLE' | 'NOT_COLLECTED';
+  evaluated: number;
+  failing: number;
+  examples: { resourceId: string; region: string | null; detail: string }[];
+  unavailableReason?: string;
+}
+
+export interface PostureCheckReport {
+  checks: PostureCheckResult[];
+  /** Checks deliberately not implemented, each with a reason. */
+  gaps: { key: string; title: string; reason: string }[];
+  summary: { failing: number; passing: number; notApplicable: number; notCollected: number; affectedResources: number };
+  provenance: 'derived_by_horizonvigil';
+  connectionsInScope: number;
 }
 
 export interface IdentitySummary { total: number; users: number; roles: number; adminEquivalent: number; broad: number; scoped: number; humanWithoutMfa: number }
