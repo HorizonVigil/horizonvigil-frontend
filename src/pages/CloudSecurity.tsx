@@ -10,7 +10,8 @@ import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
-import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary } from '../lib/api';
+import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type IdentityRisk } from '../lib/api';
+import { CredentialRiskCell, RiskFactorList } from '../components/cloudSecurity/CredentialRiskCell';
 
 // V1 scope decision (2026-09-08 audit): Cloud Security V1 is posture-only --
 // misconfigurations, exposure, identity risk, and provider-native compliance
@@ -83,7 +84,7 @@ export function CloudSecurity() {
   const [misconfigs, setMisconfigs] = useState<VulnerabilityFinding[]>([]);
   const [exposed, setExposed] = useState<VulnerabilityFinding[]>([]);
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
-  const [riskyIdentities, setRiskyIdentities] = useState<CloudIdentity[]>([]);
+  const [riskyIdentities, setRiskyIdentities] = useState<IdentityRisk[]>([]);
   // Real, persisted findings -- connector-gcp's Security Command Center scan
   // and connector-azure's Defender for Cloud scan both write into the same
   // vulnerability_findings table every other source does; this tab was the
@@ -109,12 +110,18 @@ export function CloudSecurity() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const [misconfig, exposedRes, idSummary, admin, broad, gcpScc, defender] = await Promise.allSettled([
+    const [misconfig, exposedRes, idSummary, risks, gcpScc, defender] = await Promise.allSettled([
       api.getFindingsBySource('aws-config', { limit: 50 }),
       api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
       api.getIdentitySummary(),
-      api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
-      api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
+      /**
+       * One call to the Cloud Security namespace, replacing two connector
+       * calls filtered by privilege level. The server already judges risk --
+       * privilege, MFA, key age, unused and surplus credentials -- and
+       * fetching the verdict rather than re-deriving it is why the count on
+       * the Overview and the rows in this table cannot disagree.
+       */
+      api.getIdentityRisks({ limit: 25 }),
       api.getFindingsBySource('gcp-scc', { limit: 50 }),
       api.getFindingsBySource('defender', { limit: 50 }),
     ]);
@@ -123,10 +130,12 @@ export function CloudSecurity() {
     if (misconfig.status === 'fulfilled') setMisconfigs(misconfig.value.items); else failed.push('misconfigurations');
     if (exposedRes.status === 'fulfilled') setExposed(exposedRes.value.items); else failed.push('exposed resources');
     if (idSummary.status === 'fulfilled') setIdentitySummary(idSummary.value); else failed.push('identity summary');
-    const adminItems = admin.status === 'fulfilled' ? admin.value.items : [];
-    const broadItems = broad.status === 'fulfilled' ? broad.value.items : [];
-    if (admin.status === 'fulfilled' || broad.status === 'fulfilled') setRiskyIdentities([...adminItems, ...broadItems]);
-    if (admin.status === 'rejected' || broad.status === 'rejected') failed.push('risky identities');
+    if (risks.status === 'fulfilled') {
+      // Only identities the server actually flagged. An identity with no risk
+      // factors is not "low risk" filler for this table -- it is simply not a
+      // risk, and listing it would dilute the ones that are.
+      setRiskyIdentities(risks.value.items.filter((i) => i.riskFactors.length > 0));
+    } else failed.push('identity risks');
     if (gcpScc.status === 'fulfilled') setGcpFindings(gcpScc.value.items); else failed.push('GCP Security Command Center findings');
     if (defender.status === 'fulfilled') setAzureFindings(defender.value.items); else failed.push('Azure Defender findings');
 
@@ -144,12 +153,17 @@ export function CloudSecurity() {
     { key: 'discovered_at', header: 'Discovered', render: f => formatDate(f.discovered_at), sortValue: f => f.discovered_at },
   ];
 
-  const identityColumns: Column<CloudIdentity>[] = [
+  const identityColumns: Column<IdentityRisk>[] = [
     { key: 'name', header: 'Identity', render: i => i.display_name || i.native_label || i.native_id, sticky: true },
     { key: 'type', header: 'Type', render: i => i.identity_type },
-    { key: 'provider', header: 'Provider', render: i => i.provider.toUpperCase() },
     { key: 'privilege', header: 'Privilege', render: i => i.privilege_level ? <Badge tone={i.privilege_level === 'admin_equivalent' ? 'critical' : 'warning'}>{i.privilege_level.replace('_', ' ')}</Badge> : '—' },
     { key: 'mfa', header: 'MFA', render: i => i.mfa_enabled === null ? '—' : <Badge tone={i.mfa_enabled ? 'good' : 'critical'}>{i.mfa_enabled ? 'Enabled' : 'Disabled'}</Badge> },
+    // AWS-18. The connector already collected key age, unused keys and
+    // surplus keys; until now nothing showed them, so an admin-equivalent
+    // user holding two keys -- one never used -- displayed a single "MFA
+    // Disabled" badge and nothing else.
+    { key: 'credentials', header: 'Credentials', render: i => <CredentialRiskCell credentials={i.credentials} /> },
+    { key: 'factors', header: 'Why', render: i => <RiskFactorList factors={i.riskFactors} /> },
   ];
 
   return (
