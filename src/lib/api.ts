@@ -785,6 +785,28 @@ class ApiClient {
 
   // ── Cloud Security V1 posture (§10.1) — off the V2 namespace ────────────
   getPostureOverview() { return this.get<PostureOverview>('vulnerabilityManagement', '/api/cloud-security/posture/overview'); }
+  /**
+   * Identity risk WITH its credential factors, from the Cloud Security
+   * namespace.
+   *
+   * Nothing consumed this endpoint before: the identity surfaces read the
+   * connector's own `/identities` route, so the derived verdict — privilege,
+   * MFA, key age, unused and surplus credentials — never reached a screen.
+   * Risk is judged server-side in one place precisely so a count and a table
+   * cannot disagree, which is how Cloud Security once showed 0 identity risks
+   * beside 41 identities.
+   */
+  getIdentityRisks(params: { privilegeLevel?: string; page?: number; limit?: number } = {}) {
+    const q = new URLSearchParams();
+    if (params.privilegeLevel) q.set('privilegeLevel', params.privilegeLevel);
+    if (params.page) q.set('page', String(params.page));
+    if (params.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return this.get<{ items: IdentityRisk[]; pagination: { total: number }; availability?: SourceAvailability }>(
+      'vulnerabilityManagement', `/api/cloud-security/identity-risks${qs ? `?${qs}` : ''}`,
+    );
+  }
+
   getPostureSources() { return this.get<{ connectionsInScope: number; surfaces: Record<string, SourceAvailability> }>('vulnerabilityManagement', '/api/cloud-security/posture/sources'); }
 
   getComplianceBenchmarks(params: { framework?: string; connection_id?: string; page?: number; limit?: number } = {}) {
@@ -1197,6 +1219,22 @@ export interface CloudIdentity {
   identity_created_at: string | null; first_seen_at: string; last_seen_at: string;
   metadata?: Record<string, unknown>;
 }
+/**
+ * An identity with its derived risk. `credentials.assessed` is false when the
+ * identity carried no credential metadata — which is NOT the same as having
+ * no stale credentials, and must never render as clean.
+ */
+export interface IdentityRisk extends Omit<CloudIdentity, 'metadata'> {
+  riskFactors: string[];
+  riskLevel: 'high' | 'medium' | 'low' | null;
+  credentials: {
+    assessed: boolean;
+    activeKeyCount: number;
+    oldestActiveKeyAgeDays: number | null;
+    neverUsedActiveKeys: number;
+  };
+}
+
 export interface IdentitySummary { total: number; users: number; roles: number; adminEquivalent: number; broad: number; scoped: number; humanWithoutMfa: number }
 /** One cloud_resource_edges row, from an identity's own /edges endpoint — source/target are mutually exclusive between the *_resource_id and *_identity_id pair on each side. */
 export interface IdentityEdge { id: string; relationship_type: string; confidence: number; source_engine: string; source_resource_id: string | null; source_identity_id: string | null; target_resource_id: string | null; target_identity_id: string | null; metadata: Record<string, unknown>; first_seen_at: string; last_seen_at: string }
