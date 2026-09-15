@@ -154,6 +154,30 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
   }
 }
 
+/** Completeness of the last collection run — see ApiClient.getScanHealth. */
+export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'RUNNING' | 'NEVER_RUN';
+
+export interface ScannerFailure {
+  scanner: string;
+  scopes: string[];
+  normalizedCode: string | null;
+  detail: string | null;
+}
+
+export interface ScanHealth {
+  completeness: ScanCompleteness;
+  /** False for anything but COMPLETE: a partial scan's count is a floor, not a total. */
+  countIsAuthoritative: boolean;
+  summary: string;
+  totalSteps: number;
+  succeededSteps: number;
+  failedSteps: number;
+  failures: ScannerFailure[];
+  degradedResourceTypes: string[];
+  runId: string | null;
+  finishedAt: string | null;
+}
+
 class ApiClient {
   private currentOrgId: string | null = getStoredOrgId();
 
@@ -311,6 +335,19 @@ class ApiClient {
     return this.get<{ id: string; status: string; explanation: string; progress: { totalSteps: number; completedSteps: number; failedSteps: number; percent: number }; errorSummary: string | null; finishedAt: string | null }>(
       service, `${accountsPathPrefix(service)}/collection-runs/${runId}`,
     );
+  }
+
+  /**
+   * Coverage behind the resource count.
+   *
+   * `resource_summary.totalResources` is a bare number and was rendered as
+   * one. On 2026-09-15 an account showed "430 resources" with `errors: 0`
+   * beside it while EC2 had failed in all 17 regions -- the failures live on
+   * the run's step rows, which nothing surfaced. A count without its coverage
+   * is a claim the data does not support.
+   */
+  getScanHealth(id: string, service: CloudAccountService = 'awsAccounts') {
+    return this.get<ScanHealth>(service, `${accountsPathPrefix(service)}/accounts/${id}/scan-health`);
   }
 
   cancelCollectionRun(runId: string, service: CloudAccountService = 'awsAccounts') {
