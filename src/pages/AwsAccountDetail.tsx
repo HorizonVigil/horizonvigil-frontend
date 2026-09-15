@@ -22,6 +22,8 @@ import {
 } from '../lib/api';
 import { money } from '../lib/format';
 import { useResourceFilters } from '../lib/useResourceFilters';
+import { ScanCoverageBanner, countQualifier } from '../components/cloudAccounts/ScanCoverageBanner';
+import type { ScanHealth } from '../lib/api';
 
 /** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
 function eligibleRemediationAction(r: CloudResource): RemediationActionType | null {
@@ -80,6 +82,11 @@ export function AwsAccountDetail() {
   const [remediating, setRemediating] = useState<string | null>(null);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<CloudConnection | null>(null);
+  /**
+   * Coverage behind the counts. Null means it could not be read, which the
+   * banner reports rather than treating as healthy.
+   */
+  const [scanHealth, setScanHealth] = useState<ScanHealth | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [costSnapshots, setCostSnapshots] = useState<CostSnapshot[]>([]);
   const [credentials, setCredentials] = useState<AccountCredentials | null>(null);
@@ -193,11 +200,12 @@ export function AwsAccountDetail() {
      * did fail are NAMED -- "couldn't load" with no subject leaves the
      * reader unable to tell an empty inventory from a failed one.
      */
-    const [connRes, resourcesRes, costRes, credsRes] = await Promise.allSettled([
+    const [connRes, resourcesRes, costRes, credsRes, healthRes] = await Promise.allSettled([
       api.getAccount(accountId),
       api.getResourceInventory({ connectionId: accountId, limit: 200 }),
       api.getCostExplorer({ connectionId: accountId, limit: 200 }),
       api.getAccountCredentials(accountId),
+      api.getScanHealth(accountId),
     ]);
 
     if (requestId !== loadRequestRef.current) return;
@@ -215,6 +223,9 @@ export function AwsAccountDetail() {
     if (resourcesRes.status === 'fulfilled') setResources(resourcesRes.value.items); else failed.push('resource inventory');
     if (costRes.status === 'fulfilled') setCostSnapshots(costRes.value.items); else failed.push('cost data');
     if (credsRes.status === 'fulfilled') setCredentials(credsRes.value); else failed.push('credential summary');
+    // Deliberately NOT added to `failed`: the banner states its own
+    // unavailability, and saying it twice would read as two problems.
+    setScanHealth(healthRes.status === 'fulfilled' ? healthRes.value : null);
 
     setLoadError(
       failed.length > 0
@@ -226,6 +237,7 @@ export function AwsAccountDetail() {
 
   useEffect(() => {
     setConnection(null);
+    setScanHealth(null);
     setResources([]);
     setCostSnapshots([]);
     setCredentials(null);
@@ -533,8 +545,13 @@ export function AwsAccountDetail() {
 
       {tab === 'Overview' && (
         <>
+          <ScanCoverageBanner health={scanHealth} />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
+            <StatCard
+              label="Total Resources"
+              value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()}
+              caption={countQualifier(scanHealth) ?? undefined}
+            />
             <StatCard label="IAM Users / Roles / Policies" value={`${iamCounts.users} / ${iamCounts.roles} / ${iamCounts.policies}`} />
             <StatCard label="Last Sync" value={connection.last_sync_at ? formatDate(connection.last_sync_at, 'Never').split(',')[0] : 'Never'} />
             <StatCard label="Cost Explorer total" value={money(totalCost)} />
