@@ -1,105 +1,227 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { NAV_MODULES } from './navConfig';
 
 /**
- * Phase 11 (§15.4): scheduled reports are absent until a delivery engine
- * exists.
+ * Phase 11 (§15.4): scheduled reports remain unavailable until a real delivery
+ * engine exists.
  *
- * The prior arrangement is what makes this worth a regression test. The
- * endpoints were storage-only — no cron trigger, no delivery worker — and
- * everyone involved knew it: the route carried a doc comment saying "do not
- * represent this endpoint as having live scheduling in any response or UI
- * copy", and the tab rendered an amber warning saying nothing would be
- * generated or emailed. Next to a working "New Report" button that saved a
- * schedule anyway.
+ * The regression protected here is architectural, not cosmetic:
+ * - no UI control may create a schedule that cannot execute;
+ * - no client API method should invite callers to persist an unsupported
+ *   schedule;
+ * - existing legacy schedules remain readable/deletable so customers are not
+ *   trapped by the feature removal;
+ * - report generation is preview-gated and scope/period-aware.
  *
- * A disclosure beside a working control is not a gate. §15.4: "Do not save
- * schedules that will never execute."
- *
- * Source-level assertions, the same technique v2Isolation.test.ts uses.
+ * These are source-level assertions because the relevant invariant is the
+ * absence of a browser control/API contract, not a particular runtime result.
  */
-const sources = import.meta.glob(['../pages/Reports.tsx', './api.ts'], {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
+
+const sources = import.meta.glob(
+  ['../pages/Reports.tsx', './api.ts'],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
+) as Record<string, string>;
 
 function source(endsWith: string): string {
-  const hit = Object.entries(sources).find(([path]) => path.endsWith(endsWith));
-  expect(hit, `source not found for ${endsWith}`).toBeTruthy();
+  const hit = Object.entries(sources).find(([filePath]) =>
+    filePath.endsWith(endsWith),
+  );
+
+  expect(
+    hit,
+    `source not found for ${endsWith}; verify the glob path and repository layout`,
+  ).toBeTruthy();
+
   return hit![1];
 }
 
+/**
+ * Strip source comments before assertions so historical audit notes do not
+ * accidentally satisfy/fail the behavioral checks.
+ */
 function code(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:\\])\/\/.*$/gm, '$1 ');
 }
 
-describe('scheduled reports are not offered', () => {
+function compact(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
+
+describe('scheduled reports are not offered without a delivery engine', () => {
   const reports = code(source('/Reports.tsx'));
+  const client = code(source('/api.ts'));
+  const compactReports = compact(reports);
+  const compactClient = compact(client);
+
+  it('loads the expected source files', () => {
+    expect(Object.keys(sources).some((path) => path.endsWith('/Reports.tsx'))).toBe(
+      true,
+    );
+    expect(Object.keys(sources).some((path) => path.endsWith('/api.ts'))).toBe(
+      true,
+    );
+  });
 
   it('has no Scheduled Reports tab', () => {
-    const tabs = reports.match(/const TABS = \[([^\]]+)\]/);
-    expect(tabs, 'TABS array not found').toBeTruthy();
-    expect(tabs![1]).not.toContain('Scheduled Reports');
+    const tabs =
+      reports.match(
+        /(?:const|let)\s+TABS\s*=\s*\[([\s\S]*?)\]/,
+      ) ??
+      reports.match(
+        /TABS\s*:\s*readonly[^=]*=\s*\[([\s\S]*?)\]/,
+      );
+
+    expect(
+      tabs,
+      'Reports.tsx TABS declaration was not found; verify the source structure',
+    ).toBeTruthy();
+
+    expect(tabs![1]).not.toMatch(/Scheduled Reports/i);
   });
 
-  it('has no Scheduled Reports nav entry', () => {
-    const reportsModule = NAV_MODULES.find((m) => m.label === 'Reports');
+  it('has no Scheduled Reports navigation entry', () => {
+    const reportsModule = NAV_MODULES.find(
+      (module) => module.label === 'Reports',
+    );
+
     expect(reportsModule).toBeTruthy();
-    expect(reportsModule!.children.map((child) => child.label)).not.toContain('Scheduled Reports');
+
+    expect(
+      reportsModule!.children.some(
+        (child) => child.label === 'Scheduled Reports',
+      ),
+    ).toBe(false);
   });
 
-  it('no longer offers a recurring cadence in New Report', () => {
-    // The dropdown offered daily/weekly/monthly/quarterly beside a warning
-    // that none of them would ever run.
-    for (const cadence of ['daily', 'weekly', 'monthly', 'quarterly']) {
-      expect(reports, `${cadence} still offered`).not.toMatch(new RegExp(`'${cadence}'`));
+  it('does not expose recurring cadence choices in the report form', () => {
+    for (const cadence of [
+      'daily',
+      'weekly',
+      'monthly',
+      'quarterly',
+    ]) {
+      expect(
+        reports,
+        `${cadence} cadence is still present as a report-scheduling value`,
+      ).not.toMatch(
+        new RegExp(
+          `(?:['"]${cadence}['"]|value\\s*=\\s*['"]${cadence}['"])`,
+          'i',
+        ),
+      );
     }
   });
 
-  it('never creates a schedule from the report form', () => {
-    expect(reports).not.toMatch(/createScheduledReport/);
+  it('does not offer generic schedule/save controls under alternate names', () => {
+    const schedulingTerms = [
+      /\bcreateScheduledReport\b/,
+      /\bupdateScheduledReport\b/,
+      /\bscheduleReport\b/,
+      /\bsaveSchedule\b/,
+      /\bcreateReportSchedule\b/,
+    ];
+
+    for (const term of schedulingTerms) {
+      expect(reports, `unsupported scheduling API/control found: ${term}`).not.toMatch(
+        term,
+      );
+    }
   });
 
-  it('has no client method for creating or updating a schedule at all', () => {
-    // Not just unused from this page -- removed. A client method for an
-    // endpoint the server refuses is a call that can only ever fail, and
-    // leaving it invites the next feature to reach for it.
-    const client = code(source('/api.ts'));
-    expect(client).not.toMatch(/createScheduledReport/);
-    expect(client).not.toMatch(/updateScheduledReport/);
+  it('does not create or update scheduled reports from the client API', () => {
+    for (const method of [
+      'createScheduledReport',
+      'updateScheduledReport',
+      'scheduleReport',
+      'saveSchedule',
+      'createReportSchedule',
+    ]) {
+      expect(
+        client,
+        `${method} should not exist in the browser API`,
+      ).not.toMatch(new RegExp(`\\b${method}\\s*\\(`));
+    }
   });
 
-  it('keeps the read and delete methods, so an old schedule can be removed', () => {
-    const client = code(source('/api.ts'));
-    expect(client).toMatch(/getScheduledReports/);
-    expect(client).toMatch(/deleteScheduledReport/);
+  it('retains read/delete support for legacy scheduled reports', () => {
+    expect(client).toMatch(/\bgetScheduledReports\s*\(/);
+    expect(client).toMatch(/\bdeleteScheduledReport\s*\(/);
   });
 
-  it('sends scope and period with the request, not just a name (§15.1)', () => {
-    // "The current name/category/format-only request is insufficient."
-    expect(reports).toMatch(/dateFrom/);
-    expect(reports).toMatch(/dateTo/);
-    expect(reports).toMatch(/scope: \{ dateFrom/);
+  it('does not expose a scheduled-report UI action that invokes a delete/create mismatch', () => {
+    /**
+     * Legacy deletion is intentionally supported, but a "new schedule" path
+     * must not remain hidden behind a generic submit handler.
+     */
+    expect(compactReports).not.toMatch(
+      /(?:onSubmit|handleSubmit)[^]{0,1200}\b(?:createScheduledReport|saveSchedule|scheduleReport)\b/,
+    );
   });
 
-  it('previews before generating, so a refusal arrives before the click', () => {
-    // Without this, a cost report over an unconfigured billing source is a
-    // button press followed by a 409, and the reason lands after the
-    // decision rather than before it.
-    expect(reports).toMatch(/previewReport|loadPreview/);
-    expect(reports).toMatch(/canGenerate/);
-    expect(reports).toMatch(/blockedReason/);
+  it('passes an explicit report period and scope to generation/preview', () => {
+    expect(reports).toMatch(/\bdateFrom\b/);
+    expect(reports).toMatch(/\bdateTo\b/);
+    expect(reports).toMatch(/\bscope\b/);
+
+    expect(
+      compactReports,
+      'report generation should send date range and scope together',
+    ).toMatch(
+      /scope\s*:\s*\{[^}]*dateFrom[^}]*dateTo[^}]*\}|\bdateFrom\b[^]{0,500}\bdateTo\b[^]{0,500}\bscope\b/i,
+    );
   });
 
-  it('disables the submit button when the server says it cannot generate', () => {
-    expect(reports).toMatch(/preview\?\.canGenerate === false/);
+  it('has a preview/capability check before generation', () => {
+    expect(
+      reports,
+      'Reports.tsx should load or call a report preview/capability function',
+    ).toMatch(/\b(?:previewReport|loadPreview)\s*\(/);
+
+    expect(reports).toMatch(/\bcanGenerate\b/);
+    expect(reports).toMatch(/\bblockedReason\b/);
   });
 
-  it('still lets an org delete a schedule saved before this release', () => {
-    // Removing the tab must not trap an org with a row it can neither run
-    // nor delete. Renders only when such rows exist.
-    expect(reports).toMatch(/scheduled\.length > 0/);
-    expect(reports).toMatch(/scheduledColumns/);
+  it('disables generation when the server says the report cannot be generated', () => {
+    expect(compactReports).toMatch(
+      /\bpreview\??\.\s*canGenerate\s*===\s*false\b/,
+    );
+  });
+
+  it('does not treat a missing preview as permission to generate', () => {
+    /**
+     * A failed/not-yet-loaded preview must not become an accidental fail-open
+     * path where the submit button remains enabled.
+     */
+    expect(compactReports).not.toMatch(
+      /(?:!preview|preview\s*==\s*null|null\s*===\s*preview)[^;]{0,300}(?:canGenerate|Generate|generate)/i,
+    );
+  });
+
+  it('keeps legacy scheduled rows visible when they still exist', () => {
+    expect(compactReports).toMatch(
+      /\bscheduled\.length\s*>\s*0\b/,
+    );
+    expect(reports).toMatch(/\bscheduledColumns\b/);
+  });
+
+  it('does not render a "new schedule" affordance alongside legacy deletion', () => {
+    expect(compactReports).not.toMatch(
+      /\bscheduled\.length\s*>\s*0[^]{0,1000}(?:New Schedule|Schedule Report|Create Schedule)/i,
+    );
+  });
+
+  it('keeps the Reports module itself present and owned by the central navigation config', () => {
+    const reportsModule = NAV_MODULES.find(
+      (module) => module.label === 'Reports',
+    );
+
+    expect(reportsModule).toBeTruthy();
+    expect(reportsModule!.to).toBe('/reports');
   });
 });

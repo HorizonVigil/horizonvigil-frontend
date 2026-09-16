@@ -15,12 +15,39 @@
  */
 import type { ContextSignals, WidgetMeta } from './types';
 
-/** Boost helper: returns an elevation only when `active`, else null. */
-function boostWhen(active: boolean, priority: number, reason: string) {
-  return active ? { priority, reason } : null;
+const MAX_CONTEXT_BOOST = 10_000;
+
+/**
+ * Returns an elevation only when active.
+ *
+ * Defensive normalization prevents an accidental non-finite or negative
+ * priority from destabilising widget ordering. An empty reason or invalid
+ * priority produces no boost.
+ */
+function boostWhen(
+  active: boolean,
+  priority: number,
+  reason: string,
+): { priority: number; reason: string } | null {
+  if (!active) return null;
+
+  const normalizedPriority = Number.isFinite(priority)
+    ? Math.max(0, Math.min(priority, MAX_CONTEXT_BOOST))
+    : 0;
+
+  const normalizedReason = reason.trim();
+
+  if (normalizedPriority <= 0 || normalizedReason.length === 0) {
+    return null;
+  }
+
+  return {
+    priority: normalizedPriority,
+    reason: normalizedReason,
+  };
 }
 
-export const REGISTRY_META: WidgetMeta[] = [
+export const REGISTRY_META: readonly WidgetMeta[] = [
   // ══ KPIs ═══════════════════════════════════════════════════════════════
   // kind:'kpi' — the engine shows the top ~8 eligible ones in the KPI strip,
   // the rest are addable from the drawer. defaultSize is ignored for KPIs
@@ -461,3 +488,35 @@ export const REGISTRY_META: WidgetMeta[] = [
     defaultSize: { w: 1, h: 5 }, basePriority: 246, integrated: false, defaultEnabled: false,
   },
 ];
+
+/**
+ * Stable metadata lookup for consumers that need one widget by id.
+ *
+ * Building the index once avoids repeated O(n) scans and also gives us one
+ * central place to enforce the registry's unique-id invariant.
+ */
+export const REGISTRY_META_BY_ID: ReadonlyMap<string, WidgetMeta> = (() => {
+  const byId = new Map<string, WidgetMeta>();
+
+  for (const meta of REGISTRY_META) {
+    if (!meta.id || meta.id.trim().length === 0) {
+      throw new Error('REGISTRY_META contains a widget with an empty id');
+    }
+
+    if (byId.has(meta.id)) {
+      throw new Error(`REGISTRY_META contains duplicate widget id "${meta.id}"`);
+    }
+
+    byId.set(meta.id, meta);
+  }
+
+  return byId;
+})();
+
+/**
+ * Return metadata for a widget id without exposing the catalogue array.
+ */
+export function getWidgetMeta(id: string): WidgetMeta | undefined {
+  if (typeof id !== 'string') return undefined;
+  return REGISTRY_META_BY_ID.get(id);
+}

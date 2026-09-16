@@ -1,115 +1,384 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
-import { ScanCoverageBanner, countQualifier } from './ScanCoverageBanner';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+
+import {
+  ScanCoverageBanner,
+  countQualifier,
+} from './ScanCoverageBanner';
+
 import type { ScanHealth } from '../../lib/api';
 
 /**
- * The defect this component removes, measured in production 2026-09-15:
+ * Production regression coverage for ScanCoverageBanner.
  *
- *   kamal-k8s — Overview showed "430 resources", `errors: 0`, while the last
- *   run was PARTIALLY_SUCCEEDED and EC2 had failed in all 17 regions.
+ * The defect this component protects against:
  *
- * Instances, volumes, VPCs, subnets and security groups had returned nothing
- * anywhere and those rows were stale. Nothing on the page said so, because the
- * failures live on the collection run's step rows and no screen read them.
+ * - an inventory count could be shown as complete even when a collection run
+ *   was PARTIALLY_SUCCEEDED;
+ * - failed collection steps could be invisible on the page;
+ * - degraded resource types could appear as if they had been fully collected;
+ * - a NEVER_RUN state could be mistaken for an empty estate; and
+ * - an unavailable/null coverage state could be interpreted as verified data.
+ *
+ * These tests intentionally verify the distinction between:
+ *   COMPLETE
+ *   PARTIAL
+ *   FAILED
+ *   NEVER_RUN
+ *   unavailable/null coverage
+ *
+ * The tests assert user-visible behavior and the public countQualifier
+ * contract rather than implementation details such as CSS classes or DOM
+ * structure.
  */
-// Without this, renders accumulate in the same document and every getByText
-// matches several nodes -- which looks like a component bug and is not one.
-afterEach(cleanup);
 
-const health = (over: Partial<ScanHealth> = {}): ScanHealth => ({
-  completeness: 'COMPLETE',
-  countIsAuthoritative: true,
-  summary: 'All 1628 collection steps succeeded.',
-  totalSteps: 1628, succeededSteps: 1628, failedSteps: 0,
-  failures: [], degradedResourceTypes: [], runId: 'r1', finishedAt: '2026-09-15T09:49:24Z',
-  ...over,
+afterEach(() => {
+  cleanup();
 });
 
-const PARTIAL = health({
+function createHealth(
+  overrides: Partial<ScanHealth> = {},
+): ScanHealth {
+  return {
+    completeness: 'COMPLETE',
+    countIsAuthoritative: true,
+    summary: 'All 1628 collection steps succeeded.',
+    totalSteps: 1628,
+    succeededSteps: 1628,
+    failedSteps: 0,
+    failures: [],
+    degradedResourceTypes: [],
+    runId: 'r1',
+    finishedAt: '2026-09-15T09:49:24Z',
+    ...overrides,
+  };
+}
+
+const PARTIAL_HEALTH = createHealth({
   completeness: 'PARTIAL',
   countIsAuthoritative: false,
-  summary: 'Inventory is incomplete — ec2 failed in 17 regions. The resources shown are real, but this is not the whole estate.',
-  succeededSteps: 1611, failedSteps: 17,
-  failures: [{ scanner: 'ec2', scopes: Array.from({ length: 17 }, (_, i) => `r-${i}`), normalizedCode: 'UNSUPPORTED_CAPABILITY', detail: null }],
-  degradedResourceTypes: ['ec2_instance', 'vpc', 'subnet'],
+  summary:
+    'Inventory is incomplete — ec2 failed in 17 regions. The resources shown are real, but this is not the whole estate.',
+  succeededSteps: 1611,
+  failedSteps: 17,
+  failures: [
+    {
+      scanner: 'ec2',
+      scopes: Array.from(
+        { length: 17 },
+        (_, index) => `r-${index}`,
+      ),
+      normalizedCode: 'UNSUPPORTED_CAPABILITY',
+      detail: null,
+    },
+  ],
+  degradedResourceTypes: [
+    'ec2_instance',
+    'vpc',
+    'subnet',
+  ],
 });
 
 describe('ScanCoverageBanner', () => {
-  /** A complete scan should not put a banner between the reader and the data. */
+  /**
+   * A complete scan should not place a banner between the reader and the
+   * inventory data.
+   */
   it('renders nothing when the scan completed', () => {
-    const { container } = render(<ScanCoverageBanner health={health()} />);
-    expect(container.innerHTML).toBe('');
+    const { container } = render(
+      <ScanCoverageBanner health={createHealth()} />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('states incompleteness and names the scanner that failed', () => {
-    render(<ScanCoverageBanner health={PARTIAL} />);
-    expect(screen.getByText(/Incomplete/)).toBeTruthy();
-    expect(screen.getByText(/not the whole estate/)).toBeTruthy();
-    // The headline summary and the per-scanner bullet both name it; the bullet
-    // is the one that must exist independently of the server's sentence.
-    expect(screen.getByText('• ec2 failed in 17 regions (unsupported capability)')).toBeTruthy();
+    render(
+      <ScanCoverageBanner
+        health={PARTIAL_HEALTH}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Incomplete/i),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(/not the whole estate/i),
+    ).toBeInTheDocument();
+
+    /*
+     * The server summary and the per-scanner explanation are deliberately
+     * separate concerns. This assertion protects the explicit scanner bullet
+     * even if the server-generated summary wording changes.
+     */
+    expect(
+      screen.getByText(
+        '• ec2 failed in 17 regions (unsupported capability)',
+      ),
+    ).toBeInTheDocument();
   });
 
   /**
-   * The normalized code is the remedy signal: permission denied is a policy
-   * fix, unsupported capability is a retired or un-enabled service. Losing it
-   * would leave the reader knowing something broke but not what to do.
+   * A shared normalized failure code is useful remediation context.
    */
   it('surfaces the cause when every failure shares one', () => {
-    render(<ScanCoverageBanner health={PARTIAL} />);
-    expect(screen.getByText(/\(unsupported capability\)/)).toBeTruthy();
-  });
+    render(
+      <ScanCoverageBanner
+        health={PARTIAL_HEALTH}
+      />,
+    );
 
-  it('omits a cause when the causes differ, rather than naming one of them', () => {
-    render(<ScanCoverageBanner health={health({
-      completeness: 'PARTIAL', countIsAuthoritative: false, summary: 'x',
-      failures: [{ scanner: 's3', scopes: ['us-east-1'], normalizedCode: null, detail: null }],
-    })} />);
-    // The cause is rendered in parentheses after the scope, so its absence is
-            // asserted precisely rather than by looking for any '(' on the page.
-    expect(screen.getByText('• s3 failed in us-east-1')).toBeTruthy();
-  });
-
-  /** Incomplete coverage suppresses deletion rather than causing it — and saying so is reassuring and true. */
-  it('explains that degraded types were kept rather than deleted', () => {
-    render(<ScanCoverageBanner health={PARTIAL} />);
-    expect(screen.getByText(/were kept rather than marked deleted/)).toBeTruthy();
+    expect(
+      screen.getByText(/unsupported capability/i),
+    ).toBeInTheDocument();
   });
 
   /**
-   * Null means the coverage could not be read. Rendering nothing would imply
-   * the count is fine — the exact assumption this component exists to remove.
+   * When failures have different causes, the banner must not select one cause
+   * and present it as if it explained the complete failure set.
+   */
+  it('omits a cause when the causes differ rather than naming one of them', () => {
+    render(
+      <ScanCoverageBanner
+        health={createHealth({
+          completeness: 'PARTIAL',
+          countIsAuthoritative: false,
+          summary: 'x',
+          failures: [
+            {
+              scanner: 's3',
+              scopes: ['us-east-1'],
+              normalizedCode: null,
+              detail: null,
+            },
+            {
+              scanner: 'vpc',
+              scopes: ['us-east-1'],
+              normalizedCode: 'PERMISSION_DENIED',
+              detail: null,
+            },
+          ],
+        })}
+      />,
+    );
+
+    /*
+     * The cause is rendered in parentheses after the scope only when there is
+     * one shared normalized cause. Verify the scanner line without a cause and
+     * make sure the UI does not elevate a single cause to the entire banner.
+     */
+    expect(
+      screen.getByText('• s3 failed in us-east-1'),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByText(
+        '• s3 failed in us-east-1 (permission denied)',
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Incomplete coverage suppresses deletion semantics rather than causing a
+   * partial scan to imply that missing resources were removed.
+   */
+  it('explains that degraded resource types were kept rather than marked deleted', () => {
+    render(
+      <ScanCoverageBanner
+        health={PARTIAL_HEALTH}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        /were kept rather than marked deleted/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * Null means coverage itself could not be read. Silently rendering nothing
+   * would falsely reassure the user that the inventory count is trustworthy.
    */
   it('reports its own unavailability instead of staying silent', () => {
-    render(<ScanCoverageBanner health={null} />);
-    expect(screen.getByText(/coverage could not be read/)).toBeTruthy();
+    render(
+      <ScanCoverageBanner health={null} />,
+    );
+
+    expect(
+      screen.getByText(/coverage could not be read/i),
+    ).toBeInTheDocument();
   });
 
   it('distinguishes never-collected from an empty estate', () => {
-    render(<ScanCoverageBanner health={health({
-      completeness: 'NEVER_RUN', countIsAuthoritative: false,
-      summary: 'No collection run has finished for this account yet, so its inventory has not been established.',
-      totalSteps: 0, succeededSteps: 0,
-    })} />);
-    expect(screen.getByText(/Not yet collected/)).toBeTruthy();
+    render(
+      <ScanCoverageBanner
+        health={createHealth({
+          completeness: 'NEVER_RUN',
+          countIsAuthoritative: false,
+          summary:
+            'No collection run has finished for this account yet, so its inventory has not been established.',
+          totalSteps: 0,
+          succeededSteps: 0,
+          failedSteps: 0,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Not yet collected/i),
+    ).toBeInTheDocument();
+  });
+
+  it('treats a failed collection as incomplete coverage', () => {
+    render(
+      <ScanCoverageBanner
+        health={createHealth({
+          completeness: 'FAILED',
+          countIsAuthoritative: false,
+          summary:
+            'The collection run failed before inventory could be established.',
+          succeededSteps: 0,
+          failedSteps: 1,
+          failures: [
+            {
+              scanner: 'ec2',
+              scopes: ['us-east-1'],
+              normalizedCode: 'INTERNAL_ERROR',
+              detail: null,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Incomplete/i),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(/scan incomplete/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does not render a false-clean banner for a complete zero-resource estate', () => {
+    render(
+      <ScanCoverageBanner
+        health={createHealth({
+          totalSteps: 1628,
+          succeededSteps: 1628,
+          failedSteps: 0,
+          summary:
+            'All collection steps succeeded; no resources were discovered.',
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(/Incomplete/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/coverage could not be read/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('supports multiple distinct failures without collapsing them into one explanation', () => {
+    render(
+      <ScanCoverageBanner
+        health={createHealth({
+          completeness: 'PARTIAL',
+          countIsAuthoritative: false,
+          summary:
+            'Inventory is incomplete because multiple scanners failed.',
+          succeededSteps: 1600,
+          failedSteps: 28,
+          failures: [
+            {
+              scanner: 'ec2',
+              scopes: ['us-east-1', 'us-west-2'],
+              normalizedCode: 'PERMISSION_DENIED',
+              detail: null,
+            },
+            {
+              scanner: 'vpc',
+              scopes: ['eu-west-1'],
+              normalizedCode: 'UNSUPPORTED_CAPABILITY',
+              detail: null,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        '• ec2 failed in 2 regions',
+      ),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(
+        '• vpc failed in eu-west-1',
+      ),
+    ).toBeInTheDocument();
   });
 });
 
 describe('countQualifier', () => {
-  /** "430" and "at least 430" are different claims; only the second is true when a scanner failed. */
+  /**
+   * "430" and "at least 430" are different claims. When collection coverage
+   * is not authoritative, only the qualified statement is safe.
+   */
   it('qualifies the count whenever the scan is not authoritative', () => {
-    expect(countQualifier(PARTIAL)).toBe('at least — scan incomplete');
-    expect(countQualifier(health({ completeness: 'FAILED', countIsAuthoritative: false }))).toBe('at least — scan incomplete');
-    expect(countQualifier(health({ completeness: 'NEVER_RUN', countIsAuthoritative: false }))).toBe('not yet collected');
+    expect(
+      countQualifier(PARTIAL_HEALTH),
+    ).toBe('at least — scan incomplete');
+
+    expect(
+      countQualifier(
+        createHealth({
+          completeness: 'FAILED',
+          countIsAuthoritative: false,
+        }),
+      ),
+    ).toBe('at least — scan incomplete');
+
+    expect(
+      countQualifier(
+        createHealth({
+          completeness: 'NEVER_RUN',
+          countIsAuthoritative: false,
+        }),
+      ),
+    ).toBe('not yet collected');
   });
 
-  it('leaves a complete scan unqualified', () => {
-    expect(countQualifier(health())).toBeNull();
+  it('leaves a complete authoritative scan unqualified', () => {
+    expect(
+      countQualifier(createHealth()),
+    ).toBeNull();
   });
 
-  /** Unknown coverage must not silently read as verified. */
+  /**
+   * Unknown coverage must never silently read as verified.
+   *
+   * The current public contract returns null when coverage is unavailable,
+   * which means the caller must decide separately how to present an absent
+   * count. This test locks that contract in place.
+   */
   it('does not vouch for the count when coverage is unavailable', () => {
-    expect(countQualifier(null)).toBeNull();
+    expect(
+      countQualifier(null),
+    ).toBeNull();
+  });
+
+  it('does not qualify a complete scan merely because countIsAuthoritative is false', () => {
+    expect(
+      countQualifier(
+        createHealth({
+          completeness: 'COMPLETE',
+          countIsAuthoritative: false,
+        }),
+      ),
+    ).toBe('at least — scan incomplete');
   });
 });

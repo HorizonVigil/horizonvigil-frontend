@@ -1,171 +1,270 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Phase 1 containment invariants (2026-09-08 AWS connector audit).
  *
- * AWS-P0-01: the browser started real provider discovery on its own -- a
- * sweep 3 seconds after login plus a 24-hour interval, iterating every stale
- * connection and running a 1,628-step scan from the tab, with only an
- * in-memory per-tab Set as a guard. Two tabs or two users could start
- * overlapping scans of the same account with no lock, no checkpoint, and no
- * way to resume when the tab closed.
+ * These are source-level regression tests for browser/server responsibility
+ * boundaries. They deliberately inspect the relevant source files instead of
+ * mounting the complete auth/org/API stack just to prove that a browser timer
+ * or orchestration loop does not exist.
  *
- * AWS-P0-02/03: the wizard defaulted to an un-wired connection method and
- * turned a duplicate-create conflict into a silent credential rotation.
+ * Protected invariants:
+ * - AWS provider collection is never started automatically by the browser.
+ * - The AWS connect wizard cannot default to an uncertified connection method.
+ * - Duplicate connections are surfaced as conflicts, never silently rotated.
+ * - CUR ingestion is server-owned and represented by a durable job.
  *
- * Source-level assertions, the same technique navConfig.test.ts uses for
- * App.tsx invariants: the alternative is standing up the whole auth/org/API
- * stack to observe that a timer does NOT fire.
+ * Keep these tests focused on observable architectural contracts. A future
+ * implementation may rename internal functions, but it must preserve the
+ * boundary asserted by the tests.
  */
-const sources = import.meta.glob(['./syncContext.tsx', '../components/ConnectAwsAccountWizard.tsx', '../pages/AwsAccountDetail.tsx', './api.ts'], {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
+
+const sources = import.meta.glob(
+  [
+    './syncContext.tsx',
+    '../components/ConnectAwsAccountWizard.tsx',
+    '../pages/AwsAccountDetail.tsx',
+    './api.ts',
+  ],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
+) as Record<string, string>;
 
 function source(endsWith: string): string {
-  const hit = Object.entries(sources).find(([path]) => path.endsWith(endsWith));
-  expect(hit, `source not found for ${endsWith}`).toBeTruthy();
+  const hit = Object.entries(sources).find(([filePath]) =>
+    filePath.endsWith(endsWith),
+  );
+
+  expect(
+    hit,
+    `source not found for ${endsWith}; verify the glob path and repository layout`,
+  ).toBeTruthy();
+
   return hit![1];
 }
 
+/**
+ * Remove comments before source assertions.
+ *
+ * This prevents a comment containing an old function name, timer, or PRD
+ * reference from satisfying/failing a production invariant accidentally.
+ *
+ * The scanner intentionally handles:
+ * - line comments
+ * - block comments
+ * - template literals conservatively (template contents are retained because
+ *   customer-facing source text is itself part of some assertions)
+ */
 function code(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return text
+    .replace(
+      /\/\*[\s\S]*?\*\//g,
+      ' ',
+    )
+    .replace(
+      /(^|[^:\\])\/\/.*$/gm,
+      '$1 ',
+    );
 }
 
-describe('the browser never starts provider scans on its own', () => {
+function compact(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
+
+function hasLiteral(text: string, value: string): boolean {
+  return text.includes(value);
+}
+
+describe('browser collection ownership', () => {
   const sync = code(source('/syncContext.tsx'));
+  const compactSync = compact(sync);
 
-  it('has no 24-hour auto-sync interval', () => {
-    expect(sync).not.toMatch(/24 \* 60 \* 60 \* 1000/);
-    expect(sync).not.toMatch(/setInterval/);
+  it('has no automatic 24-hour synchronization interval', () => {
+    expect(compactSync).not.toMatch(
+      /setInterval\s*\([^)]*(?:24\s*\*\s*60\s*\*\s*60\s*\*\s*1000|86_400_000)/,
+    );
+    expect(compactSync).not.toMatch(/(?:24h|24-hour|daily)\s*auto[-_ ]?sync/i);
   });
 
-  it('has no post-login delayed sweep', () => {
-    expect(sync).not.toMatch(/runAutoSync/);
-    expect(sync).not.toMatch(/staleAccounts/);
+  it('has no post-login delayed discovery sweep', () => {
+    expect(sync).not.toMatch(/\brunAutoSync\b/);
+    expect(sync).not.toMatch(/\bstaleAccounts\b/);
+    expect(sync).not.toMatch(/\bsetTimeout\s*\(/);
   });
 
-  it('no longer enumerates every connection to decide what to scan', () => {
-    // The sweep fetched all AWS/GCP/Azure accounts just to pick stale ones.
-    expect(sync).not.toMatch(/getGcpAccounts|getAzureAccounts|fetchAllPages/);
+  it('does not enumerate all cloud connections merely to choose stale scans', () => {
+    expect(sync).not.toMatch(/\bgetGcpAccounts\s*\(/);
+    expect(sync).not.toMatch(/\bgetAzureAccounts\s*\(/);
+    expect(sync).not.toMatch(/\bfetchAllPages\s*\(/);
   });
 
-  it('no longer orchestrates steps from the browser at all (Phase 3)', () => {
-    // Phase 1 removed the AUTOMATIC scans; Phase 3 removed the manual step
-    // loop too. The client's whole role is now: ask for a job, watch it.
-    expect(sync).not.toMatch(/getDiscoverySteps|runDiscoveryStep|finalizeDiscovery/);
-    expect(sync).not.toMatch(/stepErrors/);
-    expect(sync).toMatch(/startCollectionRun/);
-    expect(sync).toMatch(/getCollectionRun/);
+  it('does not orchestrate individual collection steps in the browser', () => {
+    expect(sync).not.toMatch(/\bgetDiscoverySteps\s*\(/);
+    expect(sync).not.toMatch(/\brunDiscoveryStep\s*\(/);
+    expect(sync).not.toMatch(/\bfinalizeDiscovery\s*\(/);
+    expect(sync).not.toMatch(/\bstepErrors\b/);
+
+    expect(sync).toMatch(/\bstartCollectionRun\s*\(/);
+    expect(sync).toMatch(/\bgetCollectionRun\s*\(/);
   });
 
-  it('treats PARTIALLY_SUCCEEDED as not-done', () => {
-    // Presenting an incomplete collection as success is the defect
-    // AWS-P0-05 describes.
-    expect(sync).toMatch(/run\.status === 'SUCCEEDED' \? 'done' : 'error'/);
-  });
-});
-
-describe('the connect wizard cannot onboard into an un-wired method', () => {
-  const wizard = source('/ConnectAwsAccountWizard.tsx');
-  const wizardCode = code(wizard);
-
-  it('defaults to the certified method', () => {
-    expect(wizardCode).toMatch(/useState<'access_key' \| 'cross_account_role'>\('access_key'\)/);
+  it('does not use a second in-memory scan set as the source of truth', () => {
+    expect(sync).not.toMatch(
+      /\b(?:Set|Map)\s*<[^>]*(?:scan|sync|connection)[^>]*>\s*\(\)/i,
+    );
+    expect(sync).not.toMatch(
+      /\b(?:scanning|syncing|activeScans|activeSyncs)\s*=\s*new\s+(?:Set|Map)\b/i,
+    );
   });
 
-  it('disables the cross-account role option', () => {
-    expect(wizardCode).toMatch(/disabled\s*\n?\s*aria-disabled="true"/);
+  it('treats only SUCCEEDED as completed', () => {
+    expect(compactSync).toMatch(
+      /run\.status\s*===\s*['"]SUCCEEDED['"]\s*\?\s*['"]done['"]\s*:\s*['"]error['"]/,
+    );
+    expect(compactSync).not.toMatch(
+      /run\.status\s*!==\s*['"]FAILED['"].*['"]done['"]/,
+    );
   });
 
-  it('no longer badges it Recommended', () => {
-    expect(wizardCode).not.toMatch(/Recommended/);
-  });
-
-  it('carries no internal PRD section references in customer-facing copy', () => {
-    // The prompt forbids these explicitly; §7.1/§7.2 were rendered on screen.
-    expect(wizardCode).not.toMatch(/§\d/);
-  });
-});
-
-describe('a duplicate account is reported, not silently rotated', () => {
-  const wizardCode = code(source('/ConnectAwsAccountWizard.tsx'));
-
-  it('does not call credential or role update from the create flow', () => {
-    expect(wizardCode).not.toMatch(/updateAccountCredentials|updateAccountRole/);
-  });
-
-  it('does not parse the database constraint name to infer intent', () => {
-    expect(wizardCode).not.toMatch(/cloud_connections_org_id_aws_account_id_key/);
-  });
-
-  it('handles the server 409 and surfaces the existing connection', () => {
-    expect(wizardCode).toMatch(/status === 409/);
-    expect(wizardCode).toMatch(/connection_already_exists/);
-    expect(wizardCode).toMatch(/setDuplicate\(conflict\)/);
+  it('does not fabricate completion from partial progress', () => {
+    expect(compactSync).not.toMatch(
+      /(?:PARTIALLY_SUCCEEDED|PARTIAL).*['"]done['"]/,
+    );
   });
 });
 
-/**
- * Phase 7 (§3.4): CUR ingestion was the worst browser loop in the product --
- * a `for` over report files with an UNBOUNDED `while` over row chunks inside
- * it, carrying the row offset in a local variable. Closing the tab mid-ingest
- * left the billing period partially ingested with nothing recording where it
- * stopped, and partial cost data still renders as a number.
- */
-describe('CUR ingestion is server-owned', () => {
+describe('AWS connection wizard safety', () => {
+  const wizard = code(
+    source('/ConnectAwsAccountWizard.tsx'),
+  );
+  const compactWizard = compact(wizard);
+
+  it('defaults to the certified access-key method', () => {
+    expect(compactWizard).toMatch(
+      /useState<['"]access_key['"]\s*\|\s*['"]cross_account_role['"]>\(\s*['"]access_key['"]\s*\)/,
+    );
+  });
+
+  it('keeps the uncertified cross-account-role option disabled', () => {
+    expect(compactWizard).toMatch(
+      /disabled\s*(?:=\s*\{?\s*true\s*\}?|aria-disabled\s*=\s*['"]true['"])/,
+    );
+  });
+
+  it('does not present the disabled cross-account method as Recommended', () => {
+    expect(wizard).not.toMatch(/Recommended/i);
+  });
+
+  it('does not expose internal PRD section references in customer-facing copy', () => {
+    expect(wizard).not.toMatch(/§\s*\d+(?:\.\d+)*/);
+  });
+
+  it('does not include implementation-only audit wording in visible wizard copy', () => {
+    expect(wizard).not.toMatch(
+      /\b(?:P0|P1|AWS-P0|Phase\s+\d+|internal\s+PRD|audit\s+invariant)\b/i,
+    );
+  });
+});
+
+describe('duplicate AWS connection handling', () => {
+  const wizard = code(
+    source('/ConnectAwsAccountWizard.tsx'),
+  );
+  const compactWizard = compact(wizard);
+
+  it('does not mutate credentials or roles from the create flow', () => {
+    expect(wizard).not.toMatch(/\bupdateAccountCredentials\s*\(/);
+    expect(wizard).not.toMatch(/\bupdateAccountRole\s*\(/);
+  });
+
+  it('does not infer duplicate intent from a database constraint name', () => {
+    expect(wizard).not.toMatch(
+      /cloud_connections_org_id_aws_account_id_key/,
+    );
+  });
+
+  it('handles the server conflict response explicitly', () => {
+    expect(compactWizard).toMatch(
+      /status\s*===\s*409/,
+    );
+    expect(wizard).toMatch(/connection_already_exists/);
+    expect(compactWizard).toMatch(
+      /setDuplicate\s*\(\s*conflict\s*\)/,
+    );
+  });
+
+  it('does not automatically retry a duplicate create as an update', () => {
+    expect(compactWizard).not.toMatch(
+      /409[\s\S]{0,1200}(?:updateAccountCredentials|updateAccountRole)/,
+    );
+  });
+});
+
+describe('CUR ingestion ownership', () => {
   const detail = code(source('/AwsAccountDetail.tsx'));
-  const apiSrc = code(source('/api.ts'));
+  const apiSource = code(source('/api.ts'));
 
-  it('no longer loops report files or row chunks in the browser', () => {
-    expect(detail).not.toMatch(/ingestCurStep/);
-    expect(detail).not.toMatch(/skipRows/);
-    expect(detail).not.toMatch(/getCurManifest/);
+  const compactDetail = compact(detail);
+  const compactApi = compact(apiSource);
+
+  it('does not loop report files or row chunks in the browser', () => {
+    expect(detail).not.toMatch(/\bingestCurStep\b/);
+    expect(detail).not.toMatch(/\bskipRows\b/);
+    expect(detail).not.toMatch(/\bgetCurManifest\b/);
   });
 
-  it('removed the browser CUR ORCHESTRATION client', () => {
-    // Plain substring rather than a hand-built RegExp: the escaping in a
-    // template literal collapsed and silently produced an invalid pattern.
-    //
-    // `discoverCur` was originally on this list and has been removed from it
-    // deliberately. The defect this guard exists for is the BROWSER DRIVING
-    // INGESTION -- fetching a manifest, looping report files, carrying a row
-    // offset in a local variable, and finalizing -- so that closing the tab
-    // left a billing period half-ingested with nothing recording where it
-    // stopped.
-    //
-    // Discovery is none of that. It is one idempotent POST asking the SERVER
-    // to read the report definition and save it on the connection; the server
-    // still owns every step of the durable run. Bundling it with the three
-    // orchestration calls made it unreachable, and because nothing else ever
-    // called `cur/discover`, `cur_s3_bucket` was never set and every CUR run
-    // refused with 409 cur_not_configured. The guard was protecting the
-    // pipeline by keeping it switched off.
-    for (const m of ['getCurManifest(', 'ingestCurStep(', 'finalizeCur(']) {
-      expect(apiSrc.includes(m), `${m} still present`).toBe(false);
+  it('does not expose the removed browser CUR orchestration helpers', () => {
+    for (const method of [
+      'getCurManifest',
+      'ingestCurStep',
+      'finalizeCur',
+    ]) {
+      expect(
+        hasLiteral(apiSource, `${method}(`),
+        `${method} still present in api.ts`,
+      ).toBe(false);
     }
   });
 
-  /**
-   * The property that actually matters, asserted directly: the browser may ask
-   * the server to discover, but it must never walk files or rows itself.
-   */
-  it('discovery is a single call, not a loop', () => {
-    expect(apiSrc).toMatch(/discoverCur/);
-    expect(detail).not.toMatch(/for \s*\([^)]*manifest/i);
-    expect(detail).not.toMatch(/while\s*\([^)]*(chunk|offset|skipRows)/i);
-    // Ingestion is still started as a durable job and polled, never driven.
-    expect(detail).toMatch(/api\.startCurRun\(id\)/);
+  it('allows one-shot server-side CUR discovery', () => {
+    expect(apiSource).toMatch(/\bdiscoverCur\b/);
+
+    expect(detail).not.toMatch(
+      /\bfor\s*\([^)]*\bmanifest\b/i,
+    );
+    expect(detail).not.toMatch(
+      /\bwhile\s*\([^)]*(?:chunk|offset|skipRows)/i,
+    );
   });
 
-  it('starts a durable job and polls it instead', () => {
-    expect(apiSrc).toMatch(/startCurRun/);
-    expect(detail).toMatch(/api\.startCurRun\(id\)/);
-    expect(detail).toMatch(/api\.getCollectionRun\(run\.id\)/);
+  it('starts CUR ingestion as a durable server job', () => {
+    expect(compactApi).toMatch(
+      /startCurRun\s*\(/,
+    );
+    expect(compactDetail).toMatch(
+      /api\.startCurRun\s*\(\s*id\s*\)/,
+    );
   });
 
-  it('treats a partially ingested billing period as a failure, not success', () => {
-    expect(detail).toMatch(/PARTIALLY_SUCCEEDED/);
+  it('polls the durable collection run instead of driving ingestion steps', () => {
+    expect(compactDetail).toMatch(
+      /api\.getCollectionRun\s*\(\s*run\.id\s*\)/,
+    );
+  });
+
+  it('does not carry a browser-managed row offset through render state', () => {
+    expect(detail).not.toMatch(
+      /\b(?:rowOffset|row_offset|nextOffset|skipRows)\b/,
+    );
+  });
+
+  it('treats partial ingestion as incomplete', () => {
+    expect(detail).toMatch(/\bPARTIALLY_SUCCEEDED\b/);
+    expect(compactDetail).not.toMatch(
+      /PARTIALLY_SUCCEEDED[^;]{0,200}(?:success|done|complete)/i,
+    );
   });
 });

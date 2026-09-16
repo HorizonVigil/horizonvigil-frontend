@@ -1,38 +1,40 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
-import { api, ApiError, type CloudAccountService } from './api';
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  type ReactNode,
+} from 'react';
 
-/**
- * A raw `fetch()` failure (a dropped connection, a Cloud Run cold-start
- * timeout, a momentary network blip) throws a plain TypeError — "Failed to
- * fetch" in Chrome — not an ApiError, and previously that one failure
- * aborted an entire multi-step discovery scan immediately, surfacing as a
- * scary persistent error banner even when the account itself is healthy
- * (confirmed live: a real account showed this banner with
- * cloud_connections.error_message still null, meaning the *previous* real
- * scan had succeeded fine — this was a transient hiccup on a later,
- * automatic 24h-sweep retry, not an actual account problem). Retries only
- * transient network failures with backoff, per the Cross-Phase Standards'
- * own "exponential backoff with jitter and bounded retries" rule — a real
- * ApiError (403, 500, ...) is a server-confirmed failure and retrying it
- * blindly wouldn't help, so those still fail immediately as before.
- */
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 800): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (err instanceof ApiError) throw err;
-      if (i === attempts - 1) break;
-      await new Promise(r => setTimeout(r, baseDelayMs * 2 ** i + Math.random() * 250));
-    }
-  }
-  throw lastErr;
-}
+import {
+  api,
+  ApiError,
+  type CloudAccountService,
+} from './api';
+
+const DEFAULT_SERVICE: CloudAccountService = 'awsAccounts';
+
+const POLL_INTERVAL_MS = 5_000;
+const MAX_POLL_DURATION_MS = 30 * 60 * 1_000;
+
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 800;
+const RETRY_MAX_DELAY_MS = 8_000;
+const RETRY_JITTER_MS = 250;
+
+const TERMINAL_RUN_STATUSES = new Set([
+  'SUCCEEDED',
+  'PARTIALLY_SUCCEEDED',
+  'FAILED',
+  'CANCELED',
+]);
+
+type SyncStatus = 'running' | 'done' | 'error';
 
 export interface SyncState {
-  status: 'running' | 'done' | 'error';
+  status: SyncStatus;
   done: number;
   total: number;
   stepId: string;
@@ -42,160 +44,519 @@ export interface SyncState {
 
 interface SyncContextType {
   syncStates: Record<string, SyncState>;
-  startSync: (connectionId: string, service?: CloudAccountService) => void;
-  startDiscovery: (connectionId: string, service?: CloudAccountService) => void;
+  startSync: (
+    connectionId: string,
+    service?: CloudAccountService,
+  ) => void;
+  startDiscovery: (
+    connectionId: string,
+    service?: CloudAccountService,
+  ) => void;
 }
 
 const SyncContext = createContext<SyncContextType | null>(null);
 
-/**
- * Mounted once at the app root so a check/scan started from CloudAccounts.tsx
- * keeps running even if that component unmounts mid-request.
- *
- * `startSync` is the lightweight credentials check (`/test` — no live cloud
- * call). `startDiscovery` drives the real multi-step scan (steps -> run-step
- * ×N -> finalize), one request per step so each invocation fits Cloudflare's
- * free-tier CPU/subrequest budget. Both write into the same `syncStates[id]`
- * slot — they're mutually exclusive per connection, which `runningIds`
- * enforces. `service` defaults to 'awsAccounts' (every existing call site
- * predates GCP support and doesn't pass one) — aws-accounts-api and
- * gcp-accounts-api expose the identical steps/run-step/finalize contract, so
- * this loop is genuinely provider-agnostic, not duplicated per provider.
- */
-export function SyncProvider({ children }: { children: ReactNode }) {
-  const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
+function normalizeConnectionId(connectionId: string): string {
+  const value = connectionId.trim();
+
+  if (!value) {
+    throw new Error('A connection ID is required.');
+  }
+
+  if (value.length > 256) {
+    throw new Error('Invalid connection ID.');
+  }
+
+  return value;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    const message = (error as { message: string }).message.trim();
+
+    if (message) {
+      return message;
+    }
+  }
+
+  return fallback;
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return false;
+  }
+
+  if (error instanceof DOMException) {
+    return error.name !== 'AbortError';
+  }
+
+  /*
+   * Browser fetch/network failures normally arrive as TypeError.
+   * Do not retry arbitrary Error instances because those may represent
+   * programming/data-contract failures rather than transient networking.
+   */
+  return error instanceof TypeError;
+}
+
+function retryDelay(attempt: number): number {
+  const exponential = Math.min(
+    RETRY_MAX_DELAY_MS,
+    RETRY_BASE_DELAY_MS * 2 ** attempt,
+  );
+
+  return exponential + Math.random() * RETRY_JITTER_MS;
+}
+
+function sleep(
+  milliseconds: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      new DOMException('Operation aborted.', 'AbortError'),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, milliseconds);
+
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(
+        new DOMException('Operation aborted.', 'AbortError'),
+      );
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: {
+    attempts?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<T> {
+  const attempts = Math.max(
+    1,
+    Math.min(options.attempts ?? MAX_RETRY_ATTEMPTS, MAX_RETRY_ATTEMPTS),
+  );
+
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (options.signal?.aborted) {
+      throw new DOMException(
+        'Operation aborted.',
+        'AbortError',
+      );
+    }
+
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      if (
+        !isRetryableError(error) ||
+        attempt === attempts - 1
+      ) {
+        throw error;
+      }
+
+      await sleep(retryDelay(attempt), options.signal);
+    }
+  }
+
+  throw lastError ?? new Error('Operation failed.');
+}
+
+function isTerminalStatus(status: string): boolean {
+  return TERMINAL_RUN_STATUSES.has(status);
+}
+
+function isSuccessfulStatus(status: string): boolean {
+  return status === 'SUCCEEDED';
+}
+
+export function SyncProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [syncStates, setSyncStates] = useState<
+    Record<string, SyncState>
+  >({});
+
   const runningIds = useRef<Set<string>>(new Set());
 
-  const startSync = useCallback((connectionId: string, service: CloudAccountService = 'awsAccounts') => {
-    if (runningIds.current.has(connectionId)) return;
-    runningIds.current.add(connectionId);
-    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'test' } }));
+  /*
+   * Every invocation receives a monotonically increasing token.
+   * A stale async operation can therefore never overwrite the state
+   * belonging to a newer operation.
+   */
+  const operationTokens = useRef<Map<string, number>>(new Map());
+  const nextOperationToken = useRef(0);
 
-    (async () => {
-      try {
-        const result = await withRetry(() => api.testAccount(connectionId, service));
-        setSyncStates(prev => ({
-          ...prev,
-          [connectionId]: {
-            status: 'done', done: 1, total: 1, stepId: '',
-            warning: result.credentialsPresent ? result.message : undefined,
-            error: result.credentialsPresent ? undefined : result.message,
-          },
-        }));
-      } catch (err) {
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Test failed.' } }));
-      } finally {
-        runningIds.current.delete(connectionId);
-      }
-    })();
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  /**
-   * Starts a DURABLE, server-owned collection run and watches it (Phase 3,
-   * ADR 0001).
-   *
-   * What this replaces: the browser fetched a 1,628-step plan, called
-   * run-step once per step in a loop, accumulated errors in memory, and
-   * posted its own runStartedAt/stepErrors/totalSteps to finalize -- so the
-   * CLIENT defined what "succeeded" meant, and closing the tab lost the run.
-   *
-   * Now the client asks for a job and polls it. Closing the tab no longer
-   * stops anything: the worker owns the run, and reopening the page picks the
-   * status back up. Clicking twice is idempotent because the server returns
-   * the run already in flight rather than starting a second one.
-   */
-  const startDiscovery = useCallback((connectionId: string, service: CloudAccountService = 'awsAccounts') => {
-    if (runningIds.current.has(connectionId)) return;
-    runningIds.current.add(connectionId);
-    setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'running', done: 0, total: 1, stepId: 'Queueing…' } }));
+  const beginOperation = useCallback(
+    (connectionId: string): number => {
+      const token = ++nextOperationToken.current;
 
-    (async () => {
-      try {
-        const started = await withRetry(() => api.startCollectionRun(connectionId, service));
+      operationTokens.current.set(
+        connectionId,
+        token,
+      );
 
-        // Unhurried on purpose: the worker advances a run in slices on a
-        // scheduler tick, so polling faster only adds load without surfacing
-        // progress any sooner.
-        const POLL_MS = 5000;
-        for (;;) {
-          const run = await withRetry(() => api.getCollectionRun(started.id, service));
-          const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELED'].includes(run.status);
+      runningIds.current.add(connectionId);
 
-          setSyncStates(prev => ({
-            ...prev,
+      return token;
+    },
+    [],
+  );
+
+  const isCurrentOperation = useCallback(
+    (connectionId: string, token: number): boolean =>
+      mountedRef.current &&
+      operationTokens.current.get(connectionId) === token,
+    [],
+  );
+
+  const endOperation = useCallback(
+    (connectionId: string, token: number) => {
+      if (
+        operationTokens.current.get(connectionId) === token
+      ) {
+        operationTokens.current.delete(connectionId);
+        runningIds.current.delete(connectionId);
+      }
+    },
+    [],
+  );
+
+  const startSync = useCallback(
+    (
+      rawConnectionId: string,
+      service: CloudAccountService = DEFAULT_SERVICE,
+    ) => {
+      const connectionId = normalizeConnectionId(rawConnectionId);
+
+      if (runningIds.current.has(connectionId)) {
+        return;
+      }
+
+      const token = beginOperation(connectionId);
+
+      setSyncStates((previous) => ({
+        ...previous,
+        [connectionId]: {
+          status: 'running',
+          done: 0,
+          total: 1,
+          stepId: 'test',
+        },
+      }));
+
+      void (async () => {
+        try {
+          const result = await withRetry(
+            () => api.testAccount(connectionId, service),
+          );
+
+          if (!isCurrentOperation(connectionId, token)) {
+            return;
+          }
+
+          const credentialsPresent =
+            Boolean(result.credentialsPresent);
+
+          setSyncStates((previous) => ({
+            ...previous,
             [connectionId]: {
-              status: terminal ? (run.status === 'SUCCEEDED' ? 'done' : 'error') : 'running',
-              done: run.progress.completedSteps,
-              total: Math.max(run.progress.totalSteps, 1),
-              stepId: terminal ? '' : run.explanation,
-              // PARTIALLY_SUCCEEDED surfaces as an error state on purpose: it
-              // means the collected data is incomplete, and presenting that as
-              // done is the exact defect this phase removes.
-              error: terminal && run.status !== 'SUCCEEDED' ? (run.errorSummary ?? run.explanation) : undefined,
-              warning: terminal && run.status === 'SUCCEEDED' ? run.explanation : undefined,
+              status: credentialsPresent ? 'done' : 'error',
+              done: credentialsPresent ? 1 : 0,
+              total: 1,
+              stepId: '',
+              warning: credentialsPresent
+                ? result.message || undefined
+                : undefined,
+              error: credentialsPresent
+                ? undefined
+                : result.message || 'Account test failed.',
             },
           }));
+        } catch (error) {
+          if (!isCurrentOperation(connectionId, token)) {
+            return;
+          }
 
-          if (terminal) break;
-          await new Promise(r => setTimeout(r, POLL_MS));
+          setSyncStates((previous) => ({
+            ...previous,
+            [connectionId]: {
+              status: 'error',
+              done: 0,
+              total: 1,
+              stepId: '',
+              error: errorMessage(
+                error,
+                'Unable to test the cloud account.',
+              ),
+            },
+          }));
+        } finally {
+          endOperation(connectionId, token);
         }
-      } catch (err) {
-        setSyncStates(prev => ({ ...prev, [connectionId]: { status: 'error', done: 0, total: 1, stepId: '', error: (err as Error).message || 'Could not start collection.' } }));
-      } finally {
-        runningIds.current.delete(connectionId);
+      })();
+    },
+    [
+      beginOperation,
+      endOperation,
+      isCurrentOperation,
+    ],
+  );
+
+  const startDiscovery = useCallback(
+    (
+      rawConnectionId: string,
+      service: CloudAccountService = DEFAULT_SERVICE,
+    ) => {
+      const connectionId = normalizeConnectionId(rawConnectionId);
+
+      if (runningIds.current.has(connectionId)) {
+        return;
       }
-    })();
-  }, []);
 
-  /**
-   * REMOVED 2026-09-09 (AWS connector audit AWS-P0-01, P0-A containment):
-   * a 3-second post-login sweep plus a 24-hour interval that started real
-   * provider discovery from the browser.
-   *
-   * It fetched every AWS/GCP/Azure connection, picked any whose last sync was
-   * over 24h old, and called startDiscovery on each -- so simply logging in
-   * could begin a 1,628-step scan. It did not filter to active connections,
-   * and its only guard was an in-memory per-tab Set, so two tabs or two users
-   * could start overlapping scans of the same account with no distributed
-   * lock, no checkpoint, and no way to resume when a tab closed.
-   *
-   * Nothing replaces it on the client, and nothing needs to: scheduled
-   * scanning is already server-owned and running -- `scheduled-scan-aws`
-   * daily, `scheduled-first-scan-aws` every 20 minutes for new and abandoned
-   * scans, plus the GCP equivalents. Staleness is the server's job.
-   *
-   * The state this drove (autoSyncStatus/autoSyncMessage/lastAutoSyncAt) was
-   * never read outside this provider, so no UI regresses.
-   *
-   * Manual discovery (startDiscovery above) is still browser-orchestrated and
-   * is deliberately left for Phase 3, which replaces it with a durable
-   * server-owned job. The audit separates these: P0-A containment stops the
-   * AUTOMATIC scans; server-owned workflows are P0-B.
-   */
+      const token = beginOperation(connectionId);
 
-  return <SyncContext.Provider value={{ syncStates, startSync, startDiscovery }}>{children}</SyncContext.Provider>;
+      setSyncStates((previous) => ({
+        ...previous,
+        [connectionId]: {
+          status: 'running',
+          done: 0,
+          total: 1,
+          stepId: 'Queueing…',
+        },
+      }));
+
+      void (async () => {
+        const controller = new AbortController();
+
+        const timeout = window.setTimeout(() => {
+          controller.abort();
+        }, MAX_POLL_DURATION_MS);
+
+        try {
+          const started = await withRetry(
+            () =>
+              api.startCollectionRun(
+                connectionId,
+                service,
+              ),
+            {
+              signal: controller.signal,
+            },
+          );
+
+          for (;;) {
+            const run = await withRetry(
+              () =>
+                api.getCollectionRun(
+                  started.id,
+                  service,
+                ),
+              {
+                signal: controller.signal,
+              },
+            );
+
+            if (!isCurrentOperation(connectionId, token)) {
+              return;
+            }
+
+            const terminal = isTerminalStatus(run.status);
+            const successful = isSuccessfulStatus(run.status);
+
+            const completedSteps = Number.isFinite(
+              run.progress?.completedSteps,
+            )
+              ? Math.max(
+                  0,
+                  Math.trunc(
+                    run.progress.completedSteps,
+                  ),
+                )
+              : 0;
+
+            const totalSteps = Number.isFinite(
+              run.progress?.totalSteps,
+            )
+              ? Math.max(
+                  completedSteps,
+                  Math.trunc(run.progress.totalSteps),
+                )
+              : Math.max(completedSteps, 1);
+
+            setSyncStates((previous) => ({
+              ...previous,
+              [connectionId]: {
+                status: terminal
+                  ? successful
+                    ? 'done'
+                    : 'error'
+                  : 'running',
+                done: completedSteps,
+                total: totalSteps,
+                stepId: terminal
+                  ? ''
+                  : run.explanation || 'Collecting…',
+                error:
+                  terminal && !successful
+                    ? run.errorSummary ||
+                      run.explanation ||
+                      'Collection completed with errors.'
+                    : undefined,
+                warning:
+                  terminal && successful
+                    ? run.explanation || undefined
+                    : undefined,
+              },
+            }));
+
+            if (terminal) {
+              return;
+            }
+
+            await sleep(
+              POLL_INTERVAL_MS,
+              controller.signal,
+            );
+          }
+        } catch (error) {
+          if (!isCurrentOperation(connectionId, token)) {
+            return;
+          }
+
+          const aborted =
+            error instanceof DOMException &&
+            error.name === 'AbortError';
+
+          setSyncStates((previous) => ({
+            ...previous,
+            [connectionId]: {
+              status: 'error',
+              done: 0,
+              total: 1,
+              stepId: '',
+              error: aborted
+                ? 'Collection status could not be confirmed within the allowed time. The server-owned run may still be processing.'
+                : errorMessage(
+                    error,
+                    'Could not start or monitor collection.',
+                  ),
+            },
+          }));
+        } finally {
+          window.clearTimeout(timeout);
+          controller.abort();
+          endOperation(connectionId, token);
+        }
+      })();
+    },
+    [
+      beginOperation,
+      endOperation,
+      isCurrentOperation,
+    ],
+  );
+
+  return (
+    <SyncContext.Provider
+      value={{
+        syncStates,
+        startSync,
+        startDiscovery,
+      }}
+    >
+      {children}
+    </SyncContext.Provider>
+  );
 }
 
 export function useSync() {
-  const ctx = useContext(SyncContext);
-  if (!ctx) throw new Error('useSync must be used within SyncProvider');
-  return ctx;
+  const context = useContext(SyncContext);
+
+  if (!context) {
+    throw new Error(
+      'useSync must be used within SyncProvider.',
+    );
+  }
+
+  return context;
 }
 
-/** Calls `onComplete` once when any of `connectionIds` transitions out of 'running'. */
-export function useSyncCompletion(connectionIds: string[], onComplete: () => void) {
+export function useSyncCompletion(
+  connectionIds: string[],
+  onComplete: () => void,
+) {
   const { syncStates } = useSync();
-  const prevStatus = useRef<Record<string, string | undefined>>({});
-  const latest = useRef({ connectionIds, onComplete });
-  latest.current = { connectionIds, onComplete };
+
+  const previousStatus =
+    useRef<Record<string, SyncStatus | undefined>>({});
+
+  const latest = useRef({
+    connectionIds,
+    onComplete,
+  });
+
+  latest.current = {
+    connectionIds,
+    onComplete,
+  };
 
   useEffect(() => {
-    let completed = false;
-    for (const id of latest.current.connectionIds) {
-      const status = syncStates[id]?.status;
-      if (prevStatus.current[id] === 'running' && (status === 'done' || status === 'error')) completed = true;
-      prevStatus.current[id] = status;
+    let transitioned = false;
+
+    for (const rawId of latest.current.connectionIds) {
+      const id = rawId.trim();
+
+      if (!id) {
+        continue;
+      }
+
+      const currentStatus = syncStates[id]?.status;
+      const previous = previousStatus.current[id];
+
+      if (
+        previous === 'running' &&
+        (currentStatus === 'done' ||
+          currentStatus === 'error')
+      ) {
+        transitioned = true;
+      }
+
+      previousStatus.current[id] = currentStatus;
     }
-    if (completed) latest.current.onComplete();
+
+    if (transitioned) {
+      latest.current.onComplete();
+    }
   }, [syncStates]);
 }

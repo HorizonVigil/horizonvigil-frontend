@@ -1,11 +1,12 @@
 /**
  * Shared types for the dynamic Overview engine.
  *
- * This file is deliberately runtime-import-free (only `import type`) so the
- * pure engine/registry-metadata layers that depend on it stay importable
- * from the vitest environment — anything in lib/api.ts's import chain throws
- * at module load when VITE_SUPABASE_URL is unset (see lib/featureFlags.ts's
- * own comment), and the engine + its tests must never pull that in.
+ * This module is intentionally runtime-import-free. All external dependencies
+ * are type-only so the pure engine/registry layers remain safe to import from
+ * Vitest without initializing the application API/client stack.
+ *
+ * The runtime implementation lives in the consuming modules; this file owns
+ * the shared contracts only.
  */
 import type { FC } from 'react';
 import type { Role } from '../navConfig';
@@ -15,97 +16,173 @@ import type { UnifiedAccountRow } from '../unifiedAccounts';
 
 export type { Role };
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Capabilities
+ * ────────────────────────────────────────────────────────────────────────── */
+
 /**
- * Granular, domain-scoped capabilities. Derived on the frontend from the
- * user's org role + per-module menu-permission level (see
- * lib/overview/capabilities.ts) — the backend exposes only the coarse
- * role + menu_permissions today, so this is the seam a real
- * `GET /permissions` endpoint would later replace.
+ * Granular, domain-scoped capabilities.
  *
- * `.read`  → may see the data.
- * `.manage` / `.investigate` / `.optimize` / `.security` → may act on it in
- *   the normal case.
- * `.remediate` / `.execute` → may run a privileged/irreversible action.
+ * These are derived on the frontend from the user's org role and
+ * per-module menu permissions. They control what the UI may expose; they are
+ * NOT a backend authorization boundary.
  *
- * Widgets gate their *body* on `.read` and each *action button* on the
- * matching higher capability (issue §12: what a user can SEE and what they
- * can DO are separate axes).
+ * `.read`                       → may see the data.
+ * `.manage` / `.investigate`   → may act on it in the normal case.
+ * `.optimize` / `.security`    → domain-specific action permissions.
+ * `.remediate` / `.execute`    → privileged/irreversible actions.
  */
 export type Capability =
-  | 'cloud.read' | 'cloud.manage'
-  | 'cost.read' | 'cost.manage' | 'cost.optimize'
-  | 'infrastructure.read' | 'infrastructure.manage'
-  | 'observability.read' | 'observability.investigate'
-  | 'devops.read' | 'devops.manage'
-  | 'terraform.read' | 'terraform.manage'
-  | 'repository.read' | 'repository.security'
-  | 'container.read' | 'container.security'
-  | 'kubernetes.read' | 'kubernetes.manage' | 'kubernetes.security'
-  | 'security.read' | 'security.investigate' | 'security.remediate'
-  | 'incident.read' | 'incident.manage'
-  | 'automation.read' | 'automation.execute';
+  | 'cloud.read'
+  | 'cloud.manage'
+  | 'cost.read'
+  | 'cost.manage'
+  | 'cost.optimize'
+  | 'infrastructure.read'
+  | 'infrastructure.manage'
+  | 'observability.read'
+  | 'observability.investigate'
+  | 'devops.read'
+  | 'devops.manage'
+  | 'terraform.read'
+  | 'terraform.manage'
+  | 'repository.read'
+  | 'repository.security'
+  | 'container.read'
+  | 'container.security'
+  | 'kubernetes.read'
+  | 'kubernetes.manage'
+  | 'kubernetes.security'
+  | 'security.read'
+  | 'security.investigate'
+  | 'security.remediate'
+  | 'incident.read'
+  | 'incident.manage'
+  | 'automation.read'
+  | 'automation.execute';
 
-export const ALL_CAPABILITIES: Capability[] = [
-  'cloud.read', 'cloud.manage',
-  'cost.read', 'cost.manage', 'cost.optimize',
-  'infrastructure.read', 'infrastructure.manage',
-  'observability.read', 'observability.investigate',
-  'devops.read', 'devops.manage',
-  'terraform.read', 'terraform.manage',
-  'repository.read', 'repository.security',
-  'container.read', 'container.security',
-  'kubernetes.read', 'kubernetes.manage', 'kubernetes.security',
-  'security.read', 'security.investigate', 'security.remediate',
-  'incident.read', 'incident.manage',
-  'automation.read', 'automation.execute',
+export const ALL_CAPABILITIES: readonly Capability[] = [
+  'cloud.read',
+  'cloud.manage',
+  'cost.read',
+  'cost.manage',
+  'cost.optimize',
+  'infrastructure.read',
+  'infrastructure.manage',
+  'observability.read',
+  'observability.investigate',
+  'devops.read',
+  'devops.manage',
+  'terraform.read',
+  'terraform.manage',
+  'repository.read',
+  'repository.security',
+  'container.read',
+  'container.security',
+  'kubernetes.read',
+  'kubernetes.manage',
+  'kubernetes.security',
+  'security.read',
+  'security.investigate',
+  'security.remediate',
+  'incident.read',
+  'incident.manage',
+  'automation.read',
+  'automation.execute',
 ];
 
 /** Immutable view of a user's derived capability set. */
 export interface Capabilities {
-  has(c: Capability): boolean;
-  hasAll(c: Capability[]): boolean;
-  hasAny(c: Capability[]): boolean;
+  has(capability: Capability): boolean;
+  hasAll(capabilities: readonly Capability[]): boolean;
+  hasAny(capabilities: readonly Capability[]): boolean;
   list(): Capability[];
 }
 
-// ── Scope ──────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+ * Scope
+ * ────────────────────────────────────────────────────────────────────────── */
 
-/**
- * The user's effective data scope for this org session. `connectionIds` is
- * `'all'` for an unrestricted member, or the explicit allow-list (grant rows
- * ∩ connections the FilterProvider actually knows about) for a restricted
- * one. Widgets forward this to every query — the frontend never fetches a
- * superset and hides rows (issue §13); endpoints without a scope param are
- * flagged in the widget files as a backend follow-up.
- */
 export interface EffectiveScope {
   orgId: string;
   orgName: string;
   folders: FolderRow[];
   projects: ProjectRow[];
   restricted: boolean;
+  /**
+   * `'all'` means unrestricted for the current org scope.
+   * Otherwise this is the explicit allow-list after scope + resource-grant
+   * intersection.
+   */
   connectionIds: string[] | 'all';
-  /** From the app-wide FilterBar / personalization defaults. */
+
+  /** App-wide FilterBar / personalization selections. */
   activeConnectionId?: string;
   activeProjectId?: string;
   activeEnvironment?: string;
-  /** App-wide FilterBar region ('all' or a specific region). */
+
+  /** `'all'` or a concrete region. */
   region: string;
 }
 
-/** Stable react-query key fragment for a scope — so cache is per-scope. */
+/**
+ * Stable react-query key fragment for a scope.
+ *
+ * The connection allow-list is sorted so equivalent sets produce the same
+ * cache key regardless of server/filter ordering.
+ */
 export function scopeQueryKey(scope: EffectiveScope): string {
-  const conns = scope.connectionIds === 'all' ? 'all' : [...scope.connectionIds].sort().join(',');
+  const normalizedOrgId = typeof scope.orgId === 'string'
+    ? scope.orgId.trim()
+    : '';
+
+  const normalizedConnections =
+    scope.connectionIds === 'all'
+      ? 'all'
+      : normalizeScopeIds(scope.connectionIds).sort().join(',');
+
+  const activeConnectionId = normalizeOptionalId(scope.activeConnectionId);
+  const activeProjectId = normalizeOptionalId(scope.activeProjectId);
+  const activeEnvironment = normalizeOptionalId(scope.activeEnvironment);
+
   return [
-    scope.orgId,
-    scope.restricted ? `r:${conns}` : 'unrestricted',
-    scope.activeConnectionId ?? '',
-    scope.activeProjectId ?? '',
-    scope.activeEnvironment ?? '',
+    normalizedOrgId,
+    scope.restricted ? `r:${normalizedConnections}` : 'unrestricted',
+    activeConnectionId ?? '',
+    activeProjectId ?? '',
+    activeEnvironment ?? '',
+    typeof scope.region === 'string' ? scope.region.trim() : '',
   ].join('|');
 }
 
-// ── Context signals (issue §15 level 3) ────────────────────────────────────
+function normalizeOptionalId(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeScopeIds(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+
+    const normalized = value.trim();
+
+    if (!normalized || seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Context signals — issue §15 level 3
+ * ────────────────────────────────────────────────────────────────────────── */
 
 export interface ContextSignals {
   criticalIncidents: number;
@@ -119,7 +196,7 @@ export interface ContextSignals {
   generatedAt: string;
 }
 
-export const EMPTY_SIGNALS: ContextSignals = {
+export const EMPTY_SIGNALS: ContextSignals = Object.freeze({
   criticalIncidents: 0,
   investigatingIncidents: 0,
   criticalVulns: 0,
@@ -129,18 +206,32 @@ export const EMPTY_SIGNALS: ContextSignals = {
   failedDeployments: 0,
   criticalAlerts: 0,
   generatedAt: '',
-};
+});
 
-// ── Widgets ────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+ * Widgets
+ * ────────────────────────────────────────────────────────────────────────── */
 
 export type WidgetCategory =
-  | 'platform' | 'finops' | 'devops' | 'iac' | 'security' | 'observability' | 'operations';
+  | 'platform'
+  | 'finops'
+  | 'devops'
+  | 'iac'
+  | 'security'
+  | 'observability'
+  | 'operations';
 
-export const WIDGET_CATEGORIES: WidgetCategory[] = [
-  'platform', 'finops', 'devops', 'iac', 'security', 'observability', 'operations',
+export const WIDGET_CATEGORIES: readonly WidgetCategory[] = [
+  'platform',
+  'finops',
+  'devops',
+  'iac',
+  'security',
+  'observability',
+  'operations',
 ];
 
-export const CATEGORY_LABELS: Record<WidgetCategory, string> = {
+export const CATEGORY_LABELS: Readonly<Record<WidgetCategory, string>> = {
   platform: 'Platform',
   finops: 'FinOps',
   devops: 'DevOps',
@@ -152,27 +243,38 @@ export const CATEGORY_LABELS: Record<WidgetCategory, string> = {
 
 export type WidgetKind = 'kpi' | 'panel';
 
-/** Grid size in the 12-column react-grid-layout: w 1→4 cols, 2→8, 3→12. h in row units (~34px). */
-export interface WidgetSize { w: 1 | 2 | 3; h: number }
+/**
+ * Grid size for react-grid-layout:
+ *   w 1 → 4 columns
+ *   w 2 → 8 columns
+ *   w 3 → 12 columns
+ *
+ * h is expressed in layout row units.
+ */
+export interface WidgetSize {
+  w: 1 | 2 | 3;
+  h: number;
+}
 
-/** What a widget component receives. */
 export interface WidgetRenderContext {
   scope: EffectiveScope;
   can: Capabilities;
   dateRange: DateRangePreset;
   region: string;
-  /** Every connected account/subscription/project (for provider rollups, name lookups). */
+  /** Connected account/subscription/project rows available to the widget. */
   connections: UnifiedAccountRow[];
   navigate: (to: string) => void;
 }
 
-export type WidgetComponent = FC<{ ctx: WidgetRenderContext }>;
+export type WidgetComponent = FC<{
+  ctx: WidgetRenderContext;
+}>;
 
 /**
- * Registry entry — everything except the React component. Kept separate from
- * the component map (components/overview/registry.tsx) so this list and the
- * engine that consumes it stay free of the lib/api.ts import chain and
- * therefore unit-testable.
+ * Registry entry — everything except the React component.
+ *
+ * Component implementations live in components/overview/registry.tsx. The
+ * two registries are matched by id and should be validated at load/test time.
  */
 export interface WidgetMeta {
   id: string;
@@ -180,59 +282,101 @@ export interface WidgetMeta {
   description: string;
   category: WidgetCategory;
   kind: WidgetKind;
-  /** navConfig module `icon`/menu_key this belongs to; `null` = always module-eligible (cross-cutting). */
+
+  /** navConfig module icon/menu_key; null = cross-cutting widget. */
   module: string | null;
-  /** ALL of these capabilities required for the widget to be eligible. */
+
+  /** Every listed capability is required. */
   requires: Capability[];
-  /** …and at least one of these, when set. */
+
+  /** At least one listed capability is additionally required when present. */
   anyOf?: Capability[];
+
   minRole?: Role;
+
   defaultSize: WidgetSize;
-  minSize?: { w: number; h: number };
-  /** Lower sorts nearer the top of the page. */
+
+  /** Optional react-grid-layout lower bound. */
+  minSize?: {
+    w: number;
+    h: number;
+  };
+
+  /** Lower value sorts nearer the top of the page. */
   basePriority: number;
-  /** false → eligible but not shown until the user adds it from the drawer. */
+
+  /** false = eligible but initially hidden until explicitly added. */
   defaultEnabled?: boolean;
-  /** false → the component renders an honest "not connected yet" body. */
+
+  /** false = render an honest "not connected yet" / unavailable state. */
   integrated: boolean;
-  /** issue §15 level 3 — elevate this widget when a live signal warrants it. */
-  contextBoost?: (s: ContextSignals) => { priority: number; reason: string } | null;
+
+  /** Issue §15 level 3 — contextual priority boost. */
+  contextBoost?: (
+    signals: ContextSignals,
+  ) => {
+    priority: number;
+    reason: string;
+  } | null;
 }
 
-// ── Personalization (issue §15 level 2) ────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+ * Personalization — issue §15 level 2
+ * ────────────────────────────────────────────────────────────────────────── */
 
-export interface WidgetLayoutRect { x: number; y: number; w: number; h: number }
+export interface WidgetLayoutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 export interface OverviewPreferences {
-  /** react-grid-layout positions, keyed by widget id (single 'lg' breakpoint). */
+  /** react-grid-layout positions, keyed by widget id. */
   layout: Record<string, WidgetLayoutRect>;
+
   hidden: string[];
+
   favorites: string[];
-  /** default-off widgets the user has turned on. */
+
+  /** Default-off widgets explicitly added by the user. */
   added: string[];
+
   kpiOrder: string[];
+
   kpiHidden: string[];
+
   defaults: {
     projectId?: string;
     environment?: string;
     dateRange?: DateRangePreset;
   };
-  /** signalKey → dismissed-at epoch ms. */
+
+  /** signalKey → dismissed-at epoch milliseconds. */
   dismissedSignals: Record<string, number>;
 }
 
-export const DEFAULT_PREFERENCES: OverviewPreferences = {
-  layout: {},
-  hidden: [],
-  favorites: [],
-  added: [],
-  kpiOrder: [],
-  kpiHidden: [],
-  defaults: {},
-  dismissedSignals: {},
-};
+/**
+ * Do not mutate this object.
+ *
+ * Consumers that need editable preferences should create their own copy
+ * rather than modifying DEFAULT_PREFERENCES directly.
+ */
+export const DEFAULT_PREFERENCES: Readonly<OverviewPreferences> =
+  Object.freeze({
+    layout: {},
+    hidden: [],
+    favorites: [],
+    added: [],
+    kpiOrder: [],
+    kpiHidden: [],
+    defaults: {},
+    dismissedSignals: {},
+  });
 
-// ── Engine output (issue §14 shape) ───────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+ * Engine output — issue §14 shape
+ * ────────────────────────────────────────────────────────────────────────── */
 
 export interface ResolvedWidget {
   meta: WidgetMeta;
@@ -245,6 +389,7 @@ export interface ResolvedWidget {
 export interface OverviewConfig {
   user: string;
   role: Role;
+
   scope: {
     orgId: string;
     folders: string[];
@@ -252,9 +397,12 @@ export interface OverviewConfig {
     restricted: boolean;
     connectionIds: string[] | 'all';
   };
+
   modules: string[];
   capabilities: Capability[];
+
   kpis: ResolvedWidget[];
   widgets: ResolvedWidget[];
+
   signals: ContextSignals;
 }

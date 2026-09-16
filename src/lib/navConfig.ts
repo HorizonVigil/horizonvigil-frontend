@@ -754,6 +754,85 @@ export const NAV_MODULES: NavModule[] = [
 ];
 
 /**
+ * Validates navigation invariants without mutating the live configuration.
+ *
+ * Intended for unit tests and development diagnostics. It deliberately does
+ * not throw during production startup.
+ */
+export function validateNavConfig(
+  modules: readonly NavModule[] = NAV_MODULES,
+): string[] {
+  const errors: string[] = [];
+  const moduleLabels = new Set<string>();
+  const moduleIcons = new Set<string>();
+
+  for (const module of modules) {
+    if (!module.label.trim()) {
+      errors.push('A module has an empty label.');
+    }
+
+    if (!module.icon.trim()) {
+      errors.push(`Module "${module.label}" has an empty icon/menu_key.`);
+    }
+
+    if (moduleLabels.has(module.label)) {
+      errors.push(`Duplicate module label: "${module.label}".`);
+    }
+    moduleLabels.add(module.label);
+
+    if (moduleIcons.has(module.icon)) {
+      errors.push(`Duplicate module icon/menu_key: "${module.icon}".`);
+    }
+    moduleIcons.add(module.icon);
+
+    const childLabels = new Set<string>();
+    const submenuKeys = new Set<string>();
+
+    for (const child of module.children) {
+      if (!child.label.trim()) {
+        errors.push(`Module "${module.label}" contains an empty child label.`);
+      }
+
+      if (childLabels.has(child.label)) {
+        errors.push(
+          `Module "${module.label}" contains duplicate child label "${child.label}".`,
+        );
+      }
+      childLabels.add(child.label);
+
+      const key = submenuKey(module.icon, child.label);
+      if (submenuKeys.has(key)) {
+        errors.push(
+          `Module "${module.label}" contains a colliding submenu key "${key}".`,
+        );
+      }
+      submenuKeys.add(key);
+
+      if (child.real && !child.to && !child.action) {
+        errors.push(
+          `Real child "${module.label} > ${child.label}" has neither "to" nor "action".`,
+        );
+      }
+
+      if (child.action && child.to) {
+        errors.push(
+          `Child "${module.label} > ${child.label}" defines both "action" and "to".`,
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+if (import.meta.env?.DEV) {
+  const navErrors = validateNavConfig();
+  if (navErrors.length > 0) {
+    console.error('[navConfig] integrity errors', navErrors);
+  }
+}
+
+/**
  * Checks whether a role meets a module/child's permission requirement.
  * - If neither `minRole` nor `roles` is set, item is visible to all.
  * - `minRole` = minimum role threshold (e.g. 'editor' means editor+).
@@ -835,25 +914,81 @@ export function getVisibleModules(role: Role, permissions?: Record<string, MenuP
 }
 
 function pathOnly(to: string): string {
-  const i = to.indexOf('?');
-  return i === -1 ? to : to.slice(0, i);
+  const beforeHash = to.split('#', 1)[0];
+  const i = beforeHash.indexOf('?');
+  return i === -1 ? beforeHash : beforeHash.slice(0, i);
 }
 
-/** True if `pathname` belongs to this module — its own landing page or any real child route (query strings ignored). */
-export function moduleMatchesPath(mod: NavModule, pathname: string): boolean {
-  if (mod.to && pathname.startsWith(mod.to)) return true;
-  return mod.children.some(c => c.to && pathname.startsWith(pathOnly(c.to)));
+function normalizePathname(pathname: string): string {
+  if (typeof pathname !== 'string' || pathname.trim() === '') return '/';
+
+  const normalized = pathname.trim().split('#', 1)[0].split('?', 1)[0];
+  if (!normalized || normalized === '/') return '/';
+
+  const withLeadingSlash = normalized.startsWith('/')
+    ? normalized
+    : `/${normalized}`;
+
+  return withLeadingSlash.replace(/\/+$/, '') || '/';
 }
 
 /**
- * Which of the 15 domain apps the current route belongs to — the single
- * source of truth for both AppRail (which icon is "active") and Sidebar
- * (which module's own sub-nav to render). Falls back to Overview so the
- * shell never renders with no module selected (e.g. on a route no module
- * claims, though App.tsx's catch-all already sends unknown paths to /overview).
+ * Boundary-safe route matching.
+ *
+ * A prefix match such as `/resources`.startsWith('/resources') also matches
+ * `/resources-archive`. A route therefore owns only its exact pathname and
+ * descendants below a `/` boundary.
+ */
+function routeMatches(pathname: string, route: string): boolean {
+  const current = normalizePathname(pathname);
+  const target = normalizePathname(pathOnly(route));
+
+  return current === target || current.startsWith(`${target}/`);
+}
+
+/**
+ * True if `pathname` belongs to this module — its own landing page or any
+ * real child route. Query strings and hashes do not affect ownership.
+ */
+export function moduleMatchesPath(mod: NavModule, pathname: string): boolean {
+  if (mod.to && routeMatches(pathname, mod.to)) return true;
+
+  return mod.children.some(
+    child => child.real && !!child.to && routeMatches(pathname, child.to),
+  );
+}
+
+/**
+ * Which domain module owns the current route.
+ *
+ * Direct module landing routes take precedence over cross-links from another
+ * module. This prevents a shortcut such as Vulnerability Management ->
+ * `/cloud-security` from stealing the active AppRail/Sidebar state from the
+ * dedicated Cloud Security module.
  */
 export function findActiveModule(pathname: string): NavModule {
-  return NAV_MODULES.find(m => moduleMatchesPath(m, pathname)) ?? NAV_MODULES[0];
+  const directOwner = NAV_MODULES.find(
+    mod => !!mod.to && routeMatches(pathname, mod.to),
+  );
+
+  if (directOwner) return directOwner;
+
+  return (
+    NAV_MODULES.find(mod =>
+      mod.children.some(
+        child => child.real && !!child.to && routeMatches(pathname, child.to),
+      ),
+    ) ?? NAV_MODULES[0]
+  );
+}
+
+/** path + tab + hash identity a child's `to` resolves to. */
+function childIdentity(child: NavChild): string | null {
+  if (!child.to) return null;
+  const [beforeHash, hash = ''] = child.to.split('#', 2);
+  const [path, query] = beforeHash.split('?', 2);
+  const tab = query ? new URLSearchParams(query).get('tab') : null;
+  return `${normalizePathname(path)}|${tab ?? ''}|${hash}`;
 }
 
 /** path + tab + hash identity a child's `to` resolves to — the unit isChildActive dedupes/compares on, not the raw `to` string (two children can carry different `to` values that land on the exact same page+tab, e.g. Resources' Dependency Graph and Bulk Operations both resolving to /resources/all with no distinguishing tab). */
@@ -880,16 +1015,36 @@ function childIdentity(child: NavChild): string | null {
  * Favorites) match simultaneously, since the hash was stripped before any
  * comparison happened at all.
  */
-export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string, hash: string): boolean {
-  if (!child.to) return false;
-  const [beforeHash, childHash = ''] = child.to.split('#');
-  const [childPath, childQuery] = beforeHash.split('?');
-  if (pathname !== childPath) return false;
+export function isChildActive(
+  child: NavChild,
+  siblings: NavChild[],
+  pathname: string,
+  search: string,
+  hash: string,
+): boolean {
+  if (!child.to || !child.real) return false;
+
+  const [beforeHash, childHash = ''] = child.to.split('#', 2);
+  const [childPath, childQuery] = beforeHash.split('?', 2);
+
+  if (normalizePathname(pathname) !== normalizePathname(childPath)) {
+    return false;
+  }
+
   const currentTab = new URLSearchParams(search).get('tab');
-  const childTab = childQuery ? new URLSearchParams(childQuery).get('tab') : null;
+  const childTab = childQuery
+    ? new URLSearchParams(childQuery).get('tab')
+    : null;
+
   if ((currentTab ?? null) !== (childTab ?? null)) return false;
   if (childHash && hash.replace(/^#/, '') !== childHash) return false;
+
   const thisIdentity = childIdentity(child);
-  const sharedBy = siblings.filter(s => childIdentity(s) === thisIdentity).length;
+  if (!thisIdentity) return false;
+
+  const sharedBy = siblings.filter(
+    sibling => sibling.real && childIdentity(sibling) === thisIdentity,
+  ).length;
+
   return sharedBy === 1;
 }

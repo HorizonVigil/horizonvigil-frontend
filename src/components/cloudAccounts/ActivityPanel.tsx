@@ -1,60 +1,454 @@
-/**
- * Cloud Accounts — Activity / Audit tab (spec §39). Every connection /
- * discovery / validation / bulk-operation event, newest first. AWS-scoped
- * today (connector-aws's `/activity`); Azure/GCP per-account activity is on
- * each account's own Activity tab.
- */
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+
 import { DataTable, type Column } from '../DataTable';
 import { TableSkeleton } from '../Skeleton';
-import { api, friendlyErrorMessage, type ActivityEntry } from '../../lib/api';
-import { formatActivityAction, formatDate } from '../../lib/format';
+import {
+  api,
+  friendlyErrorMessage,
+  type ActivityEntry,
+} from '../../lib/api';
+import {
+  formatActivityAction,
+  formatDate,
+} from '../../lib/format';
 import { ProviderChips } from './ProviderChips';
 
-export function ActivityPanel({ refreshToken }: { refreshToken: number }) {
-  const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+interface ActivityPanelProps {
+  refreshToken: number;
+}
 
-  const query = useQuery({
-    queryKey: ['cloud-accounts', 'activity', page, pageSize, refreshToken],
-    queryFn: () => api.getAwsAccountsActivity({ page, limit: pageSize }),
-    staleTime: 30_000,
-  });
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 500;
 
-  const columns: Column<ActivityEntry>[] = [
-    { key: 'action', header: 'Action', sticky: true, render: (r) => <span className="text-slate-700 dark:text-slate-200">{formatActivityAction(r.action)}</span> },
-    { key: 'actor', header: 'Actor', render: (r) => <span className="text-slate-500 dark:text-slate-400">{r.actor?.email ?? 'system'}</span> },
-    { key: 'target', header: 'Target', render: (r) => r.targetId
-      ? <button onClick={() => navigate(`/cloud-accounts/${r.targetId}`)} className="text-xs font-mono text-brand-600 dark:text-brand-400 hover:underline">{r.targetType ?? 'target'}</button>
-      : <span className="text-slate-400">—</span> },
-    { key: 'when', header: 'When', render: (r) => <span className="text-xs text-slate-400 whitespace-nowrap">{formatDate(r.occurredAt)}</span> },
-  ];
-
-  if (query.isLoading && !query.data) return <TableSkeleton rows={8} cols={4} />;
-  if (query.isError) {
-    return <div className="rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">Couldn't load activity: {friendlyErrorMessage(query.error)}</div>;
+function normalizePositiveInteger(
+  value: unknown,
+  fallback: number,
+  maximum?: number,
+): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value)
+  ) {
+    return fallback;
   }
 
+  const normalized = Math.max(
+    1,
+    Math.floor(value),
+  );
+
+  return maximum !== undefined
+    ? Math.min(maximum, normalized)
+    : normalized;
+}
+
+function normalizeText(
+  value: unknown,
+  fallback: string,
+): string {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+
+  return normalized || fallback;
+}
+
+function normalizeId(
+  value: unknown,
+): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim();
+}
+
+function formatAction(
+  action: unknown,
+): string {
+  try {
+    return normalizeText(
+      formatActivityAction(action as ActivityEntry['action']),
+      'Unknown action',
+    );
+  } catch {
+    return 'Unknown action';
+  }
+}
+
+function formatOccurredAt(
+  occurredAt: unknown,
+): string {
+  if (
+    typeof occurredAt !== 'string' ||
+    occurredAt.trim().length === 0
+  ) {
+    return 'Date unavailable';
+  }
+
+  const timestamp = Date.parse(occurredAt);
+
+  if (!Number.isFinite(timestamp)) {
+    return 'Date unavailable';
+  }
+
+  try {
+    return formatDate(occurredAt);
+  } catch {
+    return 'Date unavailable';
+  }
+}
+
+/**
+ * Cloud Accounts — Activity / Audit panel.
+ *
+ * AWS-scoped activity is currently loaded from the AWS connector activity
+ * endpoint. Azure/GCP activity remains available from each account's own
+ * Activity tab according to the current application contract.
+ *
+ * This component is presentation/pagination logic only. Authorization and
+ * tenant scoping remain enforced by the API/backend.
+ */
+export function ActivityPanel({
+  refreshToken,
+}: ActivityPanelProps) {
+  const navigate = useNavigate();
+
+  const [page, setPage] = useState(DEFAULT_PAGE);
+  const [pageSize, setPageSize] =
+    useState(DEFAULT_PAGE_SIZE);
+
+  const normalizedPage = normalizePositiveInteger(
+    page,
+    DEFAULT_PAGE,
+  );
+
+  const normalizedPageSize =
+    normalizePositiveInteger(
+      pageSize,
+      DEFAULT_PAGE_SIZE,
+      MAX_PAGE_SIZE,
+    );
+
+  const query = useQuery({
+    queryKey: [
+      'cloud-accounts',
+      'activity',
+      'aws',
+      normalizedPage,
+      normalizedPageSize,
+      refreshToken,
+    ],
+
+    queryFn: () =>
+      api.getAwsAccountsActivity({
+        page: normalizedPage,
+        limit: normalizedPageSize,
+      }),
+
+    staleTime: 30_000,
+
+    /*
+     * Activity is a read-only query. Retrying transient failures is generally
+     * safe because it has no cloud-side mutation side effect.
+     */
+    retry: 2,
+
+    /*
+     * Keep the previous page visible while the next page is loading.
+     * This avoids an unnecessary blank table during pagination.
+     */
+    placeholderData: (previousData) =>
+      previousData,
+  });
+
+  const handleTargetClick = useCallback(
+    (targetId: string) => {
+      const normalizedId =
+        normalizeId(targetId);
+
+      if (!normalizedId) {
+        return;
+      }
+
+      navigate(
+        `/cloud-accounts/${encodeURIComponent(
+          normalizedId,
+        )}`,
+      );
+    },
+    [navigate],
+  );
+
+  const handlePageChange = useCallback(
+    (nextPage: number) => {
+      const normalizedNextPage =
+        normalizePositiveInteger(
+          nextPage,
+          DEFAULT_PAGE,
+        );
+
+      if (
+        normalizedNextPage === normalizedPage
+      ) {
+        return;
+      }
+
+      setPage(normalizedNextPage);
+    },
+    [normalizedPage],
+  );
+
+  const handlePageSizeChange = useCallback(
+    (nextPageSize: number) => {
+      const normalizedNextPageSize =
+        normalizePositiveInteger(
+          nextPageSize,
+          DEFAULT_PAGE_SIZE,
+          MAX_PAGE_SIZE,
+        );
+
+      if (
+        normalizedNextPageSize ===
+        normalizedPageSize
+      ) {
+        return;
+      }
+
+      /*
+       * Changing page size invalidates the current page position.
+       */
+      setPageSize(normalizedNextPageSize);
+      setPage(DEFAULT_PAGE);
+    },
+    [normalizedPageSize],
+  );
+
+  const columns = useMemo<
+    Column<ActivityEntry>[]
+  >(
+    () => [
+      {
+        key: 'action',
+        header: 'Action',
+        sticky: true,
+        render: (row) => (
+          <span
+            className="text-slate-700 dark:text-slate-200"
+            title={formatAction(row?.action)}
+          >
+            {formatAction(row?.action)}
+          </span>
+        ),
+      },
+
+      {
+        key: 'actor',
+        header: 'Actor',
+        render: (row) => {
+          const email =
+            typeof row?.actor?.email === 'string'
+              ? row.actor.email.trim()
+              : '';
+
+          return (
+            <span
+              className="text-slate-500 dark:text-slate-400"
+              title={email || 'system'}
+            >
+              {email || 'system'}
+            </span>
+          );
+        },
+      },
+
+      {
+        key: 'target',
+        header: 'Target',
+        render: (row) => {
+          const targetId =
+            normalizeId(row?.targetId);
+
+          const targetType =
+            normalizeText(
+              row?.targetType,
+              'Target',
+            );
+
+          if (!targetId) {
+            return (
+              <span className="text-slate-400 dark:text-slate-500">
+                —
+              </span>
+            );
+          }
+
+          return (
+            <button
+              type="button"
+              onClick={() =>
+                handleTargetClick(targetId)
+              }
+              aria-label={`Open ${targetType} ${targetId}`}
+              className="max-w-[14rem] truncate text-left text-xs font-mono text-brand-600 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:text-brand-400 dark:focus-visible:ring-offset-slate-950"
+              title={targetId}
+            >
+              {targetType}
+            </button>
+          );
+        },
+      },
+
+      {
+        key: 'when',
+        header: 'When',
+        render: (row) => {
+          const occurredAt =
+            typeof row?.occurredAt === 'string'
+              ? row.occurredAt
+              : '';
+
+          const formatted =
+            formatOccurredAt(occurredAt);
+
+          const validTimestamp =
+            occurredAt &&
+            Number.isFinite(
+              Date.parse(occurredAt),
+            );
+
+          return validTimestamp ? (
+            <time
+              dateTime={occurredAt}
+              className="whitespace-nowrap text-xs text-slate-400 dark:text-slate-500"
+              title={formatted}
+            >
+              {formatted}
+            </time>
+          ) : (
+            <span className="whitespace-nowrap text-xs text-slate-400 dark:text-slate-500">
+              {formatted}
+            </span>
+          );
+        },
+      },
+    ],
+    [handleTargetClick],
+  );
+
+  /*
+   * Initial loading gets the skeleton.
+   *
+   * During pagination/refetch, existing data remains visible through
+   * placeholderData and DataTable receives `loading`.
+   */
+  if (query.isPending && !query.data) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading activity"
+      >
+        <TableSkeleton
+          rows={8}
+          cols={4}
+        />
+      </div>
+    );
+  }
+
+  if (query.isError && !query.data) {
+    return (
+      <div
+        role="alert"
+        className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300"
+      >
+        <p>
+          Couldn&apos;t load activity:{' '}
+          {friendlyErrorMessage(query.error)}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => {
+            void query.refetch();
+          }}
+          disabled={query.isFetching}
+          className="mt-2 text-xs font-medium underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-950"
+        >
+          {query.isFetching
+            ? 'Retrying…'
+            : 'Retry'}
+        </button>
+      </div>
+    );
+  }
+
+  const items = Array.isArray(
+    query.data?.items,
+  )
+    ? query.data.items
+    : [];
+
+  const total = normalizePositiveInteger(
+    query.data?.pagination?.total,
+    0,
+  );
+
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      className="flex flex-col gap-2"
+      aria-busy={query.isFetching}
+    >
       <ProviderChips
         lockedTo="aws"
         lockedReason="Per-account only — open the account's own Activity tab"
         className="mb-1"
       />
-      <p className="text-xs text-slate-400">Connection, discovery, validation and bulk-operation events across AWS accounts. Azure and GCP activity is on each account's own Activity tab.</p>
+
+      <p className="text-xs leading-5 text-slate-400 dark:text-slate-500">
+        Connection, discovery, validation and
+        bulk-operation events across AWS accounts.
+        Azure and GCP activity is available on each
+        account&apos;s own Activity tab.
+      </p>
+
+      {query.isError && query.data && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+        >
+          The latest activity refresh failed. Showing
+          the last successfully loaded results.
+        </div>
+      )}
+
       <DataTable
         columns={columns}
-        rows={query.data?.items ?? []}
-        rowKey={(r) => r.id}
+        rows={items}
+        rowKey={(row) =>
+          normalizeId(row?.id) ||
+          `${normalizeText(
+            row?.occurredAt,
+            'unknown-time',
+          )}-${normalizeText(
+            row?.action,
+            'unknown-action',
+          )}`
+        }
         emptyMessage="No activity recorded yet."
         server={{
-          page, pageSize, total: query.data?.pagination.total ?? 0, loading: query.isFetching,
-          onPageChange: setPage,
-          onPageSizeChange: (n) => { setPageSize(n); setPage(1); },
+          page: normalizedPage,
+          pageSize: normalizedPageSize,
+          total,
+          loading: query.isFetching,
+          onPageChange: handlePageChange,
+          onPageSizeChange:
+            handlePageSizeChange,
         }}
       />
     </div>

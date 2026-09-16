@@ -1,29 +1,23 @@
 /**
- * Derives a granular {@link Capability} set from the user's org role and
- * effective per-module menu permissions.
+ * Maps an org role + effective menu permissions to the granular capabilities
+ * used by the dynamic Overview/widget registry.
  *
- * The backend today exposes only:
- *   - a coarse org role (viewer < editor < billing_admin < admin < owner), and
- *   - a per-module menu-permission level (none | read | write | admin),
- *     keyed by the module's navConfig `icon` / menu_key.
+ * IMPORTANT:
+ * - This is a UI capability derivation helper, not an authorization boundary.
+ * - The backend must enforce every protected action independently.
+ * - An explicit module permission is authoritative for that module.
+ * - Missing/null permissions are treated as "no overrides" for compatibility
+ *   with navConfig.canSeeModule while permissions are loading.
  *
- * The dynamic Overview needs finer distinctions than that — "can see the
- * security score" vs "can run remediation", "can read cost" vs "can execute
- * an optimization". This module maps the coarse inputs onto the granular
- * capability vocabulary the widget registry gates on. It is intentionally the
- * ONLY place that mapping lives, so swapping in a real `GET /permissions`
- * endpoint later is a one-function change.
- *
- * Precedence mirrors navConfig's `canSeeModule`: an explicit menu-permission
- * entry fully determines that module's effective level; with no entry we fall
- * back to a level implied by the role.
+ * Keep this mapping centralized so a future `GET /permissions` response can
+ * replace this derivation without changing widget consumers.
  */
 import type { MenuPermissionLevel } from '../api';
 import type { Role } from '../navConfig';
 import type { Capability, Capabilities } from './types';
 import { ALL_CAPABILITIES } from './types';
 
-const ROLE_RANK: Record<Role, number> = {
+const ROLE_RANK: Readonly<Record<Role, number>> = {
   viewer: 0,
   editor: 1,
   billing_admin: 2,
@@ -33,7 +27,7 @@ const ROLE_RANK: Record<Role, number> = {
 
 type Level = 0 | 1 | 2 | 3; // none | read | write | admin
 
-const LEVEL_RANK: Record<MenuPermissionLevel, Level> = {
+const LEVEL_RANK: Readonly<Record<MenuPermissionLevel, Level>> = {
   none: 0,
   read: 1,
   write: 2,
@@ -41,37 +35,77 @@ const LEVEL_RANK: Record<MenuPermissionLevel, Level> = {
 };
 
 /**
- * The menu_keys (navConfig module `icon`s) this mapping reasons about.
- * Modules not listed here (overview, dashboard, issues, reports, users,
- * organization, settings, credit-card) grant no domain capability.
+ * These are the only modules that contribute domain capabilities.
+ *
+ * Other navigation entries (for example Overview, Reports, Users,
+ * Organization, Settings, or billing-only navigation) do not grant a domain
+ * capability from this mapper.
  */
 type DomainModule =
-  | 'cloud' | 'cost' | 'optimization' | 'resources' | 'security'
-  | 'monitoring' | 'incidents' | 'automation' | 'containers' | 'alerts';
+  | 'cloud'
+  | 'cost'
+  | 'optimization'
+  | 'resources'
+  | 'security'
+  | 'monitoring'
+  | 'incidents'
+  | 'automation'
+  | 'containers'
+  | 'alerts';
 
 /**
- * Level a role implies for a module when there is no explicit override.
- * billing_admin is finance-forward: admin on cost/optimization, read elsewhere.
+ * Role defaults used when an explicit menu-permission entry is absent.
+ *
+ * billing_admin intentionally receives admin-level defaults only for
+ * cost/optimization and read-level defaults elsewhere.
  */
 function roleImpliedLevel(role: Role, mod: DomainModule): Level {
-  if (role === 'owner' || role === 'admin') return 3;
-  if (role === 'billing_admin') return mod === 'cost' || mod === 'optimization' ? 3 : 1;
-  if (role === 'editor') return 2;
-  return 1; // viewer
+  switch (role) {
+    case 'owner':
+    case 'admin':
+      return 3;
+    case 'billing_admin':
+      return mod === 'cost' || mod === 'optimization' ? 3 : 1;
+    case 'editor':
+      return 2;
+    case 'viewer':
+      return 1;
+    default:
+      // Role is a typed union at compile time. Keep a defensive fallback so
+      // malformed runtime data cannot accidentally produce elevated access.
+      return 0;
+  }
 }
 
+/**
+ * Resolves the effective module level.
+ *
+ * An explicit value is authoritative, including `none`.
+ */
 function effectiveLevel(
   role: Role,
-  menuPermissions: Record<string, MenuPermissionLevel> | null | undefined,
+  menuPermissions: Readonly<Record<string, MenuPermissionLevel>> | null | undefined,
   mod: DomainModule,
 ): Level {
   const override = menuPermissions?.[mod];
-  if (override) return LEVEL_RANK[override];
+
+  if (override !== undefined) {
+    return LEVEL_RANK[override] ?? 0;
+  }
+
   return roleImpliedLevel(role, mod);
 }
 
-/** Capabilities unlocked at each level threshold for a module. Cumulative: level 3 also grants level 1 & 2 rows. */
-const MODULE_TIERS: Record<DomainModule, Partial<Record<1 | 2 | 3, Capability[]>>> = {
+/**
+ * Capability tiers are cumulative:
+ * level 3 includes level 1 and level 2 capabilities.
+ *
+ * A missing tier is intentional: the module simply does not grant any
+ * additional capability at that threshold.
+ */
+const MODULE_TIERS: Readonly<
+  Record<DomainModule, Partial<Record<1 | 2 | 3, readonly Capability[]>>>
+> = {
   cloud: {
     1: ['cloud.read'],
     2: ['cloud.manage'],
@@ -103,10 +137,8 @@ const MODULE_TIERS: Record<DomainModule, Partial<Record<1 | 2 | 3, Capability[]>
     2: ['incident.manage'],
   },
   automation: {
-    // execute is a privileged, often-irreversible action — admin tier only,
-    // same as security.remediate. An editor who genuinely needs it gets an
-    // explicit `automation: 'admin'` menu override.
     1: ['automation.read'],
+    // Execution is intentionally admin-tier only.
     3: ['automation.execute'],
   },
   containers: {
@@ -120,26 +152,47 @@ const MODULE_TIERS: Record<DomainModule, Partial<Record<1 | 2 | 3, Capability[]>
   },
 };
 
-const DOMAIN_MODULES = Object.keys(MODULE_TIERS) as DomainModule[];
+const DOMAIN_MODULES = Object.freeze(
+  Object.keys(MODULE_TIERS) as DomainModule[],
+);
 
 function makeCapabilities(set: Set<Capability>): Capabilities {
+  const frozenCapabilities = Object.freeze(new Set(set));
+
   return {
-    has: (c) => set.has(c),
-    hasAll: (cs) => cs.every((c) => set.has(c)),
-    hasAny: (cs) => cs.length === 0 || cs.some((c) => set.has(c)),
-    list: () => ALL_CAPABILITIES.filter((c) => set.has(c)),
+    has: (capability) => frozenCapabilities.has(capability),
+
+    hasAll: (capabilities) =>
+      capabilities.every((capability) => frozenCapabilities.has(capability)),
+
+    hasAny: (capabilities) =>
+      capabilities.length === 0 ||
+      capabilities.some((capability) => frozenCapabilities.has(capability)),
+
+    list: () => ALL_CAPABILITIES.filter((capability) => frozenCapabilities.has(capability)),
   };
 }
 
 /**
- * @param role            the caller's role in the current org (`currentOrg.myRole`).
- * @param menuPermissions the effective per-module override map from
- *                        `useOrg().menuPermissions` (null while still loading —
- *                        treated as "no overrides", same as navConfig does).
+ * Derive the capabilities available to the current user.
+ *
+ * @param role
+ *   The caller's effective role in the current organization.
+ *
+ * @param menuPermissions
+ *   Effective per-module menu permissions. `null`/`undefined` means that no
+ *   explicit overrides are currently available, matching navConfig behavior.
+ *
+ * NOTE:
+ * This function should never be used to authorize a backend operation.
+ * It only derives client-visible capability state.
  */
 export function deriveCapabilities(
   role: Role,
-  menuPermissions: Record<string, MenuPermissionLevel> | null | undefined,
+  menuPermissions:
+    | Readonly<Record<string, MenuPermissionLevel>>
+    | null
+    | undefined,
 ): Capabilities {
   const granted = new Set<Capability>();
   const levels = {} as Record<DomainModule, Level>;
@@ -147,22 +200,45 @@ export function deriveCapabilities(
   for (const mod of DOMAIN_MODULES) {
     const level = effectiveLevel(role, menuPermissions, mod);
     levels[mod] = level;
+
     const tiers = MODULE_TIERS[mod];
+
     for (const threshold of [1, 2, 3] as const) {
-      if (level >= threshold) for (const c of tiers[threshold] ?? []) granted.add(c);
+      if (level < threshold) continue;
+
+      for (const capability of tiers[threshold] ?? []) {
+        granted.add(capability);
+      }
     }
   }
 
-  // Cross-module derivations that need more than one module's level.
-  if (levels.resources >= 2 && levels.security >= 2) granted.add('terraform.manage');
-  // An org admin/owner can always run automation, even with no explicit
-  // Automation module grant — mirrors navConfig's admin-gated Automation route.
-  if (ROLE_RANK[role] >= ROLE_RANK.admin) granted.add('automation.execute');
+  /**
+   * Terraform management requires both infrastructure management and the
+   * security investigation/admin surface represented by the current model.
+   *
+   * Keep this derivation explicit rather than encoding it into unrelated
+   * module tiers.
+   */
+  if (levels.resources >= 2 && levels.security >= 2) {
+    granted.add('terraform.manage');
+  }
+
+  /**
+   * Organization admins/owners retain automation execution even when the
+   * Automation navigation module has no explicit override, matching the
+   * current navConfig route gating behavior.
+   */
+  if (ROLE_RANK[role] >= ROLE_RANK.admin) {
+    granted.add('automation.execute');
+  }
 
   return makeCapabilities(granted);
 }
 
-/** The full-access capability set — for previews, tests, and the "everything" fallback. */
+/**
+ * Full-access capability set for previews/tests and explicit "everything"
+ * contexts.
+ */
 export function allCapabilities(): Capabilities {
   return makeCapabilities(new Set(ALL_CAPABILITIES));
 }

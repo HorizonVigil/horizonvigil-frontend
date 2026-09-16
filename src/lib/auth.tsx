@@ -1,21 +1,39 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 export type OAuthProvider = 'google' | 'azure' | 'github';
 
+const PROFILE_TABLE = 'profiles';
+const PROFILE_ID_FIELD = 'id';
+const RESET_PATH = '/login/reset';
+const AUTHENTICATED_REDIRECT_PATH = '/overview';
+
 /**
- * signIn resolves as soon as the password itself is correct, even for a
- * user enrolled in MFA -- Supabase issues a real session at 'aal1'
- * (password-only) and expects the caller to separately check whether
- * stepping up to 'aal2' (password + TOTP) is required before treating the
- * user as fully signed in. Login.tsx checks this and routes to the MFA
- * challenge screen instead of the app when it's true.
+ * Supabase can issue an AAL1 session after password authentication even when
+ * the account requires MFA. Callers should check this before granting access
+ * to the authenticated application surface.
  */
 export async function mfaStepUpRequired(): Promise<boolean> {
-  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const {
+    data,
+    error,
+  } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
   if (error) throw error;
-  return data.nextLevel === 'aal2' && data.nextLevel !== data.currentLevel;
+
+  return (
+    data.nextLevel === 'aal2' &&
+    data.currentLevel !== data.nextLevel
+  );
 }
 
 interface AuthContextType {
@@ -23,123 +41,317 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, fullName: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  /**
-   * Calls Supabase's real OAuth flow -- this redirects to the provider and
-   * back, it isn't simulated. It only succeeds end-to-end once the
-   * corresponding provider is turned on with real client credentials under
-   * Authentication > Providers in the Supabase dashboard; until then,
-   * Supabase itself returns a real "provider is not enabled" error rather
-   * than this silently pretending to work.
-   */
   signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
-  /**
-   * Calls Supabase's real Enterprise SSO API (SAML 2.0 federation with a
-   * customer's own IdP -- Okta/Entra ID/Ping, not the consumer OAuth
-   * providers above). Same honest-failure shape as signInWithOAuth: this
-   * redirects for real once a provider is registered for the given email
-   * domain, and Supabase itself returns a real "no SSO provider found for
-   * this domain" error until one is. Registering a domain's provider is a
-   * one-time setup step done per enterprise customer (via Supabase's
-   * project-level SSO configuration, which itself requires a paid add-on
-   * tier) -- this function only calls the login API, it doesn't configure
-   * anything.
-   */
   signInWithSSO: (domain: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-/**
- * Creates the public.profiles row the first time we see an authenticated
- * user. This is also what triggers handle_new_profile() in
- * 001_init.sql, which converts any pending email invites into real
- * role_grants — so "invite by email" only resolves once this has run at
- * least once for the invited user.
- */
-async function ensureProfile(user: User) {
-  await supabase.from('profiles').upsert(
-    { id: user.id, email: user.email, full_name: (user.user_metadata?.full_name as string) ?? null },
-    { onConflict: 'id', ignoreDuplicates: true },
-  );
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+function normalizeFullName(fullName: string): string {
+  return fullName.trim();
+}
+
+function normalizeDomain(domain: string): string {
+  return domain.trim().toLowerCase();
+}
+
+function getBrowserOrigin(): string {
+  if (typeof window === 'undefined') {
+    throw new Error('Authentication redirect requires a browser environment.');
+  }
+
+  return window.location.origin;
+}
+
+function authRedirect(path: string): string {
+  return `${getBrowserOrigin()}${path}`;
+}
+
+/**
+ * Ensure the application profile exists for an authenticated user.
+ *
+ * Profile creation is best-effort from the auth-provider event pipeline. The
+ * authenticated session itself must not be invalidated because a profile
+ * write is temporarily unavailable; application routes that require a
+ * profile can enforce their own readiness check.
+ *
+ * We intentionally do not log the user object or database error here because
+ * those values may contain identity information.
+ */
+async function ensureProfile(user: User): Promise<void> {
+  const email = user.email?.trim() || null;
+  const metadataFullName = user.user_metadata?.full_name;
+
+  const fullName =
+    typeof metadataFullName === 'string'
+      ? metadataFullName.trim() || null
+      : null;
+
+  const { error } = await supabase
+    .from(PROFILE_TABLE)
+    .upsert(
+      {
+        [PROFILE_ID_FIELD]: user.id,
+        email,
+        full_name: fullName,
+      },
+      {
+        onConflict: PROFILE_ID_FIELD,
+        ignoreDuplicates: true,
+      },
+    );
+
+  if (error) {
+    throw error;
+  }
+}
+
+export function AuthProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  /**
+   * Prevent stale async profile work from surfacing after an unmount.
+   * Supabase owns the underlying auth listener lifecycle; this flag only
+   * guards React state updates.
+   */
+  const mountedRef = useRef(true);
+
   useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data: { session } }) => {
-        setUser(session?.user ?? null);
-        if (session?.user) void ensureProfile(session.user).catch(() => undefined);
-      })
-      .catch(() => setUser(null))
-      .finally(() => setIsLoading(false));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    mountedRef.current = true;
+
+    let disposed = false;
+
+    const initialize = async () => {
+      try {
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+
+        if (error) throw error;
+
+        if (!disposed && mountedRef.current) {
+          setUser(session?.user ?? null);
+        }
+
+        if (session?.user) {
+          void ensureProfile(session.user).catch(() => {
+            // Profile provisioning is intentionally non-fatal to auth session
+            // restoration. The database/auth layer remains authoritative.
+          });
+        }
+      } catch {
+        if (!disposed && mountedRef.current) {
+          setUser(null);
+        }
+      } finally {
+        if (!disposed && mountedRef.current) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void initialize();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (disposed || !mountedRef.current) return;
+
       setUser(session?.user ?? null);
-      if (session?.user) void ensureProfile(session.user).catch(() => undefined);
+
+      if (session?.user) {
+        void ensureProfile(session.user).catch(() => {
+          // Best-effort profile provisioning.
+        });
+      }
     });
-    return () => listener.subscription.unsubscribe();
+
+    return () => {
+      disposed = true;
+      mountedRef.current = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+  const signIn = useCallback(
+    async (email: string, password: string): Promise<void> => {
+      const normalizedEmail = normalizeEmail(email);
+
+      if (!normalizedEmail) {
+        throw new Error('Email is required.');
+      }
+
+      if (!password) {
+        throw new Error('Password is required.');
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (error) throw error;
+    },
+    [],
+  );
+
+  const signUp = useCallback(
+    async (
+      email: string,
+      password: string,
+      fullName: string,
+    ): Promise<void> => {
+      const normalizedEmail = normalizeEmail(email);
+      const normalizedFullName = normalizeFullName(fullName);
+
+      if (!normalizedEmail) {
+        throw new Error('Email is required.');
+      }
+
+      if (!password) {
+        throw new Error('Password is required.');
+      }
+
+      if (!normalizedFullName) {
+        throw new Error('Full name is required.');
+      }
+
+      const { error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            full_name: normalizedFullName,
+          },
+        },
+      });
+
+      if (error) throw error;
+    },
+    [],
+  );
+
+  const signOut = useCallback(async (): Promise<void> => {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      throw error;
+    }
+
+    if (mountedRef.current) {
+      setUser(null);
+    }
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) throw error;
-  }, []);
+  const resetPassword = useCallback(
+    async (email: string): Promise<void> => {
+      const normalizedEmail = normalizeEmail(email);
 
-  const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-  }, []);
+      if (!normalizedEmail) {
+        throw new Error('Email is required.');
+      }
 
-  const resetPassword = useCallback(async (email: string) => {
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login/reset`,
-    });
-  }, []);
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+          redirectTo: authRedirect(RESET_PATH),
+        });
 
-  const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}/overview` },
-    });
-    if (error) throw error;
-    // On success the browser navigates away to the provider immediately --
-    // there's no local state to set here, execution doesn't continue.
-  }, []);
+      if (error) throw error;
+    },
+    [],
+  );
 
-  const signInWithSSO = useCallback(async (domain: string) => {
-    const { data, error } = await supabase.auth.signInWithSSO({
-      domain,
-      options: { redirectTo: `${window.location.origin}/overview` },
-    });
-    if (error) throw error;
-    // Unlike signInWithOAuth (which always redirects on success),
-    // signInWithSSO returns a url to navigate to rather than redirecting
-    // itself -- Supabase's own API shape, not a choice made here.
-    if (data?.url) window.location.href = data.url;
-  }, []);
+  const signInWithOAuth = useCallback(
+    async (provider: OAuthProvider): Promise<void> => {
+      if (!['google', 'azure', 'github'].includes(provider)) {
+        throw new Error('Unsupported authentication provider.');
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: authRedirect(AUTHENTICATED_REDIRECT_PATH),
+        },
+      });
+
+      if (error) throw error;
+
+      // Supabase handles the successful OAuth redirect. No local auth state
+      // is manufactured here; on the return trip the auth listener updates it.
+    },
+    [],
+  );
+
+  const signInWithSSO = useCallback(
+    async (domain: string): Promise<void> => {
+      const normalizedDomain = normalizeDomain(domain);
+
+      if (!normalizedDomain) {
+        throw new Error('SSO domain is required.');
+      }
+
+      const { data, error } = await supabase.auth.signInWithSSO({
+        domain: normalizedDomain,
+        options: {
+          redirectTo: authRedirect(AUTHENTICATED_REDIRECT_PATH),
+        },
+      });
+
+      if (error) throw error;
+
+      /**
+       * SSO returns a URL for the browser to navigate to. OAuth above uses
+       * Supabase's own redirect behavior; do not mix the two flows.
+       */
+      if (data?.url) {
+        window.location.assign(data.url);
+      }
+    },
+    [],
+  );
+
+  const value: AuthContextType = {
+    user,
+    isAuthenticated: user !== null,
+    isLoading,
+    signIn,
+    signUp,
+    signOut,
+    resetPassword,
+    signInWithOAuth,
+    signInWithSSO,
+  };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, signIn, signUp, signOut, resetPassword, signInWithOAuth, signInWithSSO }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+
   return context;
 }

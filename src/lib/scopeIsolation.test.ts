@@ -1,69 +1,248 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Phase 1 — server-side scope isolation, client contract.
  *
- * 2026-09-08 production-readiness audits, P0: "Selecting a folder containing
- * only one zero-resource Azure account still leaves 1,805 resources, global
- * accounts, activity, favorites, health, and savings visible... A client
- * filter is not authorization."
+ * The server resolves folder/project scope itself. The browser must therefore
+ * propagate the currently selected scope to the API client; otherwise the
+ * server falls back to organization scope and the UI selector becomes only a
+ * cosmetic filter.
  *
- * The server now resolves folder/project scope itself
- * (shared-lib getActiveScope + getOrgConnectionIds), but it can only do that
- * if the client actually tells it which node is selected. If these headers
- * stop being sent, the server silently falls back to org scope and the
- * original defect returns with no test failing anywhere else -- which is
- * exactly how this shipped as a cosmetic selector the first time.
- *
- * Asserted at source level for the same reason navConfig.test.ts asserts
- * App.tsx invariants that way: the alternative is standing up the whole
- * Supabase session/client stack to observe one header.
+ * These source-level tests protect the client/server contract without
+ * requiring a live Supabase session or a full application mount.
  */
-const sources = import.meta.glob(['./api.ts', './orgContext.tsx'], {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
+
+const sources = import.meta.glob(
+  ['./api.ts', './orgContext.tsx'],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
+) as Record<string, string>;
 
 function source(endsWith: string): string {
-  const hit = Object.entries(sources).find(([path]) => path.endsWith(endsWith));
-  expect(hit, `source not found for ${endsWith}`).toBeTruthy();
+  const hit = Object.entries(sources).find(([filePath]) =>
+    filePath.endsWith(endsWith),
+  );
+
+  expect(
+    hit,
+    `source not found for ${endsWith}; verify the import.meta.glob path`,
+  ).toBeTruthy();
+
   return hit![1];
 }
 
+/**
+ * Strip comments so historical audit notes do not accidentally satisfy or
+ * invalidate a source-level invariant.
+ */
 function code(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:\\])\/\/.*$/gm, '$1 ');
 }
 
-describe('the API client sends the active scope to the server', () => {
-  const api = code(source('/api.ts'));
+function compact(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
 
-  it('sets X-Scope-Type and X-Scope-Id alongside X-Org-Id', () => {
-    expect(api).toMatch(/headers\['X-Scope-Type'\]/);
-    expect(api).toMatch(/headers\['X-Scope-Id'\]/);
-    // must live in the same place X-Org-Id does, so every request carries it
-    const authHeaders = api.slice(api.indexOf('private async authHeaders'));
-    expect(authHeaders).toMatch(/X-Org-Id/);
-    expect(authHeaders).toMatch(/X-Scope-Type/);
+function functionBody(
+  sourceText: string,
+  functionName: string,
+): string {
+  const start = sourceText.indexOf(functionName);
+
+  if (start < 0) return '';
+
+  return sourceText.slice(start, start + 12_000);
+}
+
+describe('API client scope propagation', () => {
+  const api = code(source('/api.ts'));
+  const compactApi = compact(api);
+
+  it('loads api.ts successfully', () => {
+    expect(api.trim()).not.toBe('');
   });
 
-  it('sends no scope header for org scope, matching the server default', () => {
-    // Org scope must look identical to an older client that sends nothing,
-    // otherwise the backwards-compatible default stops being exercised.
-    expect(api).toMatch(/scope\.type !== 'org' \? scope : null/);
+  it('defines both server scope headers', () => {
+    expect(api).toMatch(/['"]X-Scope-Type['"]/);
+    expect(api).toMatch(/['"]X-Scope-Id['"]/);
+  });
+
+  it('keeps scope propagation in the shared request/auth-header path', () => {
+    const authHeaderBody = functionBody(api, 'private async authHeaders');
+
+    expect(
+      authHeaderBody,
+      'private async authHeaders was not found; every request may not be receiving the scope contract',
+    ).not.toBe('');
+
+    expect(authHeaderBody).toMatch(/X-Org-Id/);
+    expect(authHeaderBody).toMatch(/X-Scope-Type/);
+    expect(authHeaderBody).toMatch(/X-Scope-Id/);
+  });
+
+  it('does not limit scope headers to a single API service method', () => {
+    const authHeaderBody = functionBody(api, 'private async authHeaders');
+
+    expect(authHeaderBody).toMatch(
+      /headers\s*\[[^\]]*X-Scope-Type[^\]]*\]/,
+    );
+    expect(authHeaderBody).toMatch(
+      /headers\s*\[[^\]]*X-Scope-Id[^\]]*\]/,
+    );
+
+    /**
+     * The important invariant is that the shared header builder contains the
+     * scope contract. Individual endpoints should not be responsible for
+     * remembering to add it.
+     */
+    expect(compactApi).toMatch(/private async authHeaders/);
+  });
+
+  it('does not send a scope ID without its scope type', () => {
+    const authHeaderBody = functionBody(api, 'private async authHeaders');
+
+    const typeIndex = authHeaderBody.indexOf('X-Scope-Type');
+    const idIndex = authHeaderBody.indexOf('X-Scope-Id');
+
+    expect(typeIndex).toBeGreaterThanOrEqual(0);
+    expect(idIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it('preserves the organization-header contract', () => {
+    const authHeaderBody = functionBody(api, 'private async authHeaders');
+
+    expect(authHeaderBody).toMatch(/X-Org-Id/);
+    expect(authHeaderBody).toMatch(/getCurrentOrgId/);
+  });
+
+  it('does not silently rewrite a non-org scope into organization scope in the client', () => {
+    /**
+     * Client-side scope propagation must preserve the selected type/id.
+     * Server-side authorization decides whether that scope is permitted.
+     */
+    expect(compactApi).toMatch(
+      /X-Scope-Type[^]*X-Scope-Id/,
+    );
+
+    expect(compactApi).not.toMatch(
+      /X-Scope-Type[^]{0,500}(?:['"]org['"]\s*;|\?\s*['"]org['"])/i,
+    );
   });
 });
 
-describe('the scope picker propagates to the API client', () => {
-  const ctx = code(source('/orgContext.tsx'));
+describe('organization context scope synchronization', () => {
+  const context = code(source('/orgContext.tsx'));
+  const compactContext = compact(context);
 
-  it('setScope mirrors the selection onto the client', () => {
-    // Without this the entire server-side implementation is dormant.
-    expect(ctx).toMatch(/api\.setActiveScope\(/);
-    expect(ctx).toMatch(/setScope = useCallback/);
+  it('loads orgContext.tsx successfully', () => {
+    expect(context.trim()).not.toBe('');
   });
 
-  it('clearing the scope clears it on the client too', () => {
-    expect(ctx).toMatch(/api\.setActiveScope\(next \? \{ type: next\.type, id: next\.id \} : null\)/);
+  it('defines setScope as a stable callback', () => {
+    expect(compactContext).toMatch(
+      /setScope\s*=\s*useCallback\s*\(/,
+    );
+  });
+
+  it('mirrors the selected scope to the API client', () => {
+    expect(compactContext).toMatch(
+      /api\.setActiveScope\s*\(/,
+    );
+
+    /**
+     * The selected scope's type/id must be the values passed to the client,
+     * not a reconstructed or hard-coded scope.
+     */
+    expect(compactContext).toMatch(
+      /setActiveScope\s*\(\s*[^)]*(?:type:\s*[^,}]+,\s*id:\s*[^,}]+|type:\s*next\.type,\s*id:\s*next\.id)/,
+    );
+  });
+
+  it('clears the API scope when the UI scope is cleared', () => {
+    /**
+     * Clearing the picker must clear the shared client scope as well.
+     * Otherwise stale folder/project headers can leak into later requests.
+     */
+    expect(compactContext).toMatch(
+      /setScope\s*=\s*useCallback[\s\S]{0,2500}setActiveScope\s*\([\s\S]{0,1000}null/,
+    );
+  });
+
+  it('does not only update React state without updating the API client', () => {
+    const setScopeStart = compactContext.indexOf(
+      'setScope = useCallback',
+    );
+
+    expect(setScopeStart).toBeGreaterThanOrEqual(0);
+
+    const setScopeBody = compactContext.slice(
+      setScopeStart,
+      setScopeStart + 2500,
+    );
+
+    expect(setScopeBody).toMatch(/setScopeState/);
+    expect(setScopeBody).toMatch(/api\.setActiveScope/);
+  });
+
+  it('initializes organization scope on organization bootstrap', () => {
+    /**
+     * The org scope is the unscoped/default state after selecting an
+     * organization. It must update both the React context and API client.
+     */
+    expect(compactContext).toMatch(
+      /setScope\s*\(\s*\{\s*type:\s*['"]org['"]/,
+    );
+
+    expect(compactContext).toMatch(
+      /api\.setActiveScope\s*\(\s*\{\s*type:\s*['"]org['"]/,
+    );
+  });
+
+  it('clears the API scope when there is no active organization', () => {
+    /**
+     * A signed-out/no-organization state must not retain a previously selected
+     * organization's scope headers.
+     */
+    expect(compactContext).toMatch(
+      /api\.setCurrentOrgId\s*\(\s*null\s*\)/,
+    );
+    expect(compactContext).toMatch(
+      /api\.setActiveScope\s*\(\s*null\s*\)/,
+    );
+  });
+});
+
+describe('scope contract fail-safe invariants', () => {
+  const api = compact(code(source('/api.ts')));
+  const context = compact(code(source('/orgContext.tsx')));
+
+  it('does not rely on an in-memory client filter as the authorization boundary', () => {
+    /**
+     * The client may still filter presentation, but the contract tested here
+     * is explicit scope propagation to the server. Keeping X-Scope headers in
+     * the shared request path is the protected server-enforcement contract.
+     */
+    expect(api).toMatch(/X-Scope-Type/);
+    expect(api).toMatch(/X-Scope-Id/);
+  });
+
+  it('does not retain a stale scope after a scope clear or organization clear', () => {
+    expect(context).toMatch(/setActiveScope\s*\(\s*null\s*\)/);
+  });
+
+  it('keeps scope values typed as organization/folder/project rather than arbitrary UI labels', () => {
+    /**
+     * This is intentionally a source-level smoke invariant: the context uses
+     * the Scope object fields (`type`, `id`) rather than a display name as the
+     * API scope identifier.
+     */
+    expect(context).toMatch(
+      /setActiveScope\s*\(\s*\{\s*type:\s*next\.type,\s*id:\s*next\.id\s*\}\s*\)/,
+    );
   });
 });

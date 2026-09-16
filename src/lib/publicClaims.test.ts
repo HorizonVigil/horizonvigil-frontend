@@ -1,82 +1,153 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
- * Acceptance condition 27: "Public claims match the capability registry and
- * certified production state." AWS-P1-08 and §16 list the specific
- * statements to remove.
+ * Acceptance condition 27: public claims must remain aligned with the
+ * certified production capability registry/state.
  *
- * These are asserted rather than reviewed because the marketing copy has
- * drifted back from the product three separate times. Each string below
- * describes something the SERVER actively refuses, verified in production:
+ * These source-level assertions intentionally guard customer-facing marketing
+ * copy because this copy has historically drifted back toward capabilities
+ * that the production server currently denies or does not certify.
  *
- *   "one-click remediation"      every remediation endpoint returns 403
- *                                (PROVIDER_REMEDIATION_ENABLED, fail-closed)
- *   "cross-account role"         ASSUME_ROLE_ENABLED is off; the wizard
- *                                disables the option and bulk import 403s
- *   "prioritized by exposure"    V2 vulnerability surfaces are denied 403
- *   "Vulnerability Management"   gated module; §16 names the
- *     "› Compliance"             "Vulnerability Management > Compliance"
- *                                string explicitly for removal
+ * Protected claims:
+ * - no "one-click" remediation / customer-side fix execution
+ * - no presentation of cross-account IAM role as an available connection method
+ * - no V2 vulnerability framing that is not part of the certified surface
+ * - no routing of Compliance under Vulnerability Management
+ * - no promise of inventory completion "in minutes"
  *
- * A claim on a marketing page is not a smaller kind of falsehood than a
- * number on a dashboard. It reaches people who cannot check it.
+ * Comments are ignored so explanatory engineering notes do not affect the
+ * customer-facing copy assertions.
  */
+
 const sources = import.meta.glob(
-  ['../pages/marketing/Home.tsx', '../pages/marketing/Docs.tsx', '../pages/marketing/Pricing.tsx', './marketingContent.ts'],
-  { query: '?raw', import: 'default', eager: true },
+  [
+    '../pages/marketing/Home.tsx',
+    '../pages/marketing/Docs.tsx',
+    '../pages/marketing/Pricing.tsx',
+    './marketingContent.ts',
+  ],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
 ) as Record<string, string>;
 
-/** Comments are stripped: a doc comment explaining why a claim was removed must not fail the test that removed it. */
+function stripComments(text: string): string {
+  return text
+    // Block comments.
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    // Line comments that are not URL protocol text.
+    .replace(/(^|[^:\\])\/\/.*$/gm, '$1 ');
+}
+
 function prose(): string {
-  return Object.values(sources)
-    .map((text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''))
+  const sourceEntries = Object.entries(sources);
+
+  expect(
+    sourceEntries.length,
+    'No marketing source files were loaded; verify the import.meta.glob paths.',
+  ).toBeGreaterThan(0);
+
+  return sourceEntries
+    .map(([, text]) => stripComments(text))
     .join('\n');
 }
 
-describe('public copy does not claim capabilities the server denies', () => {
+describe('public marketing claims stay within certified production capability', () => {
   const copy = prose();
 
   it('does not advertise one-click remediation', () => {
-    expect(copy).not.toMatch(/one[- ]click/i);
+    expect(copy).not.toMatch(/\bone[-\s]click\b/i);
   });
 
-  it('does not claim a fix is applied for the customer', () => {
-    for (const claim of [/Apply a fix in one click/i, /Fixes apply/i, /Remediation applied/i]) {
-      expect(copy, `${claim} claims execution`).not.toMatch(claim);
+  it('does not claim customer-side fix execution', () => {
+    const prohibitedClaims = [
+      /\bapply a fix in one click\b/i,
+      /\bfixes apply\b/i,
+      /\bremediation applied\b/i,
+      /\bautomatically applies?\s+(?:the\s+)?fix\b/i,
+      /\bauto(?:matically)?[-\s]?remediat(?:e|ion)\b/i,
+    ];
+
+    for (const claim of prohibitedClaims) {
+      expect(copy, `customer-facing execution claim found: ${claim}`).not.toMatch(
+        claim,
+      );
     }
   });
 
-  it('does not offer cross-account role as an available connection method', () => {
-    // Naming it is fine — and necessary, since customers ask. Offering it as
-    // a choice they can make today is not.
-    for (const claim of [
-      /or a cross-account IAM role —/i,
-      /access-key, cross-account role, or/i,
-      /pick a method: a scoped access key .* or a cross-account/i,
+  it('does not present cross-account IAM role as an available connection method', () => {
+    const prohibitedClaims = [
+      /\bor a cross-account IAM role\b/i,
+      /\baccess[-\s]?key,\s*cross[-\s]?account role(?:,|\s|or)/i,
+      /\bpick a method:\s*.*cross[-\s]?account/i,
+      /\bchoose\s+(?:a|an)\s+cross[-\s]?account(?: IAM)? role\b/i,
+      /\bconnect(?:ing)?\s+(?:with|using)\s+(?:a|an)\s+cross[-\s]?account(?: IAM)? role\b/i,
+    ];
+
+    for (const claim of prohibitedClaims) {
+      expect(
+        copy,
+        `customer-facing AssumeRole availability claim found: ${claim}`,
+      ).not.toMatch(claim);
+    }
+  });
+
+  it('does not advertise V2 vulnerability framing', () => {
+    expect(copy).not.toMatch(/\bprioritized by exposure\b/i);
+    expect(copy).not.toMatch(/\bcritical findings\b/i);
+  });
+
+  it('does not place Compliance under Vulnerability Management', () => {
+    expect(copy).not.toMatch(
+      /Vulnerability Management\s*[›>]\s*Compliance/i,
+    );
+  });
+
+  it('does not promise full inventory completion within minutes', () => {
+    expect(copy).not.toMatch(
+      /\binventory in (?:a few )?minutes\b/i,
+    );
+    expect(copy).not.toMatch(
+      /\bfull inventory\b[^.\n]{0,100}\b(?:in|within)\s+(?:a few\s+)?minutes\b/i,
+    );
+  });
+
+  it('still communicates certified capabilities instead of becoming empty marketing copy', () => {
+    expect(copy).toMatch(/\bAuto-PR\b/i);
+    expect(copy).toMatch(/\bread-only\b/i);
+  });
+
+  it('does not expose internal acceptance/audit terminology in customer copy', () => {
+    const internalTerms = [
+      /AWS-P[01]-\d+/i,
+      /\bAcceptance condition\b/i,
+      /\bcertified production state\b/i,
+      /\bserver denies\b/i,
+      /\bproduction audit\b/i,
+    ];
+
+    for (const term of internalTerms) {
+      expect(copy, `internal implementation term leaked into source copy: ${term}`).not.toMatch(
+        term,
+      );
+    }
+  });
+
+  it('loads each expected marketing source so a renamed/missing file cannot silently weaken coverage', () => {
+    const loadedPaths = Object.keys(sources);
+
+    for (const expectedPath of [
+      '/Home.tsx',
+      '/Docs.tsx',
+      '/Pricing.tsx',
+      '/marketingContent.ts',
     ]) {
-      expect(copy, `${claim} presents AssumeRole as available`).not.toMatch(claim);
+      expect(
+        loadedPaths.some((filePath) => filePath.endsWith(expectedPath)),
+        `${expectedPath} was not included in the marketing-source glob`,
+      ).toBe(true);
     }
-  });
-
-  it('carries no V2 vulnerability framing', () => {
-    expect(copy).not.toMatch(/prioritized by exposure/i);
-    expect(copy).not.toMatch(/critical findings/i);
-  });
-
-  it('does not route customers to Vulnerability Management for compliance', () => {
-    // The exact string §16 names for removal. Compliance is its own module
-    // at /cloud-compliance as of Phase 10.
-    expect(copy).not.toMatch(/Vulnerability Management\s*[›>]\s*Compliance/i);
-  });
-
-  it('does not promise a full inventory in minutes', () => {
-    expect(copy).not.toMatch(/inventory in (a few )?minutes/i);
-  });
-
-  it('still says what the product DOES do, rather than going silent', () => {
-    // Removing a false claim must not leave a blank. The honest capability
-    // — hand-off via commands or an Auto-PR — is real and still advertised.
-    expect(copy).toMatch(/Auto-PR/);
-    expect(copy).toMatch(/read-only/i);
   });
 });

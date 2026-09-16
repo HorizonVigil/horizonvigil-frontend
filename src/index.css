@@ -29,6 +29,7 @@
 
     color-scheme: light;
     font-synthesis: none;
+    accent-color: var(--brand-600);
     text-rendering: optimizeLegibility;
   }
 
@@ -130,6 +131,24 @@
   }
 
   /*
+   * Native controls: keep an explicit visible affordance when the browser
+   * renders its own focus UI differently from Tailwind's ring utilities.
+   */
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline-offset: 2px;
+  }
+
+  /*
+   * Prevent long unbroken values (ARNs, resource IDs, URLs, etc.) from
+   * forcing application-level horizontal overflow.
+   */
+  pre,
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  /*
    * Native controls should remain usable in Windows High Contrast /
    * forced-colors mode.
    */
@@ -143,6 +162,19 @@
     select,
     textarea {
       forced-color-adjust: auto;
+    }
+
+    .enterprise-card,
+    .chart-card,
+    .exec-kpi-card,
+    .status-pill,
+    .ai-insight-panel {
+      forced-color-adjust: auto;
+    }
+
+    .skeleton-shimmer {
+      background: Canvas !important;
+      animation: none !important;
     }
   }
 
@@ -390,6 +422,34 @@
     );
     background-size: 400px 100%;
     animation: shimmer 1.4s ease infinite;
+  }
+}
+
+/*
+ * Print: keep reports and data readable without forcing screen-only
+ * backgrounds/shadows into paper/PDF output.
+ */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .enterprise-card,
+  .chart-card,
+  .exec-kpi-card,
+  .ai-insight-panel {
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-pulse-soft,
+  .skeleton-shimmer {
+    animation: none !important;
   }
 }
 

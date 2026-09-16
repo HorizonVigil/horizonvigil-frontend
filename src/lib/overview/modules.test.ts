@@ -1,51 +1,51 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getEnabledModules } from './modules';
 
 describe('getEnabledModules', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   /**
-   * Regression test for a real bug caught live: Cloud Security/Cloud
-   * Compliance were first built sharing Vulnerability Management's icon
-   * ('security') for RBAC reasons. getEnabledModules() feeds
-   * getVisibleModules().map(icon) straight into the Overview engine's
-   * widget-eligibility gate (engine.ts's getEligibleMeta) -- so as long as
-   * ANY visible module carried icon 'security', every module:'security'
-   * widget in registryMeta.ts (Critical Vulnerabilities, Attack Paths,
-   * Security Posture, ...) stayed eligible on the Overview dashboard even
-   * with Vulnerability Management itself correctly hidden from the sidebar.
-   * Cloud Security/Cloud Compliance now carry their own distinct icons
-   * specifically to prevent this.
+   * Regression coverage for the production bug where multiple navigation
+   * entries shared the `security` icon. The Overview engine consumes the
+   * enabled-module icon set as a widget eligibility gate, so a hidden
+   * Vulnerability Management module must not become eligible merely because
+   * Cloud Security or Cloud Compliance are visible.
    */
-  it('excludes every hidden module\'s icon in cloud-only mode, without excluding their still-visible shortcuts', () => {
+  it('excludes hidden module icons in cloud-only mode while preserving visible management shortcuts', () => {
     vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'true');
+
     const enabled = getEnabledModules('owner', null);
 
-    expect(enabled.has('security')).toBe(false); // Vulnerability Management
+    // Vulnerability Management.
+    expect(enabled.has('security')).toBe(false);
+
+    // Modules hidden in cloud-only mode.
     expect(enabled.has('incidents')).toBe(false);
     expect(enabled.has('issues')).toBe(false);
-    expect(enabled.has('dashboard')).toBe(false); // Custom Dashboards
+    expect(enabled.has('dashboard')).toBe(false);
     expect(enabled.has('monitoring')).toBe(false);
     expect(enabled.has('alerts')).toBe(false);
 
-    // Users & Groups / Organization Management stay visible in cloud-only
-    // mode -- access/org management is needed regardless of product scope.
+    // Access/org-management remains available.
     expect(enabled.has('users')).toBe(true);
     expect(enabled.has('organization')).toBe(true);
-    // The cloud-only shortcuts are still visible, on their own distinct
-    // icons -- proving they didn't get swept up in the exclusion above.
+
+    // Cloud-only security/compliance shortcuts use distinct identifiers.
     expect(enabled.has('cloud-security')).toBe(true);
     expect(enabled.has('cloud-compliance')).toBe(true);
-    // FinOps (never hidden) and its Cost Optimization shortcut share 'cost'
-    // -- both visible, and safe to share since FinOps itself is never hidden.
+
+    // Cost is not hidden by cloud-only mode.
     expect(enabled.has('cost')).toBe(true);
   });
 
-  it('includes every module\'s icon in full (non-cloud-only) mode', () => {
+  it('includes the full module icon set in non-cloud-only mode', () => {
     vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'false');
+
     const enabled = getEnabledModules('owner', null);
+
     expect(enabled.has('security')).toBe(true);
     expect(enabled.has('incidents')).toBe(true);
     expect(enabled.has('organization')).toBe(true);
@@ -54,5 +54,84 @@ describe('getEnabledModules', () => {
     expect(enabled.has('users')).toBe(true);
     expect(enabled.has('monitoring')).toBe(true);
     expect(enabled.has('alerts')).toBe(true);
+  });
+
+  it('does not leak a hidden security capability through cloud-only shortcut modules', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'true');
+
+    const enabled = getEnabledModules('owner', null);
+
+    // The critical invariant is not merely that Vulnerability Management is
+    // absent from navigation; its exact `security` capability/module key must
+    // also be absent from the returned set.
+    expect(enabled.has('security')).toBe(false);
+
+    expect(enabled.has('cloud-security')).toBe(true);
+    expect(enabled.has('cloud-compliance')).toBe(true);
+  });
+
+  it('keeps output isolated between calls when the environment changes', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'true');
+    const cloudOnly = getEnabledModules('owner', null);
+
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'false');
+    const full = getEnabledModules('owner', null);
+
+    expect(cloudOnly.has('security')).toBe(false);
+    expect(full.has('security')).toBe(true);
+
+    // The first Set must represent the state at the time it was created,
+    // rather than sharing mutable state with later calls.
+    expect(cloudOnly.has('incidents')).toBe(false);
+    expect(full.has('incidents')).toBe(true);
+  });
+
+  it('accepts null permissions without treating them as an explicit deny', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'false');
+
+    const enabled = getEnabledModules('owner', null);
+
+    expect(enabled.has('security')).toBe(true);
+    expect(enabled.has('cost')).toBe(true);
+    expect(enabled.has('users')).toBe(true);
+    expect(enabled.has('organization')).toBe(true);
+  });
+
+  it('keeps the cloud-only result free of the modules explicitly known to be hidden', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'true');
+
+    const enabled = getEnabledModules('owner', null);
+
+    const hiddenInCloudOnly = [
+      'security',
+      'incidents',
+      'issues',
+      'dashboard',
+      'monitoring',
+      'alerts',
+    ];
+
+    for (const moduleIcon of hiddenInCloudOnly) {
+      expect(
+        enabled.has(moduleIcon),
+        `expected hidden module icon "${moduleIcon}" to be excluded`,
+      ).toBe(false);
+    }
+  });
+
+  it('does not share mutable Set state across callers', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'false');
+
+    const first = getEnabledModules('owner', null);
+    const second = getEnabledModules('owner', null);
+
+    expect(first).not.toBe(second);
+
+    const originalSecondSize = second.size;
+    first.add('__test_only__');
+
+    expect(first.has('__test_only__')).toBe(true);
+    expect(second.has('__test_only__')).toBe(false);
+    expect(second.size).toBe(originalSecondSize);
   });
 });

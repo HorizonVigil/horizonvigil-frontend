@@ -1,158 +1,1374 @@
-/**
- * Cloud Accounts — Health tab (spec §8, §37). One row per connected
- * environment across AWS + Azure + GCP, each with an explainable score:
- * click a row to see the five weighted signals and exactly why it has that
- * state. Data from the connector `GET /health/detailed` endpoints.
- */
-import { Fragment, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+
 import { Badge } from '../Badge';
 import { StatCard } from '../StatCard';
 import { Icon } from '../icons';
 import { TableSkeleton } from '../Skeleton';
 import { EmptyState } from '../EmptyState';
-import { api, friendlyErrorMessage, type HealthSignalStatus } from '../../lib/api';
-import { summarizeHealthRows, HEALTH_STATE_TONE, HEALTH_STATE_LABEL, healthTierClass } from '../../lib/cloudAccounts/health';
+import {
+  api,
+  friendlyErrorMessage,
+  type HealthSignalStatus,
+} from '../../lib/api';
+import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
+import {
+  summarizeHealthRows,
+  HEALTH_STATE_TONE,
+  HEALTH_STATE_LABEL,
+  healthTierClass,
+} from '../../lib/cloudAccounts/health';
 import { useFilters } from '../../lib/filterContext';
 import { useOrg } from '../../lib/orgContext';
 
-const SIGNAL_DOT: Record<HealthSignalStatus, string> = {
-  ok: 'bg-emerald-500', warn: 'bg-amber-500', fail: 'bg-red-500', unknown: 'bg-slate-400',
+const SIGNAL_DOT: Record<
+  HealthSignalStatus,
+  string
+> = {
+  ok: 'bg-emerald-500',
+  warn: 'bg-amber-500',
+  fail: 'bg-red-500',
+  unknown: 'bg-slate-400',
 };
 
-export function HealthPanel({ refreshToken }: { refreshToken: number }) {
+const PROVIDERS = ['aws', 'azure', 'gcp'] as const;
+type Provider = (typeof PROVIDERS)[number];
+
+const HEALTH_STATES = [
+  'healthy',
+  'warning',
+  'critical',
+  'unknown',
+] as const;
+
+type HealthState = (typeof HEALTH_STATES)[number];
+
+interface HealthPanelProps {
+  refreshToken: number;
+}
+
+interface ProviderHealthResponse {
+  accounts?: unknown[];
+}
+
+function isProvider(
+  value: unknown,
+): value is Provider {
+  return (
+    value === 'aws' ||
+    value === 'azure' ||
+    value === 'gcp'
+  );
+}
+
+function isHealthState(
+  value: unknown,
+): value is HealthState {
+  return (
+    value === 'healthy' ||
+    value === 'warning' ||
+    value === 'critical' ||
+    value === 'unknown'
+  );
+}
+
+function isHealthSignalStatus(
+  value: unknown,
+): value is HealthSignalStatus {
+  return (
+    value === 'ok' ||
+    value === 'warn' ||
+    value === 'fail' ||
+    value === 'unknown'
+  );
+}
+
+function normalizeText(
+  value: unknown,
+  fallback: string,
+): string {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+
+  return normalized || fallback;
+}
+
+function normalizeScore(
+  value: unknown,
+): number | null {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value)
+  ) {
+    return null;
+  }
+
+  return Math.min(
+    100,
+    Math.max(0, Math.round(value)),
+  );
+}
+
+function normalizeNonNegativeInteger(
+  value: unknown,
+): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0
+  ) {
+    return 0;
+  }
+
+  return Math.floor(value);
+}
+
+function normalizeHealthRows(
+  rows: unknown[],
+): UnifiedAccountRow[] {
+  /*
+   * The connector/API should already return the typed domain model.
+   *
+   * This defensive guard prevents malformed/null records from causing the
+   * entire Health tab to crash if a connector response is partially corrupt.
+   */
+  return rows.filter(
+    (row): row is UnifiedAccountRow =>
+      Boolean(
+        row &&
+          typeof row === 'object' &&
+          typeof (row as UnifiedAccountRow).connectionId ===
+            'string' &&
+          typeof (row as UnifiedAccountRow).provider ===
+            'string' &&
+          isProvider(
+            (row as UnifiedAccountRow).provider,
+          ) &&
+          isHealthState(
+            (row as UnifiedAccountRow).state,
+          ),
+      ),
+  );
+}
+
+function getStateTone(
+  state: unknown,
+) {
+  if (isHealthState(state)) {
+    return HEALTH_STATE_TONE[state];
+  }
+
+  return HEALTH_STATE_TONE.unknown;
+}
+
+function getStateLabel(
+  state: unknown,
+): string {
+  if (isHealthState(state)) {
+    return HEALTH_STATE_LABEL[state];
+  }
+
+  return HEALTH_STATE_LABEL.unknown;
+}
+
+function normalizeSignalStatus(
+  status: unknown,
+): HealthSignalStatus {
+  return isHealthSignalStatus(status)
+    ? status
+    : 'unknown';
+}
+
+function normalizeSignalLabel(
+  label: unknown,
+): string {
+  return normalizeText(
+    label,
+    'Health signal',
+  );
+}
+
+function normalizeSignalDetail(
+  detail: unknown,
+): string {
+  return normalizeText(
+    detail,
+    'No additional details are available.',
+  );
+}
+
+function getRowIdentity(
+  row: UnifiedAccountRow,
+  index: number,
+): string {
+  /*
+   * connectionId is expected to uniquely identify the connected environment.
+   * The index is only a defensive fallback for malformed duplicate data.
+   */
+  const id = normalizeText(
+    row.connectionId,
+    '',
+  );
+
+  return id || `health-row-${index}`;
+}
+
+export function HealthPanel({
+  refreshToken,
+}: HealthPanelProps) {
   const navigate = useNavigate();
   const { connections } = useFilters();
   const { scope } = useOrg();
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [providerFilter, setProviderFilter] = useState<'' | 'aws' | 'azure' | 'gcp'>('');
-  const [stateFilter, setStateFilter] = useState<'' | 'healthy' | 'warning' | 'critical' | 'unknown'>('');
+
+  const tableId = useId();
+  const filterDescriptionId = useId();
+
+  const [expanded, setExpanded] =
+    useState<string | null>(null);
+
+  const [providerFilter, setProviderFilter] =
+    useState<'' | Provider>('');
+
+  const [stateFilter, setStateFilter] =
+    useState<'' | HealthState>('');
 
   const query = useQuery({
-    queryKey: ['cloud-accounts', 'health-detailed', refreshToken],
+    queryKey: [
+      'cloud-accounts',
+      'health-detailed',
+      refreshToken,
+    ],
+
     queryFn: async () => {
-      const [aws, azure, gcp] = await Promise.allSettled([
-        api.getAwsHealthDetailed(), api.getAzureHealthDetailed(), api.getGcpHealthDetailed(),
-      ]);
-      const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : null);
-      const responses = [val(aws), val(azure), val(gcp)];
-      return { rows: responses.flatMap((r) => r?.accounts ?? []) };
+      const results =
+        await Promise.allSettled([
+          api.getAwsHealthDetailed(),
+          api.getAzureHealthDetailed(),
+          api.getGcpHealthDetailed(),
+        ]);
+
+      /*
+       * Keep successful providers even when another provider fails.
+       *
+       * This is important for a multi-cloud product: an Azure connector
+       * failure should not erase otherwise valid AWS/GCP health data.
+       */
+      const successfulResponses =
+        results
+          .filter(
+            (
+              result,
+            ): result is PromiseFulfilledResult<ProviderHealthResponse> =>
+              result.status === 'fulfilled',
+          )
+          .map((result) => result.value);
+
+      const failedProviderCount =
+        results.filter(
+          (result) =>
+            result.status === 'rejected',
+        ).length;
+
+      const rawRows =
+        successfulResponses.flatMap(
+          (response) =>
+            Array.isArray(response?.accounts)
+              ? response.accounts
+              : [],
+        );
+
+      return {
+        rows: normalizeHealthRows(rawRows),
+        failedProviderCount,
+      };
     },
+
     staleTime: 60_000,
+
+    /*
+     * Refreshing health is safe, but automatic retries are deliberately
+     * limited. Provider authorization failures generally will not be fixed
+     * by repeatedly retrying from the browser.
+     */
+    retry: 1,
+
+    gcTime: 5 * 60_000,
   });
 
-  // `connections` is already narrowed to the active org/folder/project scope
-  // (see lib/scope.ts) -- cross-referencing by connectionId scopes these
-  // per-account health rows (and the KPIs recomputed from them) the same way,
-  // without this tab needing to know about folders/projects itself.
+  /*
+   * `connections` is already narrowed to the active organization/folder/
+   * project scope by the filter context.
+   *
+   * Health rows are scoped by connectionId so this tab does not duplicate
+   * folder/project scope logic.
+   */
   const scopedRows = useMemo(() => {
     const rows = query.data?.rows ?? [];
-    const scopedIds = new Set(connections.map((c) => c.id));
-    return rows.filter((r) => scopedIds.has(r.connectionId));
-  }, [query.data, connections]);
+
+    if (connections.length === 0) {
+      return [];
+    }
+
+    const scopedIds = new Set(
+      connections
+        .map((connection) => connection.id)
+        .filter(
+          (id): id is string =>
+            typeof id === 'string' &&
+            id.trim().length > 0,
+        ),
+    );
+
+    return rows.filter((row) =>
+      scopedIds.has(row.connectionId),
+    );
+  }, [query.data?.rows, connections]);
+
+  /*
+   * If the currently expanded environment disappears because of a scope
+   * change, provider refresh, or account removal, close its details panel.
+   */
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+
+    const stillExists = scopedRows.some(
+      (row) =>
+        row.connectionId === expanded,
+    );
+
+    if (!stillExists) {
+      setExpanded(null);
+    }
+  }, [expanded, scopedRows]);
 
   const filtered = useMemo(() => {
-    let rows = scopedRows;
-    if (providerFilter) rows = rows.filter((r) => r.provider === providerFilter);
-    if (stateFilter) rows = rows.filter((r) => r.state === stateFilter);
-    const rank = { critical: 0, warning: 1, unknown: 2, healthy: 3 };
-    return [...rows].sort((a, b) => rank[a.state] - rank[b.state] || a.score - b.score);
-  }, [scopedRows, providerFilter, stateFilter]);
+    let result = scopedRows;
 
-  if (query.isLoading) return <TableSkeleton rows={6} cols={5} />;
-  if (query.isError) {
+    if (providerFilter) {
+      result = result.filter(
+        (row) =>
+          row.provider === providerFilter,
+      );
+    }
+
+    if (stateFilter) {
+      result = result.filter(
+        (row) =>
+          row.state === stateFilter,
+      );
+    }
+
+    /*
+     * Preserve the product's intended severity ordering:
+     * critical → warning → unknown → healthy.
+     *
+     * Score is only used as a secondary ordering signal within a state.
+     * Unknown rows are not sorted by an invented score.
+     */
+    const rank: Record<HealthState, number> = {
+      critical: 0,
+      warning: 1,
+      unknown: 2,
+      healthy: 3,
+    };
+
+    return [...result].sort(
+      (a, b) => {
+        const aState = isHealthState(a.state)
+          ? a.state
+          : 'unknown';
+
+        const bState = isHealthState(b.state)
+          ? b.state
+          : 'unknown';
+
+        const stateDifference =
+          rank[aState] - rank[bState];
+
+        if (stateDifference !== 0) {
+          return stateDifference;
+        }
+
+        /*
+         * Unknown means no reliable score. Do not let an invalid score
+         * accidentally sort before/after real scores.
+         */
+        const aScore =
+          aState === 'unknown'
+            ? null
+            : normalizeScore(a.score);
+
+        const bScore =
+          bState === 'unknown'
+            ? null
+            : normalizeScore(b.score);
+
+        if (
+          aScore !== null &&
+          bScore !== null
+        ) {
+          return aScore - bScore;
+        }
+
+        if (
+          aScore !== null &&
+          bScore === null
+        ) {
+          return -1;
+        }
+
+        if (
+          aScore === null &&
+          bScore !== null
+        ) {
+          return 1;
+        }
+
+        return normalizeText(
+          a.connectionName,
+          '',
+        ).localeCompare(
+          normalizeText(
+            b.connectionName,
+            '',
+          ),
+        );
+      },
+    );
+  }, [
+    scopedRows,
+    providerFilter,
+    stateFilter,
+  ]);
+
+  const combined = useMemo(
+    () => summarizeHealthRows(scopedRows),
+    [scopedRows],
+  );
+
+  const handleToggleExpanded = useCallback(
+    (id: string) => {
+      if (!id) {
+        return;
+      }
+
+      setExpanded((current) =>
+        current === id ? null : id,
+      );
+    },
+    [],
+  );
+
+  const handleNavigate = useCallback(
+    (connectionId: string) => {
+      const normalizedId =
+        normalizeText(
+          connectionId,
+          '',
+        );
+
+      if (!normalizedId) {
+        return;
+      }
+
+      navigate(
+        `/cloud-accounts/${encodeURIComponent(
+          normalizedId,
+        )}`,
+      );
+    },
+    [navigate],
+  );
+
+  const clearFilters = useCallback(() => {
+    setProviderFilter('');
+    setStateFilter('');
+  }, []);
+
+  /*
+   * Initial loading only.
+   *
+   * If a refresh occurs while previous data exists, keep the existing table
+   * visible instead of replacing it with a skeleton.
+   */
+  if (
+    query.isLoading &&
+    !query.data
+  ) {
     return (
-      <div className="rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-600 dark:text-red-300">
-        Couldn't load account health: {friendlyErrorMessage(query.error)}
+      <div
+        aria-label="Loading account health"
+        aria-busy="true"
+      >
+        <TableSkeleton
+          rows={6}
+          cols={5}
+        />
       </div>
     );
   }
 
-  const combined = summarizeHealthRows(scopedRows);
-  if (combined.total === 0) {
-    return scope && scope.type !== 'org' && (query.data?.rows.length ?? 0) > 0
-      ? <EmptyState icon="gauge" title={`No environments in ${scope.name}`} description="Pick a different folder/project scope, or switch back to the whole organization." />
-      : <EmptyState icon="gauge" title="No connected environments yet" description="Connect an AWS account, Azure subscription or GCP project to see its health here." />;
+  /*
+   * A completely failed query means none of the provider requests produced
+   * usable data. Show an actual error rather than "no environments".
+   */
+  if (
+    query.isError &&
+    !query.data
+  ) {
+    return (
+      <div
+        role="alert"
+        className={[
+          'rounded-md border px-3 py-3',
+          'border-red-200 bg-red-50',
+          'text-sm text-red-700',
+          'dark:border-red-900',
+          'dark:bg-red-900/20',
+          'dark:text-red-300',
+        ].join(' ')}
+      >
+        <div className="flex items-start gap-2">
+          <Icon
+            name="alert-triangle"
+            size={15}
+            className="mt-0.5 shrink-0"
+            aria-hidden="true"
+          />
+
+          <div className="min-w-0">
+            <p className="font-medium">
+              Couldn't load account health
+            </p>
+
+            <p className="mt-1">
+              {friendlyErrorMessage(
+                query.error,
+              )}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
+  /*
+   * No scoped data.
+   *
+   * Distinguish "scope contains no environments" from the organization having
+   * no connected environments at all.
+   */
+  if (combined.total === 0) {
+    const hasAnyReturnedRows =
+      (query.data?.rows.length ?? 0) > 0;
+
+    if (
+      scope &&
+      scope.type !== 'org' &&
+      hasAnyReturnedRows
+    ) {
+      return (
+        <EmptyState
+          icon="gauge"
+          title={`No environments in ${scope.name}`}
+          description="Pick a different folder/project scope, or switch back to the whole organization."
+        />
+      );
+    }
+
+    return (
+      <EmptyState
+        icon="gauge"
+        title="No connected environments yet"
+        description="Connect an AWS account, Azure subscription or GCP project to see its health here."
+      />
+    );
+  }
+
+  const hasActiveFilters =
+    Boolean(
+      providerFilter ||
+        stateFilter,
+    );
+
+  const failedProviderCount =
+    query.data?.failedProviderCount ?? 0;
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Overall Health" value={combined.healthPercent === null ? '—' : `${combined.healthPercent}%`}
-          caption={combined.healthPercent === null ? 'Nothing rated yet' : `${combined.healthy}/${combined.total - combined.unknown} healthy`}
-          icon="gauge" iconTone={combined.healthPercent !== null && combined.healthPercent >= 85 ? 'good' : combined.healthPercent !== null && combined.healthPercent >= 60 ? 'warning' : 'critical'} />
-        <StatCard label="Healthy" value={String(combined.healthy)} icon="check-circle" iconTone="good" />
-        <StatCard label="Warning" value={String(combined.warning)} icon="alert-triangle" iconTone={combined.warning > 0 ? 'warning' : 'neutral'} />
-        <StatCard label="Critical" value={String(combined.critical)} icon="shield-alert" iconTone={combined.critical > 0 ? 'critical' : 'neutral'} />
-        <StatCard label="Unknown" value={String(combined.unknown)} icon="help" iconTone="neutral" />
+    <section
+      aria-labelledby={tableId}
+      className="flex flex-col gap-4"
+    >
+      <h2
+        id={tableId}
+        className="sr-only"
+      >
+        Cloud environment health
+      </h2>
+
+      {/* KPI summary */}
+      <div
+        className="grid grid-cols-2 gap-3 md:grid-cols-5"
+        aria-label="Health summary"
+      >
+        <StatCard
+          label="Overall Health"
+          value={
+            combined.healthPercent === null
+              ? '—'
+              : `${combined.healthPercent}%`
+          }
+          caption={
+            combined.healthPercent === null
+              ? 'Nothing rated yet'
+              : `${combined.healthy}/${Math.max(
+                  combined.total -
+                    combined.unknown,
+                  0,
+                )} healthy`
+          }
+          icon="gauge"
+          iconTone={
+            combined.healthPercent ===
+            null
+              ? 'neutral'
+              : combined.healthPercent >=
+                85
+              ? 'good'
+              : combined.healthPercent >=
+                60
+              ? 'warning'
+              : 'critical'
+          }
+        />
+
+        <StatCard
+          label="Healthy"
+          value={String(
+            normalizeNonNegativeInteger(
+              combined.healthy,
+            ),
+          )}
+          icon="check-circle"
+          iconTone="good"
+        />
+
+        <StatCard
+          label="Warning"
+          value={String(
+            normalizeNonNegativeInteger(
+              combined.warning,
+            ),
+          )}
+          icon="alert-triangle"
+          iconTone={
+            combined.warning > 0
+              ? 'warning'
+              : 'neutral'
+          }
+        />
+
+        <StatCard
+          label="Critical"
+          value={String(
+            normalizeNonNegativeInteger(
+              combined.critical,
+            ),
+          )}
+          icon="shield-alert"
+          iconTone={
+            combined.critical > 0
+              ? 'critical'
+              : 'neutral'
+          }
+        />
+
+        <StatCard
+          label="Unknown"
+          value={String(
+            normalizeNonNegativeInteger(
+              combined.unknown,
+            ),
+          )}
+          icon="help"
+          iconTone="neutral"
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        {combined.perProvider.map((p) => (
-          <button key={p.provider} type="button" onClick={() => setProviderFilter((f) => f === p.provider ? '' : p.provider)}
-            className={`rounded-lg border px-3 py-2 text-left transition-colors ${providerFilter === p.provider ? 'border-brand-400 dark:border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-            <div className="text-xs uppercase tracking-wide text-slate-400">{p.provider}</div>
-            <div className={`text-lg font-semibold tabular-nums ${healthTierClass(p.healthPercent)}`}>{p.healthPercent === null ? '—' : `${p.healthPercent}%`}</div>
-            <div className="text-[11px] text-slate-400">{p.total} environment{p.total === 1 ? '' : 's'}</div>
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5">
-          {(['healthy', 'warning', 'critical', 'unknown'] as const).map((s) => (
-            <button key={s} type="button" onClick={() => setStateFilter((f) => f === s ? '' : s)}
-              className={`text-xs rounded-full px-2.5 py-1 border capitalize transition-colors ${stateFilter === s ? 'bg-brand-600 border-brand-600 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>{s}</button>
-          ))}
+      {/* Provider/state filters */}
+      <div
+        className="flex flex-wrap items-center gap-3"
+        aria-describedby={
+          filterDescriptionId
+        }
+      >
+        <span
+          id={filterDescriptionId}
+          className="sr-only"
+        >
+          Filter environments by provider or
+          health state.
+        </span>
+
+        {combined.perProvider.map(
+          (providerSummary) => {
+            if (
+              !isProvider(
+                providerSummary.provider,
+              )
+            ) {
+              return null;
+            }
+
+            const active =
+              providerFilter ===
+              providerSummary.provider;
+
+            const healthPercent =
+              normalizeScore(
+                providerSummary.healthPercent,
+              );
+
+            return (
+              <button
+                key={
+                  providerSummary.provider
+                }
+                type="button"
+                aria-pressed={active}
+                aria-label={`Filter by ${providerSummary.provider}. ${providerSummary.total} environment${providerSummary.total === 1 ? '' : 's'}`}
+                onClick={() =>
+                  setProviderFilter(
+                    (current) =>
+                      current ===
+                      providerSummary.provider
+                        ? ''
+                        : providerSummary.provider,
+                  )
+                }
+                className={[
+                  'rounded-lg border px-3 py-2',
+                  'text-left transition-colors',
+                  'focus:outline-none',
+                  'focus-visible:ring-2',
+                  'focus-visible:ring-brand-500',
+                  'focus-visible:ring-offset-1',
+                  'dark:focus-visible:ring-offset-slate-950',
+                  active
+                    ? [
+                        'border-brand-400',
+                        'bg-brand-50',
+                        'dark:border-brand-500',
+                        'dark:bg-brand-900/30',
+                      ].join(' ')
+                    : [
+                        'border-slate-200',
+                        'hover:bg-slate-50',
+                        'dark:border-slate-700',
+                        'dark:hover:bg-slate-800',
+                      ].join(' '),
+                ].join(' ')}
+              >
+                <div className="text-xs uppercase tracking-wide text-slate-400">
+                  {providerSummary.provider}
+                </div>
+
+                <div
+                  className={[
+                    'text-lg font-semibold tabular-nums',
+                    healthTierClass(
+                      healthPercent,
+                    ),
+                  ].join(' ')}
+                >
+                  {healthPercent === null
+                    ? '—'
+                    : `${healthPercent}%`}
+                </div>
+
+                <div className="text-[11px] text-slate-400">
+                  {normalizeNonNegativeInteger(
+                    providerSummary.total,
+                  )}{' '}
+                  environment
+                  {providerSummary.total ===
+                  1
+                    ? ''
+                    : 's'}
+                </div>
+              </button>
+            );
+          },
+        )}
+
+        <div
+          className={[
+            'flex flex-wrap items-center gap-1.5',
+            'sm:ml-auto',
+          ].join(' ')}
+          aria-label="Health state filters"
+        >
+          {HEALTH_STATES.map(
+            (state) => {
+              const active =
+                stateFilter === state;
+
+              return (
+                <button
+                  key={state}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() =>
+                    setStateFilter(
+                      (current) =>
+                        current === state
+                          ? ''
+                          : state,
+                    )
+                  }
+                  className={[
+                    'rounded-full border px-2.5 py-1',
+                    'text-xs capitalize',
+                    'transition-colors',
+                    'focus:outline-none',
+                    'focus-visible:ring-2',
+                    'focus-visible:ring-brand-500',
+                    'focus-visible:ring-offset-1',
+                    'dark:focus-visible:ring-offset-slate-950',
+                    active
+                      ? [
+                          'border-brand-600',
+                          'bg-brand-600',
+                          'text-white',
+                        ].join(' ')
+                      : [
+                          'border-slate-200',
+                          'text-slate-600',
+                          'hover:bg-slate-50',
+                          'dark:border-slate-700',
+                          'dark:text-slate-300',
+                          'dark:hover:bg-slate-800',
+                        ].join(' '),
+                  ].join(' ')}
+                >
+                  {state}
+                </button>
+              );
+            },
+          )}
+
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className={[
+                'ml-1 rounded-md px-2 py-1',
+                'text-xs text-slate-500',
+                'underline-offset-2 hover:underline',
+                'dark:text-slate-400',
+                'focus:outline-none',
+                'focus-visible:ring-2',
+                'focus-visible:ring-brand-500',
+              ].join(' ')}
+            >
+              Clear filters
+            </button>
+          ) : null}
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 text-left text-slate-500 dark:text-slate-400">
-              <th className="px-3 py-2">Environment</th>
-              <th className="px-3 py-2">Provider</th>
-              <th className="px-3 py-2">Score</th>
-              <th className="px-3 py-2">State</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((row) => {
-              const open = expanded === row.connectionId;
-              return (
-                <Fragment key={row.connectionId}>
-                  <tr className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => setExpanded(open ? null : row.connectionId)}>
-                    <td className="px-3 py-2">
-                      <button onClick={(e) => { e.stopPropagation(); navigate(`/cloud-accounts/${row.connectionId}`); }} className="text-slate-700 dark:text-slate-200 hover:underline font-medium">{row.connectionName}</button>
-                      <span className="text-xs text-slate-400 ml-1.5">{row.environment}</span>
-                    </td>
-                    <td className="px-3 py-2"><Badge tone="neutral">{row.provider.toUpperCase()}</Badge></td>
-                    <td className="px-3 py-2 tabular-nums">{row.state === 'unknown' ? '—' : `${row.score}`}</td>
-                    <td className="px-3 py-2"><Badge tone={HEALTH_STATE_TONE[row.state]}>{HEALTH_STATE_LABEL[row.state]}</Badge></td>
-                    <td className="px-3 py-2 text-right text-slate-400"><Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} /></td>
-                  </tr>
-                  {open && (
-                    <tr className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 bg-slate-50/60 dark:bg-slate-800/30">
-                      <td colSpan={5} className="px-3 py-3">
-                        <ul className="flex flex-col gap-1.5">
-                          {row.signals.map((sig) => (
-                            <li key={sig.key} className="flex items-start gap-2 text-xs">
-                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 mt-1.5 ${SIGNAL_DOT[sig.status]}`} />
-                              <span className="font-medium text-slate-600 dark:text-slate-300 w-32 shrink-0">{sig.label}</span>
-                              <span className="text-slate-500 dark:text-slate-400">{sig.detail}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-            {filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">No environments match these filters.</td></tr>}
-          </tbody>
-        </table>
+      {/* Partial provider failure */}
+      {failedProviderCount > 0 ? (
+        <div
+          role="status"
+          className={[
+            'rounded-md border px-3 py-2',
+            'border-amber-200 bg-amber-50',
+            'text-xs text-amber-700',
+            'dark:border-amber-900/50',
+            'dark:bg-amber-950/30',
+            'dark:text-amber-300',
+          ].join(' ')}
+        >
+          Health data from{' '}
+          {failedProviderCount}{' '}
+          provider
+          {failedProviderCount === 1
+            ? ''
+            : 's'} could not be loaded. The
+          displayed results contain only
+          successfully retrieved provider data.
+        </div>
+      ) : null}
+
+      {/* Background refresh indicator */}
+      {query.isFetching &&
+      !query.isLoading ? (
+        <div
+          role="status"
+          className="text-xs text-slate-400"
+          aria-live="polite"
+        >
+          Refreshing health data…
+        </div>
+      ) : null}
+
+      {/* Health table */}
+      <div
+        className={[
+          'overflow-hidden rounded-xl border',
+          'border-slate-200 bg-white',
+          'dark:border-slate-800',
+          'dark:bg-slate-900',
+        ].join(' ')}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <caption className="sr-only">
+              Cloud environment health and
+              explainable health signals
+            </caption>
+
+            <thead>
+              <tr
+                className={[
+                  'border-b',
+                  'border-slate-200',
+                  'text-left text-slate-500',
+                  'dark:border-slate-800',
+                  'dark:text-slate-400',
+                ].join(' ')}
+              >
+                <th
+                  scope="col"
+                  className="px-3 py-2"
+                >
+                  Environment
+                </th>
+
+                <th
+                  scope="col"
+                  className="px-3 py-2"
+                >
+                  Provider
+                </th>
+
+                <th
+                  scope="col"
+                  className="px-3 py-2"
+                >
+                  Score
+                </th>
+
+                <th
+                  scope="col"
+                  className="px-3 py-2"
+                >
+                  State
+                </th>
+
+                <th
+                  scope="col"
+                  className="px-3 py-2 text-right"
+                >
+                  <span className="sr-only">
+                    Details
+                  </span>
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filtered.map(
+                (row, index) => {
+                  const rowId =
+                    getRowIdentity(
+                      row,
+                      index,
+                    );
+
+                  const open =
+                    expanded ===
+                    row.connectionId;
+
+                  const score =
+                    normalizeScore(
+                      row.score,
+                    );
+
+                  const state =
+                    isHealthState(
+                      row.state,
+                    )
+                      ? row.state
+                      : 'unknown';
+
+                  const connectionName =
+                    normalizeText(
+                      row.connectionName,
+                      'Unnamed environment',
+                    );
+
+                  const environment =
+                    normalizeText(
+                      row.environment,
+                      '',
+                    );
+
+                  const providerName =
+                    isProvider(
+                      row.provider,
+                    )
+                      ? row.provider
+                      : 'unknown';
+
+                  const detailPanelId = `${tableId}-${rowId}-details`;
+
+                  const signals =
+                    Array.isArray(
+                      row.signals,
+                    )
+                      ? row.signals
+                      : [];
+
+                  return (
+                    <Fragment
+                      key={rowId}
+                    >
+                      <tr
+                        className={[
+                          'border-b',
+                          'border-slate-100',
+                          'dark:border-slate-800/60',
+                          open
+                            ? 'bg-slate-50 dark:bg-slate-800/40'
+                            : '',
+                        ].join(' ')}
+                      >
+                        <td className="px-3 py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleNavigate(
+                                  row.connectionId,
+                                )
+                              }
+                              className={[
+                                'min-w-0 truncate',
+                                'font-medium',
+                                'text-slate-700',
+                                'hover:underline',
+                                'dark:text-slate-200',
+                                'focus:outline-none',
+                                'focus-visible:ring-2',
+                                'focus-visible:ring-brand-500',
+                                'focus-visible:ring-offset-1',
+                                'dark:focus-visible:ring-offset-slate-900',
+                              ].join(' ')}
+                              title={
+                                connectionName
+                              }
+                              aria-label={`Open ${connectionName}`}
+                            >
+                              {
+                                connectionName
+                              }
+                            </button>
+
+                            {environment ? (
+                              <span
+                                className={[
+                                  'shrink-0 text-xs',
+                                  'text-slate-400',
+                                ].join(
+                                  ' ',
+                                )}
+                                title={
+                                  environment
+                                }
+                              >
+                                {
+                                  environment
+                                }
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        <td className="px-3 py-2">
+                          <Badge tone="neutral">
+                            {providerName.toUpperCase()}
+                          </Badge>
+                        </td>
+
+                        <td className="px-3 py-2 tabular-nums">
+                          {state ===
+                          'unknown' ||
+                          score === null
+                            ? '—'
+                            : score}
+                        </td>
+
+                        <td className="px-3 py-2">
+                          <Badge
+                            tone={getStateTone(
+                              state,
+                            )}
+                          >
+                            {
+                              getStateLabel(
+                                state,
+                              )
+                            }
+                          </Badge>
+                        </td>
+
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            aria-expanded={
+                              open
+                            }
+                            aria-controls={
+                              detailPanelId
+                            }
+                            aria-label={
+                              open
+                                ? `Hide health details for ${connectionName}`
+                                : `Show health details for ${connectionName}`
+                            }
+                            onClick={() =>
+                              handleToggleExpanded(
+                                row.connectionId,
+                              )
+                            }
+                            className={[
+                              'inline-flex items-center',
+                              'justify-center rounded-md',
+                              'p-1.5 text-slate-400',
+                              'hover:bg-slate-100',
+                              'hover:text-slate-600',
+                              'dark:hover:bg-slate-800',
+                              'dark:hover:text-slate-300',
+                              'focus:outline-none',
+                              'focus-visible:ring-2',
+                              'focus-visible:ring-brand-500',
+                            ].join(
+                              ' ',
+                            )}
+                          >
+                            <Icon
+                              name={
+                                open
+                                  ? 'chevron-up'
+                                  : 'chevron-down'
+                              }
+                              size={14}
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </td>
+                      </tr>
+
+                      {open ? (
+                        <tr
+                          id={
+                            detailPanelId
+                          }
+                          className={[
+                            'border-b',
+                            'border-slate-100',
+                            'bg-slate-50/60',
+                            'dark:border-slate-800/60',
+                            'dark:bg-slate-800/30',
+                          ].join(
+                            ' ',
+                          )}
+                        >
+                          <td
+                            colSpan={5}
+                            className="px-3 py-3"
+                          >
+                            <div
+                              aria-label={`Health signals for ${connectionName}`}
+                            >
+                              {signals.length ===
+                              0 ? (
+                                <p className="text-xs text-slate-400">
+                                  No health signal
+                                  details are
+                                  available for
+                                  this environment.
+                                </p>
+                              ) : (
+                                <ul className="flex flex-col gap-2">
+                                  {signals.map(
+                                    (
+                                      signal,
+                                      signalIndex,
+                                    ) => {
+                                      const status =
+                                        normalizeSignalStatus(
+                                          signal?.status,
+                                        );
+
+                                      const label =
+                                        normalizeSignalLabel(
+                                          signal?.label,
+                                        );
+
+                                      const detail =
+                                        normalizeSignalDetail(
+                                          signal?.detail,
+                                        );
+
+                                      const signalKey =
+                                        normalizeText(
+                                          signal?.key,
+                                          `${rowId}-signal-${signalIndex}`,
+                                        );
+
+                                      return (
+                                        <li
+                                          key={`${signalKey}-${signalIndex}`}
+                                          className={[
+                                            'flex items-start',
+                                            'gap-2 text-xs',
+                                          ].join(
+                                            ' ',
+                                          )}
+                                        >
+                                          <span
+                                            className={[
+                                              'mt-1.5 h-1.5',
+                                              'w-1.5 shrink-0',
+                                              'rounded-full',
+                                              SIGNAL_DOT[
+                                                status
+                                              ],
+                                            ].join(
+                                              ' '
+                                            )}
+                                            aria-hidden="true"
+                                          />
+
+                                          <span
+                                            className={[
+                                              'w-32 shrink-0',
+                                              'font-medium',
+                                              'text-slate-600',
+                                              'dark:text-slate-300',
+                                            ].join(
+                                              ' '
+                                            )}
+                                          >
+                                            {
+                                              label
+                                            }
+                                          </span>
+
+                                          <span
+                                            className={[
+                                              'min-w-0',
+                                              'break-words',
+                                              'text-slate-500',
+                                              'dark:text-slate-400',
+                                            ].join(
+                                              ' '
+                                            )}
+                                          >
+                                            {
+                                              detail
+                                            }
+
+                                            <span className="sr-only">
+                                              {' '}
+                                              Status:{' '}
+                                              {
+                                                status
+                                              }
+                                            </span>
+                                          </span>
+                                        </li>
+                                      );
+                                    },
+                                  )}
+                                </ul>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                },
+              )}
+
+              {filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className={[
+                      'px-3 py-10',
+                      'text-center text-sm',
+                      'text-slate-400',
+                    ].join(' ')}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <Icon
+                        name="search"
+                        size={18}
+                        aria-hidden="true"
+                      />
+
+                      <span>
+                        No environments match
+                        these filters.
+                      </span>
+
+                      {hasActiveFilters ? (
+                        <button
+                          type="button"
+                          onClick={
+                            clearFilters
+                          }
+                          className={[
+                            'text-xs',
+                            'text-brand-600',
+                            'hover:underline',
+                            'dark:text-brand-400',
+                            'focus:outline-none',
+                            'focus-visible:ring-2',
+                            'focus-visible:ring-brand-500',
+                          ].join(
+                            ' '
+                          )}
+                        >
+                          Clear filters
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

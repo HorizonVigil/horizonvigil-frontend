@@ -1,121 +1,272 @@
 /**
- * FinOps → Overview — pure aggregation layer (spec §8–9, §11–15, §19–22,
- * §27–29). Composed on the frontend from the same endpoints Cost Management
- * and Cost Optimization already use (getCostAnalytics, getCostForecast,
- * getCostExplorer, getBudgets, getCostOptimizationDashboard,
- * getCostAnomalies, getSavingsOpportunities) — no new backend calls.
+ * FinOps → Overview — pure aggregation and presentation-data helpers.
  *
- * No fabricated numbers: a metric this compose layer genuinely can't
- * produce (true resource-level cost — CostSnapshot is service+account+date
- * granularity, not per-resource) is simply not offered, rather than
- * approximated.
+ * The Overview is composed from the same backend endpoints already used by
+ * Cost Management and Cost Optimization. This module does not make network
+ * requests and does not fabricate unavailable metrics.
+ *
+ * Important contracts:
+ * - Cost values remain in their source currency and are not silently converted
+ *   here.
+ * - Unresolvable connection keys are omitted rather than guessed.
+ * - Budget/optimization/anomaly aggregates are defensive against malformed
+ *   runtime payloads.
+ * - Date calculations use UTC calendar dates so client timezone boundaries do
+ *   not shift reporting windows.
+ * - Exported helpers are pure and do not mutate caller-owned collections.
  */
-import type { Budget, CostAnomaly, CostRecommendation, CostSnapshot } from '../api';
+
+import type {
+  Budget,
+  CostAnomaly,
+  CostRecommendation,
+  CostSnapshot,
+} from '../api';
 import type { UnifiedAccountRow } from '../unifiedAccounts';
 import type { BarDatum } from '../../components/charts/BarChart';
 import type { DateRangePreset } from '../filterContext';
 
-// Not imported from filterContext.tsx on purpose: that module has a real
-// (non-type) `import { api } from './api'` at its top, which throws at
-// vitest module-load time with no VITE_SUPABASE_URL set (see lib/supabase.ts)
-// — the same reason lib/overview/scopeLogic.ts exists as its own file.
+export type Provider = 'aws' | 'azure' | 'gcp';
+
+export const PROVIDERS: readonly Provider[] = [
+  'aws',
+  'azure',
+  'gcp',
+];
+
+export const PROVIDER_LABEL: Record<Provider, string> = {
+  aws: 'AWS',
+  azure: 'Azure',
+  gcp: 'GCP',
+};
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function nonNegative(value: unknown): number {
+  return isFiniteNumber(value) ? Math.max(0, value) : 0;
+}
+
+function normalizeString(value: unknown, fallback = ''): string {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim();
+  return normalized || fallback;
+}
+
+function normalizeLimit(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.floor(value);
+}
+
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseIsoDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || toIsoDate(date) !== value) {
+    return null;
+  }
+
+  return date;
+}
+
 function dateRangeToDays(range: DateRangePreset): number {
   switch (range) {
-    case '1h': return 1;
-    case '7d': return 7;
-    case '30d': return 30;
-    case 'mtd': return new Date().getDate();
+    case '1h':
+      // Cost endpoints in this module are date-scoped, so the shortest
+      // supported window is the current calendar day.
+      return 1;
+    case '7d':
+      return 7;
+    case '30d':
+      return 30;
+    case 'mtd':
+      return new Date().getUTCDate();
+    default:
+      return 1;
   }
 }
 
-export type Provider = 'aws' | 'azure' | 'gcp';
-export const PROVIDER_LABEL: Record<Provider, string> = { aws: 'AWS', azure: 'Azure', gcp: 'GCP' };
-
-/** Converts the FilterBar's day-count preset into ISO from/to dates for the cost-management-api's date-scoped endpoints. Shared with Cost Management's own copy. */
-export function rangeToFromTo(range: DateRangePreset): { from: string; to: string } {
+/**
+ * Converts the FilterBar day preset into an inclusive UTC date range.
+ */
+export function rangeToFromTo(
+  range: DateRangePreset,
+): { from: string; to: string } {
   const days = dateRangeToDays(range);
   const to = new Date();
   const from = new Date(to);
-  from.setDate(from.getDate() - days + 1);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+
+  from.setUTCDate(from.getUTCDate() - days + 1);
+
+  return {
+    from: toIsoDate(from),
+    to: toIsoDate(to),
+  };
 }
 
-/** The immediately-preceding, equal-length window before `{from, to}` — spec §11/§39's "vs Previous Period". */
-export function previousRange({ from, to }: { from: string; to: string }): { from: string; to: string } {
-  const fromD = new Date(`${from}T00:00:00Z`);
-  const toD = new Date(`${to}T00:00:00Z`);
-  const days = Math.round((toD.getTime() - fromD.getTime()) / 86_400_000) + 1;
-  const prevTo = new Date(fromD);
-  prevTo.setUTCDate(prevTo.getUTCDate() - 1);
-  const prevFrom = new Date(prevTo);
-  prevFrom.setUTCDate(prevFrom.getUTCDate() - days + 1);
-  return { from: prevFrom.toISOString().slice(0, 10), to: prevTo.toISOString().slice(0, 10) };
+/** The immediately preceding equal-length UTC calendar window. */
+export function previousRange({
+  from,
+  to,
+}: {
+  from: string;
+  to: string;
+}): { from: string; to: string } {
+  const fromDate = parseIsoDate(from);
+  const toDate = parseIsoDate(to);
+
+  if (!fromDate || !toDate) {
+    return { from, to };
+  }
+
+  const days =
+    Math.floor((toDate.getTime() - fromDate.getTime()) / 86_400_000) + 1;
+
+  if (!Number.isFinite(days) || days <= 0) {
+    return { from, to };
+  }
+
+  const previousTo = new Date(fromDate);
+  previousTo.setUTCDate(previousTo.getUTCDate() - 1);
+
+  const previousFrom = new Date(previousTo);
+  previousFrom.setUTCDate(previousFrom.getUTCDate() - days + 1);
+
+  return {
+    from: toIsoDate(previousFrom),
+    to: toIsoDate(previousTo),
+  };
 }
 
-/** % change from `previous` to `current`, or null when there's nothing to compare against (avoids a divide-by-zero reading as -100%/+Infinity). */
+/** Percentage change from previous to current; null means no valid baseline. */
 export function percentChange(current: number, previous: number): number | null {
-  if (previous <= 0) return null;
+  if (!isFiniteNumber(current) || !isFiniteNumber(previous) || previous <= 0) {
+    return null;
+  }
+
   return Math.round(((current - previous) / previous) * 100);
 }
 
-export function aggregateDaily(rows: CostSnapshot[]): { date: string; cost: number }[] {
-  const byDate = new Map<string, number>();
-  for (const r of rows) byDate.set(r.usage_date, (byDate.get(r.usage_date) ?? 0) + Number(r.unblended_cost));
-  return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, cost]) => ({ date, cost }));
+function connectionForKey(
+  accountKey: string,
+  connections: readonly UnifiedAccountRow[],
+): UnifiedAccountRow | null {
+  for (const connection of connections) {
+    if (connection.id === accountKey || connection.identifier === accountKey) {
+      return connection;
+    }
+  }
+
+  return null;
 }
 
-/** Resolve which provider an analytics `byAccount` key belongs to — keys are native account/subscription/project ids OR connection ids depending on the source, so check both. */
-function providerOf(accountKey: string, connections: UnifiedAccountRow[]): Provider | null {
-  const row = connections.find((c) => c.id === accountKey || c.identifier === accountKey);
-  return row ? row.provider : null;
-}
-
-/** Cost by cloud (spec §12) — sums `byAccount` entries per resolved provider. Unresolvable keys (no matching connection) are dropped rather than guessed. */
-export function costByCloudBars(byAccount: Record<string, number>, connections: UnifiedAccountRow[]): BarDatum[] {
+/** Cost by cloud. Unknown analytics keys are intentionally omitted. */
+export function costByCloudBars(
+  byAccount: Record<string, number>,
+  connections: readonly UnifiedAccountRow[],
+): BarDatum[] {
   const sums = new Map<Provider, number>();
-  for (const [key, cost] of Object.entries(byAccount)) {
-    const p = providerOf(key, connections);
-    if (!p) continue;
-    sums.set(p, (sums.get(p) ?? 0) + cost);
+
+  for (const [key, rawCost] of Object.entries(byAccount ?? {})) {
+    const connection = connectionForKey(key, connections);
+    if (!connection) continue;
+
+    const provider = connection.provider;
+    if (provider !== 'aws' && provider !== 'azure' && provider !== 'gcp') {
+      continue;
+    }
+
+    const cost = nonNegative(rawCost);
+    if (cost <= 0) continue;
+
+    sums.set(provider, (sums.get(provider) ?? 0) + cost);
   }
-  return (['aws', 'azure', 'gcp'] as const)
-    .filter((p) => sums.has(p))
-    .map((p) => ({ label: PROVIDER_LABEL[p], value: sums.get(p)! }))
-    .sort((a, b) => b.value - a.value);
+
+  return PROVIDERS
+    .filter((provider) => sums.has(provider))
+    .map((provider) => ({
+      label: PROVIDER_LABEL[provider],
+      value: sums.get(provider) ?? 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.value - a.value || a.label.localeCompare(b.label),
+    );
 }
 
-/** Cost by account/subscription/project (spec §13) — top N, resolved to a display name where possible. */
-export function costByAccountBars(byAccount: Record<string, number>, connections: UnifiedAccountRow[], limit = 10): BarDatum[] {
-  return Object.entries(byAccount)
-    .map(([key, value]) => {
-      const row = connections.find((c) => c.id === key || c.identifier === key);
-      return { label: row ? row.name : key, value };
+/** Cost by account/subscription/project, top N, resolved to a display name. */
+export function costByAccountBars(
+  byAccount: Record<string, number>,
+  connections: readonly UnifiedAccountRow[],
+  limit = 10,
+): BarDatum[] {
+  const safeLimit = normalizeLimit(limit, 10);
+
+  return Object.entries(byAccount ?? {})
+    .map(([key, rawValue]) => {
+      const row = connectionForKey(key, connections);
+      return {
+        label: row?.name?.trim() || key || 'Unknown',
+        value: nonNegative(rawValue),
+      };
     })
-    .filter((d) => d.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, limit);
+    .filter((item) => item.value > 0)
+    .sort(
+      (a, b) =>
+        b.value - a.value || a.label.localeCompare(b.label),
+    )
+    .slice(0, safeLimit);
 }
 
-/** Cost by environment (spec §17) — sums `byAccount` per connection's environment. Unresolvable keys are dropped, same as costByCloudBars. */
-export function costByEnvironmentBars(byAccount: Record<string, number>, connections: UnifiedAccountRow[]): BarDatum[] {
+/** Cost by environment. Unknown connection keys are omitted. */
+export function costByEnvironmentBars(
+  byAccount: Record<string, number>,
+  connections: readonly UnifiedAccountRow[],
+): BarDatum[] {
   const sums = new Map<string, number>();
-  for (const [key, cost] of Object.entries(byAccount)) {
-    const row = connections.find((c) => c.id === key || c.identifier === key);
+
+  for (const [key, rawValue] of Object.entries(byAccount ?? {})) {
+    const row = connectionForKey(key, connections);
     if (!row) continue;
-    sums.set(row.environment, (sums.get(row.environment) ?? 0) + cost);
+
+    const value = nonNegative(rawValue);
+    if (value <= 0) continue;
+
+    const environment = normalizeString(row.environment, 'Unknown');
+    sums.set(environment, (sums.get(environment) ?? 0) + value);
   }
-  return [...sums.entries()].map(([label, value]) => ({ label, value })).filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
-}
 
-export function recordToBars(record: Record<string, number> | null | undefined, limit = 8): BarDatum[] {
-  return Object.entries(record ?? {})
+  return [...sums.entries()]
     .map(([label, value]) => ({ label, value }))
-    .filter((d) => d.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, limit);
+    .sort(
+      (a, b) =>
+        b.value - a.value || a.label.localeCompare(b.label),
+    );
 }
 
-// ── Budget rollup (spec §19) ────────────────────────────────────────────────
+export function recordToBars(
+  record: Record<string, number> | null | undefined,
+  limit = 8,
+): BarDatum[] {
+  const safeLimit = normalizeLimit(limit, 8);
+
+  return Object.entries(record ?? {})
+    .map(([label, rawValue]) => ({
+      label: normalizeString(label, 'Unknown'),
+      value: nonNegative(rawValue),
+    }))
+    .filter((item) => item.value > 0)
+    .sort(
+      (a, b) =>
+        b.value - a.value || a.label.localeCompare(b.label),
+    )
+    .slice(0, safeLimit);
+}
 
 export interface BudgetRollup {
   count: number;
@@ -128,29 +279,65 @@ export interface BudgetRollup {
   warningCount: number;
 }
 
-const STATUS_RANK: Record<Budget['status'], number> = { ok: 0, warning: 1, exceeded: 2 };
+const STATUS_RANK: Record<Budget['status'], number> = {
+  ok: 0,
+  warning: 1,
+  exceeded: 2,
+};
 
-export function summarizeBudgets(budgets: Budget[]): BudgetRollup {
-  if (budgets.length === 0) {
-    return { count: 0, totalLimit: 0, totalSpend: 0, totalForecast: 0, usedPercent: null, worst: null, exceededCount: 0, warningCount: 0 };
+export function summarizeBudgets(
+  budgets: readonly Budget[],
+): BudgetRollup {
+  if (!Array.isArray(budgets) || budgets.length === 0) {
+    return {
+      count: 0,
+      totalLimit: 0,
+      totalSpend: 0,
+      totalForecast: 0,
+      usedPercent: null,
+      worst: null,
+      exceededCount: 0,
+      warningCount: 0,
+    };
   }
-  const totalLimit = budgets.reduce((s, b) => s + b.monthly_limit, 0);
-  const totalSpend = budgets.reduce((s, b) => s + b.currentSpend, 0);
-  const totalForecast = budgets.reduce((s, b) => s + b.projectedSpend, 0);
-  const worst = budgets.reduce<Budget['status']>((w, b) => (STATUS_RANK[b.status] > STATUS_RANK[w] ? b.status : w), 'ok');
+
+  let totalLimit = 0;
+  let totalSpend = 0;
+  let totalForecast = 0;
+  let exceededCount = 0;
+  let warningCount = 0;
+  let worst: Budget['status'] | null = null;
+
+  for (const item of budgets) {
+    totalLimit += nonNegative(item.monthly_limit);
+    totalSpend += nonNegative(item.currentSpend);
+    totalForecast += nonNegative(item.projectedSpend);
+
+    if (item.status === 'exceeded') exceededCount += 1;
+    if (item.status === 'warning') warningCount += 1;
+
+    if (
+      item.status in STATUS_RANK &&
+      (worst === null || STATUS_RANK[item.status] > STATUS_RANK[worst])
+    ) {
+      worst = item.status;
+    }
+  }
+
   return {
     count: budgets.length,
     totalLimit,
     totalSpend,
     totalForecast,
-    usedPercent: totalLimit > 0 ? Math.round((totalSpend / totalLimit) * 100) : null,
+    usedPercent:
+      totalLimit > 0
+        ? Math.round((totalSpend / totalLimit) * 100)
+        : null,
     worst,
-    exceededCount: budgets.filter((b) => b.status === 'exceeded').length,
-    warningCount: budgets.filter((b) => b.status === 'warning').length,
+    exceededCount,
+    warningCount,
   };
 }
-
-// ── Optimization breakdown (spec §22) ───────────────────────────────────────
 
 const CATEGORY_LABEL: Record<string, string> = {
   rightsizing: 'Rightsizing',
@@ -160,54 +347,102 @@ const CATEGORY_LABEL: Record<string, string> = {
   savings_plan: 'Savings Plans',
 };
 
-/**
- * Savings by category, counting only what can honestly be acted on (§9).
- *
- * Every open recommendation used to be summed here. On 2026-09-09 that meant
- * this chart's bars were made entirely of four recommendations whose target
- * instances had all been deleted — including one instance counted twice,
- * under two mutually exclusive actions.
- */
-export function optimizationByCategory(recs: CostRecommendation[]): BarDatum[] {
+/** Savings by category, limited to recommendations explicitly marked actionable. */
+export function optimizationByCategory(
+  recs: readonly CostRecommendation[],
+): BarDatum[] {
   const sums = new Map<string, number>();
-  for (const r of recs) {
-    if (r.validity !== 'actionable') continue;
-    sums.set(r.category, (sums.get(r.category) ?? 0) + r.potential_monthly_savings);
-  }
-  return [...sums.entries()]
-    .map(([category, value]) => ({ label: CATEGORY_LABEL[category] ?? category.replace(/_/g, ' '), value }))
-    .filter((d) => d.value > 0)
-    .sort((a, b) => b.value - a.value);
-}
 
-// ── Anomaly severity (spec §21) ─────────────────────────────────────────────
+  for (const recommendation of recs) {
+    if (recommendation.validity !== 'actionable') continue;
+
+    const value = nonNegative(
+      recommendation.potential_monthly_savings,
+    );
+    if (value <= 0) continue;
+
+    const category = normalizeString(
+      recommendation.category,
+      'other',
+    );
+
+    sums.set(category, (sums.get(category) ?? 0) + value);
+  }
+
+  return [...sums.entries()]
+    .map(([category, value]) => ({
+      label:
+        CATEGORY_LABEL[category] ?? category.replace(/_/g, ' '),
+      value,
+    }))
+    .filter((item) => item.value > 0)
+    .sort(
+      (a, b) =>
+        b.value - a.value || a.label.localeCompare(b.label),
+    );
+}
 
 export type AnomalySeverity = 'critical' | 'warning';
 
-export function anomalySeverity(percentChange: number): AnomalySeverity {
-  return percentChange >= 50 ? 'critical' : 'warning';
+export function anomalySeverity(
+  percentChange: number,
+): AnomalySeverity {
+  const value = isFiniteNumber(percentChange)
+    ? Math.abs(percentChange)
+    : 0;
+
+  return value >= 50 ? 'critical' : 'warning';
 }
 
-export function sortAnomalies(anomalies: CostAnomaly[]): CostAnomaly[] {
-  return [...anomalies].sort((a, b) => b.dollar_impact - a.dollar_impact);
+export function sortAnomalies(
+  anomalies: readonly CostAnomaly[],
+): CostAnomaly[] {
+  return [...anomalies].sort((a, b) => {
+    const impactA = Math.abs(nonNegative(a.dollar_impact));
+    const impactB = Math.abs(nonNegative(b.dollar_impact));
+
+    return (
+      impactB - impactA ||
+      String(a.id).localeCompare(String(b.id))
+    );
+  });
 }
 
-// ── Cost trend (spec §11) — cumulative-vs-previous not derivable without a
-// second fetch, so this exposes what the compose layer has: the daily series
-// itself plus a simple split at the midpoint for a period-over-period read.
+/**
+ * Splits an already-loaded daily series at the midpoint. It does not make a
+ * second backend request and therefore is not a true arbitrary historical
+ * previous-period comparison unless the supplied series contains both halves.
+ */
+export function periodOverPeriod(
+  daily: readonly { date: string; cost: number }[],
+): {
+  current: number;
+  previous: number;
+  changePercent: number | null;
+} {
+  if (!Array.isArray(daily) || daily.length === 0) {
+    return { current: 0, previous: 0, changePercent: null };
+  }
 
-export function periodOverPeriod(daily: { date: string; cost: number }[]): { current: number; previous: number; changePercent: number | null } {
-  if (daily.length < 2) {
-    const current = daily.reduce((s, d) => s + d.cost, 0);
+  if (daily.length === 1) {
+    const current = nonNegative(daily[0].cost);
     return { current, previous: 0, changePercent: null };
   }
-  const mid = Math.floor(daily.length / 2);
-  const previous = daily.slice(0, mid).reduce((s, d) => s + d.cost, 0);
-  const current = daily.slice(mid).reduce((s, d) => s + d.cost, 0);
-  return { current, previous, changePercent: previous > 0 ? Math.round(((current - previous) / previous) * 100) : null };
-}
 
-// ── Biggest increases / decreases (spec §29) ────────────────────────────────
+  const mid = Math.floor(daily.length / 2);
+  const previous = daily
+    .slice(0, mid)
+    .reduce((sum, point) => sum + nonNegative(point.cost), 0);
+  const current = daily
+    .slice(mid)
+    .reduce((sum, point) => sum + nonNegative(point.cost), 0);
+
+  return {
+    current,
+    previous,
+    changePercent: percentChange(current, previous),
+  };
+}
 
 export interface CostChange {
   label: string;
@@ -216,19 +451,71 @@ export interface CostChange {
   delta: number;
 }
 
-/** Per-service delta between two `byService` snapshots, split into increases and decreases, each sorted by absolute dollar impact. A service present in only one period is a full increase/decrease from/to zero, not dropped. */
+/** Per-service deltas, split into independently capped increases/decreases. */
 export function biggestChanges(
   current: Record<string, number>,
   previous: Record<string, number>,
   limit = 5,
-): { increases: CostChange[]; decreases: CostChange[] } {
-  const services = new Set([...Object.keys(current), ...Object.keys(previous)]);
+): {
+  increases: CostChange[];
+  decreases: CostChange[];
+} {
+  const safeLimit = normalizeLimit(limit, 5);
+  const services = new Set([
+    ...Object.keys(current ?? {}),
+    ...Object.keys(previous ?? {}),
+  ]);
+
   const changes: CostChange[] = [...services].map((label) => {
-    const cur = current[label] ?? 0;
-    const prev = previous[label] ?? 0;
-    return { label, current: cur, previous: prev, delta: cur - prev };
+    const currentValue = nonNegative(current?.[label]);
+    const previousValue = nonNegative(previous?.[label]);
+
+    return {
+      label,
+      current: currentValue,
+      previous: previousValue,
+      delta: currentValue - previousValue,
+    };
   });
-  const increases = changes.filter((c) => c.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, limit);
-  const decreases = changes.filter((c) => c.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, limit);
+
+  const increases = changes
+    .filter((change) => change.delta > 0)
+    .sort(
+      (a, b) =>
+        b.delta - a.delta || a.label.localeCompare(b.label),
+    )
+    .slice(0, safeLimit);
+
+  const decreases = changes
+    .filter((change) => change.delta < 0)
+    .sort(
+      (a, b) =>
+        a.delta - b.delta || a.label.localeCompare(b.label),
+    )
+    .slice(0, safeLimit);
+
   return { increases, decreases };
+}
+
+/** Aggregates daily cost by usage date. Invalid cost values contribute zero. */
+export function aggregateDaily(
+  rows: readonly CostSnapshot[],
+): { date: string; cost: number }[] {
+  const byDate = new Map<string, number>();
+
+  for (const row of rows) {
+    if (!row) continue;
+
+    const date = normalizeString(row.usage_date);
+    if (!date) continue;
+
+    const parsedCost = Number(row.unblended_cost);
+    const cost = isFiniteNumber(parsedCost) ? parsedCost : 0;
+
+    byDate.set(date, (byDate.get(date) ?? 0) + cost);
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, cost]) => ({ date, cost }));
 }

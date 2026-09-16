@@ -1,27 +1,26 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { isVulnerabilityDataEnabled } from './featureFlags';
 import { NAV_MODULES } from './navConfig';
 
 /**
- * P0-A regression tests for the 2026-09-08 production-readiness audit's
- * first release gate: "Complete V2 isolation -- a V1 E2E/network test finds
- * no V2 label, record, count, route result, export, or request."
+ * P0-A regression tests for the 2026-09-08 production-readiness audit:
  *
- * Verified against production the same day: all 4,075 open rows in
- * vulnerability_findings come from trivy / scanner_trufflehog /
- * scanner_checkov / scanner_grype / scanner_trivy / scanner_semgrep, and
- * ZERO come from the V1 posture sources (aws_config, iam_access_analyzer,
- * gcp_scc, defender). So any V1 surface reading that table is showing 100%
- * V2 data -- which is how Overview showed "167 critical vulnerabilities
- * open", Cloud Security's Posture tab showed 3,615 findings, and the Issues
- * queue showed ~3,619 open items when the real V1 work queue was 4.
+ * "Complete V2 isolation -- a V1 E2E/network test finds no V2 label, record,
+ * count, route result, export, or request."
  *
- * Gating the V2 *routes* (App.tsx redirects) did not fix this, because each
- * of these surfaces called the V2 APIs directly. These tests assert the
- * call sites stay gated, using the same `?raw` source-import technique
- * navConfig.test.ts already uses to assert App.tsx invariants.
+ * Production observations recorded on 2026-09-08:
+ * - 4,075 open vulnerability_findings rows came from V2 scanners/sources.
+ * - Zero came from the audited V1 posture sources.
+ * - V1 surfaces therefore previously exposed V2 counts such as the Overview
+ *   critical-vulnerability KPI, Cloud Security Posture findings, and Issues
+ *   queue entries.
+ *
+ * These are source-level regression tests. They complement API/integration
+ * and end-to-end tests; they do not prove runtime/network isolation alone.
  */
-const sources = import.meta.glob(
+
+const SOURCES = import.meta.glob(
   [
     '../lib/overview/contextSignals.ts',
     '../components/overview/widgets/operationsWidgets.tsx',
@@ -34,18 +33,101 @@ const sources = import.meta.glob(
     '../pages/CloudAccounts.tsx',
     '../components/overview/widgets/securityWidgets.tsx',
   ],
-  { query: '?raw', import: 'default', eager: true },
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
 ) as Record<string, string>;
 
 function source(endsWith: string): string {
-  const hit = Object.entries(sources).find(([path]) => path.endsWith(endsWith));
-  expect(hit, `source not found for ${endsWith} -- did the file move?`).toBeTruthy();
+  const hit = Object.entries(SOURCES).find(([path]) => path.endsWith(endsWith));
+
+  expect(
+    hit,
+    `source not found for ${endsWith} -- did the file move?`,
+  ).toBeTruthy();
+
   return hit![1];
 }
 
-/** Strips line/block comments so a doc comment mentioning an API name isn't mistaken for a call site. */
+/**
+ * Removes comments for call-site assertions without treating URL text
+ * (`https://...`) as a line comment.
+ *
+ * This is deliberately not a JavaScript parser. It only preserves quoted
+ * strings/template literals while skipping block and line comments, which is
+ * sufficient for these source-level contracts.
+ */
 function code(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  let result = '';
+  let index = 0;
+  let state: 'code' | 'single' | 'double' | 'template' = 'code';
+
+  while (index < text.length) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (state === 'code') {
+      if (char === '/' && next === '*') {
+        const end = text.indexOf('*/', index + 2);
+        if (end === -1) break;
+        result += ' ';
+        index = end + 2;
+        continue;
+      }
+
+      if (char === '/' && next === '/') {
+        const end = text.indexOf('\n', index + 2);
+        if (end === -1) break;
+        result += '\n';
+        index = end + 1;
+        continue;
+      }
+
+      if (char === "'") {
+        state = 'single';
+      } else if (char === '"') {
+        state = 'double';
+      } else if (char === '`') {
+        state = 'template';
+      }
+
+      result += char;
+      index += 1;
+      continue;
+    }
+
+    result += char;
+
+    if (char === '\\') {
+      if (text[index + 1] !== undefined) {
+        result += text[index + 1];
+        index += 2;
+        continue;
+      }
+    }
+
+    if (
+      (state === 'single' && char === "'") ||
+      (state === 'double' && char === '"') ||
+      (state === 'template' && char === '`')
+    ) {
+      state = 'code';
+    }
+
+    index += 1;
+  }
+
+  return result;
+}
+
+function sectionAfter(sourceText: string, marker: string): string {
+  const index = sourceText.indexOf(marker);
+
+  expect(index, `section marker not found: ${marker}`).toBeGreaterThanOrEqual(0);
+
+  return sourceText.slice(index);
 }
 
 afterEach(() => {
@@ -53,163 +135,184 @@ afterEach(() => {
 });
 
 describe('isVulnerabilityDataEnabled', () => {
-  it('is off in cloud-only mode, which is the real production V1 setting', () => {
+  it('is disabled in cloud-only V1 mode', () => {
     vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'true');
+
     expect(isVulnerabilityDataEnabled()).toBe(false);
   });
 
-  it('is on when cloud-only mode is off, so a full-nav build still works', () => {
+  it('remains enabled when cloud-only mode is explicitly disabled', () => {
     vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'false');
+
+    expect(isVulnerabilityDataEnabled()).toBe(true);
+  });
+
+  it('does not treat arbitrary truthy strings as cloud-only mode', () => {
+    vi.stubEnv('VITE_CLOUD_ONLY_MODE', 'TRUE');
+
     expect(isVulnerabilityDataEnabled()).toBe(true);
   });
 });
 
 describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
-  it('Overview context signals gate the vulnerability dashboard and attack paths (the "167 critical vulnerabilities open" banner)', () => {
+  it('gates Overview vulnerability dashboard and attack paths', () => {
     const src = code(source('overview/contextSignals.ts'));
-    expect(src).toMatch(/isVulnerabilityDataEnabled\(\)/);
-    // The two V2 calls must sit behind wantSecurity, which is now gated.
-    expect(src).toMatch(/const wantSecurity = isVulnerabilityDataEnabled\(\) && can\.has\('security\.read'\)/);
-    expect(src).toMatch(/wantSecurity \? api\.getVulnerabilityDashboard\(\)/);
-    expect(src).toMatch(/wantSecurity \? api\.getAttackPaths\(\)/);
+
+    expect(src).toMatch(/isVulnerabilityDataEnabled\s*\(\s*\)/);
+    expect(src).toMatch(
+      /const\s+wantSecurity\s*=\s*isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*can\.has\(\s*['"]security\.read['"]\s*\)/,
+    );
+    expect(src).toMatch(
+      /wantSecurity\s*\?\s*api\.getVulnerabilityDashboard\s*\(\s*\)/,
+    );
+    expect(src).toMatch(/wantSecurity\s*\?\s*api\.getAttackPaths\s*\(\s*\)/);
   });
 
-  it('the Overview Open Issues KPI excludes V2 findings from its count', () => {
+  it('gates the Overview Open Issues KPI from V2 findings', () => {
     const src = code(source('widgets/operationsWidgets.tsx'));
-    const kpi = src.slice(src.indexOf('OpenIssuesKpi'));
-    expect(kpi).toMatch(/isVulnerabilityDataEnabled\(\) && ctx\.can\.has\('security\.read'\)/);
+    const widget = sectionAfter(src, 'OpenIssuesKpi');
+
+    expect(widget).toMatch(
+      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*ctx\.can\.has\(\s*['"]security\.read['"]\s*\)/,
+    );
   });
 
-  it('the Issues queue gates its security source', () => {
+  it('gates the Issues queue security source', () => {
     const src = code(source('pages/Issues.tsx'));
-    expect(src).toMatch(/const wantSecurity = isVulnerabilityDataEnabled\(\)/);
-    expect(src).toMatch(/wantSecurity\s*\n?\s*\? api\.getFindings/);
+
+    expect(src).toMatch(
+      /const\s+wantSecurity\s*=\s*isVulnerabilityDataEnabled\s*\(\s*\)/,
+    );
+    expect(src).toMatch(
+      /wantSecurity\s*\?\s*api\.getFindings\s*\(/,
+    );
   });
 
-  it('Cloud Security no longer renders the V2-driven posture dashboard or risk score', () => {
+  it('removes the V2-driven posture dashboard and risk score from Cloud Security', () => {
     const src = code(source('pages/CloudSecurity.tsx'));
-    expect(src).not.toMatch(/getVulnerabilityDashboard/);
+
+    expect(src).not.toMatch(/getVulnerabilityDashboard\s*\(/);
     expect(src).not.toMatch(/SecurityPostureSummary/);
     expect(src).not.toMatch(/Risk Score/);
   });
 
-  it('Cloud Security keeps only V1 posture tabs -- no Posture tab, and the real provider-native ones remain', () => {
+  it('keeps only V1 posture tabs in Cloud Security', () => {
     const src = code(source('pages/CloudSecurity.tsx'));
-    const tabs = src.match(/const TABS = \[([^\]]+)\]/);
-    expect(tabs, 'TABS array not found').toBeTruthy();
-    expect(tabs![1]).not.toMatch(/'Posture'/);
-    for (const kept of ['Misconfigurations', 'Identity & Access Risk', 'Exposed Resources']) {
-      expect(tabs![1]).toContain(kept);
+    const tabs = src.match(/const\s+TABS\s*=\s*\[([\s\S]*?)\]/);
+
+    expect(tabs, 'Cloud Security TABS array not found').toBeTruthy();
+
+    const tabSource = tabs![1];
+
+    expect(tabSource).not.toMatch(/['"]Posture['"]/);
+
+    for (const kept of [
+      'Misconfigurations',
+      'Identity & Access Risk',
+      'Exposed Resources',
+    ]) {
+      expect(tabSource).toContain(kept);
     }
   });
 
-  it('Cloud Security no longer hosts Compliance (Phase 10, §10.1)', () => {
-    // Compliance is its own module now. Keeping it here is what made two
-    // sidebar entries resolve to /cloud-security and both mark themselves
-    // aria-current -- a query param cannot separate two business domains.
+  it('keeps Compliance out of Cloud Security', () => {
     const src = code(source('pages/CloudSecurity.tsx'));
-    const tabs = src.match(/const TABS = \[([^\]]+)\]/);
+    const tabs = src.match(/const\s+TABS\s*=\s*\[([\s\S]*?)\]/);
+
+    expect(tabs, 'Cloud Security TABS array not found').toBeTruthy();
     expect(tabs![1]).not.toContain("'Compliance'");
-    // And it must not still be fetching the data that moved with it.
-    expect(src).not.toMatch(/getComplianceBenchmarks/);
+    expect(src).not.toMatch(/getComplianceBenchmarks\s*\(/);
   });
 
-  it('no V1 surface reads the V2-namespaced compliance endpoint (Phase 10, §10.3)', () => {
-    // getComplianceBenchmarks hits /api/vulnerability-management/compliance.
-    // V1 posture and compliance depending on a hole in the V2 gate is the
-    // arrangement Phase 10 exists to end. The V2 page itself may still call
-    // it -- that whole route is gated -- but no V1 surface may.
-    for (const file of ['pages/CloudSecurity.tsx', 'components/overview/widgets/securityWidgets.tsx']) {
-      expect(code(source(file)), `${file} still calls the V2 compliance endpoint`).not.toMatch(/getComplianceBenchmarks/);
+  it('keeps V2 compliance endpoint calls out of V1 surfaces', () => {
+    for (const file of [
+      'pages/CloudSecurity.tsx',
+      'components/overview/widgets/securityWidgets.tsx',
+    ]) {
+      const src = code(source(file));
+
+      expect(
+        src,
+        `${file} still calls the V2 compliance endpoint`,
+      ).not.toMatch(/getComplianceBenchmarks\s*\(/);
     }
   });
 
-  it('the Overview compliance widget states why before it states a number', () => {
-    // It used to print a per-framework pass rate, green above 80%, from a
-    // table with zero rows. A score with nothing behind it is the most
-    // consequential false number this product could show.
+  it('requires the Overview compliance widget to communicate availability', () => {
     const src = code(source('components/overview/widgets/securityWidgets.tsx'));
-    expect(src).toMatch(/getComplianceOverview/);
+
+    expect(src).toMatch(/getComplianceOverview\s*\(/);
     expect(src).toMatch(/availability\.message/);
   });
 
-  it('renames Multi-Cloud Coverage to Source Coverage', () => {
-    // The audit's name, and the honest one: the tab answers which sources
-    // have been evaluated, not how many clouds exist.
+  it('uses Source Coverage rather than the misleading Multi-Cloud Coverage label', () => {
     const src = code(source('pages/CloudSecurity.tsx'));
-    const tabs = src.match(/const TABS = \[([^\]]+)\]/);
+    const tabs = src.match(/const\s+TABS\s*=\s*\[([\s\S]*?)\]/);
+
+    expect(tabs, 'Cloud Security TABS array not found').toBeTruthy();
     expect(tabs![1]).toContain('Source Coverage');
     expect(tabs![1]).not.toContain('Multi-Cloud Coverage');
   });
 
-  it('the Overview Recommended Actions widget excludes V2 critical findings', () => {
-    // module: null in registryMeta, so unlike the security widgets this one
-    // is NOT removed by getEnabledModules() in cloud-only mode -- it needs
-    // its own gate or it renders CVEs as "Critical finding" on V1 Overview.
+  it('gates Overview Recommended Actions from V2 critical findings', () => {
     const src = code(source('widgets/operationsWidgets.tsx'));
-    const widget = src.slice(src.indexOf('RecommendedActionsWidget'));
-    expect(widget).toMatch(/isVulnerabilityDataEnabled\(\) && ctx\.can\.has\('security\.read'\)/);
+    const widget = sectionAfter(src, 'RecommendedActionsWidget');
+
+    expect(widget).toMatch(
+      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*ctx\.can\.has\(\s*['"]security\.read['"]\s*\)/,
+    );
   });
 
-  it('Cloud Accounts Overview gates the V2 dashboard and omits Security & Risk when gated', () => {
+  it('gates the Cloud Accounts Overview security dashboard and section', () => {
     const src = code(source('cloudAccounts/OverviewPanel.tsx'));
-    expect(src).toMatch(/isVulnerabilityDataEnabled\(\) && canSecurity \? api\.getVulnerabilityDashboard\(\)/);
-    // The section itself must not render at all while gated -- rendering it
-    // with null data produced a false "No open findings" claim.
-    expect(src).toMatch(/isVulnerabilityDataEnabled\(\) && \(\s*<SectionBoundary name="security">/);
+
+    expect(src).toMatch(
+      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*canSecurity\s*\?\s*api\.getVulnerabilityDashboard\s*\(\s*\)/,
+    );
+    expect(src).toMatch(
+      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*\(\s*<SectionBoundary\s+name=["']security["']>/,
+    );
   });
 
-  it('SecurityPanel never reports unavailable data as "no open findings" (false-clean)', () => {
+  it('does not convert unavailable SecurityPanel data into a clean result', () => {
     const src = code(source('overview/SecurityPanel.tsx'));
-    // Null (not fetched / denied / failed) and a genuine zero must be
-    // distinct branches, and the null branch must not claim nothing was found.
-    expect(src).toMatch(/if \(!security\) \{/);
+
+    expect(src).toMatch(/if\s*\(\s*!security\s*\)\s*\{/);
     expect(src).toMatch(/Not available/);
-    expect(src).toMatch(/if \(openFindings === 0\) \{/);
-    expect(src).not.toMatch(/!security \|\| openFindings === 0/);
-    // and its links must not dead-end into the gated route
+    expect(src).toMatch(/if\s*\(\s*openFindings\s*===\s*0\s*\)\s*\{/);
+    expect(src).not.toMatch(/!security\s*\|\|\s*openFindings\s*===\s*0/);
     expect(src).not.toMatch(/\/vulnerability-management/);
   });
 
-  it('the custom-dashboard findings widget no longer renders a V2 count', () => {
+  it('does not render a V2 open-findings count in custom dashboards', () => {
     const src = code(source('pages/CustomDashboards.tsx'));
+
     expect(src).not.toMatch(/Open Security Findings/);
-    expect(src).not.toMatch(/data\.openFindings\.toLocaleString/);
+    expect(src).not.toMatch(/data\.openFindings\.toLocaleString\s*\(/);
   });
 });
 
 describe('no direct provider mutation is reachable in V1', () => {
-  // 2026-09-08 audits, P0: "No direct provider mutation ships in V1."
-  // Executing a resize used the SAME stored credential as read-only
-  // collection, with no separate execution identity, certified worker,
-  // canary, emergency stop, or provider-verified outcome.
   const src = code(source('pages/CostOptimization.tsx'));
 
   it('offers no automated-resize request action', () => {
     expect(src).not.toMatch(/Request Automated Resize/);
-    expect(src).not.toMatch(/requestRemediation\(/);
+    expect(src).not.toMatch(/requestRemediation\s*\(/);
     expect(src).not.toMatch(/onRequestResize/);
   });
 
-  it('runs no background poll or job against the gated remediation pathway', () => {
-    // The audits' definition of gating explicitly includes "no background
-    // fetch or job" -- an 8s interval silently polling a 403 would not pass.
-    expect(src).not.toMatch(/finishResizeRemediation\(/);
-    expect(src).not.toMatch(/listRemediation\(/);
+  it('does not poll or run jobs against the gated remediation pathway', () => {
+    expect(src).not.toMatch(/finishResizeRemediation\s*\(/);
+    expect(src).not.toMatch(/listRemediation\s*\(/);
   });
 
-  it('still offers the V1-permitted alternatives (manual CLI guidance and a real IaC pull request)', () => {
+  it('retains V1-permitted manual/IaC alternatives', () => {
     expect(src).toMatch(/aws ec2 modify-instance-attribute/);
-    expect(src).toMatch(/openAutoPr\(/);
+    expect(src).toMatch(/openAutoPr\s*\(/);
   });
 });
 
 describe('destructive actions are protected (Phase 0.6)', () => {
-  // 2026-09-08 audits, P0: permanent purge removed a connection, its
-  // resources and all history behind one generic Confirm; bulk delete could
-  // do that to several accounts without ever naming them. Disposition:
-  // "Disable by default". Purge is now denied server-side in all three
-  // connectors; these assert the client can't offer it either.
   const src = code(source('pages/CloudAccounts.tsx'));
 
   it('offers no bulk permanent delete', () => {
@@ -217,44 +320,45 @@ describe('destructive actions are protected (Phase 0.6)', () => {
     expect(src).not.toMatch(/selected permanently/);
   });
 
-  it('calls no permanent-delete API at all', () => {
-    expect(src).not.toMatch(/deleteAccountPermanently|deleteGcpAccountPermanently|deleteAzureAccountPermanently/);
+  it('calls no permanent-delete API', () => {
+    expect(src).not.toMatch(
+      /deleteAccountPermanently\s*\(|deleteGcpAccountPermanently\s*\(|deleteAzureAccountPermanently\s*\(/,
+    );
   });
 
-  it('keeps Disconnect, which is reversible and preserves history', () => {
+  it('keeps reversible Disconnect actions', () => {
     expect(src).toMatch(/handleDisconnect/);
     expect(src).toMatch(/handleBulkDisconnect/);
   });
 });
 
 describe('navigation does not dead-end into gated V2 routes', () => {
-  it('Cloud Compliance has its own canonical route (Phase 10, §10.2)', () => {
-    const mod = NAV_MODULES.find(m => m.label === 'Cloud Compliance');
-    expect(mod).toBeTruthy();
-    // This link has moved twice. It was /vulnerability-management?tab=
-    // Compliance, whose redirect dropped the tab and landed on Cloud
-    // Security's Overview. It was then repointed at Cloud Security's
-    // Compliance TAB, which fixed the dead end but left two nav entries
-    // resolving to /cloud-security -- so both marked themselves active.
-    // Only a distinct route separates two modules.
-    expect(mod!.to).toBe('/cloud-compliance');
+  it('gives Cloud Compliance its own canonical route', () => {
+    const module = NAV_MODULES.find(item => item.label === 'Cloud Compliance');
+
+    expect(module).toBeTruthy();
+    expect(module!.to).toBe('/cloud-compliance');
   });
 
-  it('exactly one nav module resolves to /cloud-security', () => {
-    // The regression guard for the aria-current bug, asserted on the data
-    // rather than on the rendering.
-    const onCloudSecurity = NAV_MODULES.filter(m => m.to?.startsWith('/cloud-security'));
-    expect(onCloudSecurity.map(m => m.label)).toEqual(['Cloud Security']);
+  it('has exactly one navigation module rooted at Cloud Security', () => {
+    const onCloudSecurity = NAV_MODULES.filter(item =>
+      item.to?.startsWith('/cloud-security'),
+    );
+
+    expect(onCloudSecurity.map(item => item.label)).toEqual([
+      'Cloud Security',
+    ]);
   });
 
-  it('no cloud-only-visible module points at a gated /vulnerability-management route', () => {
-    // Vulnerability Management itself still carries that `to` on purpose:
-    // it is hiddenInCloudOnlyMode, and navConfig deliberately keeps it in
-    // NAV_MODULES so ProtectedRoute's separate label lookup still resolves.
-    // The invariant that matters is that no module a V1 user can actually
-    // SEE routes them into the gated surface.
-    const visibleInV1 = NAV_MODULES.filter(m => !m.hiddenInCloudOnlyMode);
-    const offenders = visibleInV1.filter(m => m.to?.startsWith('/vulnerability-management'));
-    expect(offenders.map(m => m.label)).toEqual([]);
+  it('keeps visible V1 navigation away from the gated Vulnerability Management route', () => {
+    const visibleInV1 = NAV_MODULES.filter(
+      item => !item.hiddenInCloudOnlyMode,
+    );
+
+    const offenders = visibleInV1.filter(item =>
+      item.to?.startsWith('/vulnerability-management'),
+    );
+
+    expect(offenders.map(item => item.label)).toEqual([]);
   });
 });

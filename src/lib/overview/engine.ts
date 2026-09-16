@@ -1,155 +1,341 @@
 /**
- * The Overview Engine (issue §18).
+ * Overview Engine (issue §18).
  *
- * Pure. Given the resolved identity inputs — role, capabilities, enabled
- * modules, scope, saved personalization and the current context signals — it
- * produces an {@link OverviewConfig}: the ordered, positioned set of KPIs and
- * widgets to render. That object is exactly the issue §14 shape and is the
- * reference for a future server-side `GET /overview/config`.
+ * Pure transformation:
+ *   resolved identity inputs
+ *     → eligible
+ *     → shown
+ *     → prioritised
+ *     → KPI/panel split
+ *     → deterministic layout
  *
- * Pipeline:
- *   eligible (module + capability + role)
- *     → shown (minus hidden, plus opted-in default-off)
- *     → prioritised (base weight − context boost − favorite bump)
- *     → split KPI / panel, sorted
- *     → auto-packed 12-col grid, then per-widget saved-layout overrides
+ * The returned OverviewConfig is also the contract shape that can later be
+ * produced by a server-side GET /overview/config endpoint.
+ *
+ * IMPORTANT:
+ * This module derives presentation eligibility only. Backend authorization
+ * must independently enforce every protected operation.
  */
 import type { Role } from '../navConfig';
 import { REGISTRY_META } from './registryMeta';
 import type {
-  Capabilities, ContextSignals, EffectiveScope, OverviewConfig,
-  OverviewPreferences, ResolvedWidget, WidgetLayoutRect, WidgetMeta,
+  Capabilities,
+  ContextSignals,
+  EffectiveScope,
+  OverviewConfig,
+  OverviewPreferences,
+  ResolvedWidget,
+  WidgetLayoutRect,
+  WidgetMeta,
 } from './types';
 
-const ROLE_RANK: Record<Role, number> = { viewer: 0, editor: 1, billing_admin: 2, admin: 3, owner: 4 };
+const ROLE_RANK: Readonly<Record<Role, number>> = {
+  viewer: 0,
+  editor: 1,
+  billing_admin: 2,
+  admin: 3,
+  owner: 4,
+};
 
 const GRID_COLS = 12;
-/** How many KPI cards the strip shows before the rest move to "Add widgets". */
+
+/** Maximum number of KPI cards displayed in the strip. */
 export const KPI_STRIP_LIMIT = 8;
 
 export interface EngineInput {
   userId: string;
   role: Role;
   capabilities: Capabilities;
-  enabledModules: Set<string>;
+  enabledModules: ReadonlySet<string>;
   scope: EffectiveScope;
   preferences: OverviewPreferences;
   signals: ContextSignals;
 }
 
-/** Widgets the user is *allowed* to see — module enabled, role met, capabilities held. */
+/**
+ * Widgets the current user is allowed to see.
+ *
+ * Eligibility requires all applicable constraints:
+ * - module enabled;
+ * - minimum role satisfied;
+ * - every required capability present;
+ * - at least one capability present when anyOf is declared.
+ */
 export function getEligibleMeta(input: {
   capabilities: Capabilities;
-  enabledModules: Set<string>;
+  enabledModules: ReadonlySet<string>;
   role: Role;
 }): WidgetMeta[] {
   const { capabilities, enabledModules, role } = input;
-  return REGISTRY_META.filter((m) => {
-    if (m.module !== null && !enabledModules.has(m.module)) return false;
-    if (m.minRole && ROLE_RANK[role] < ROLE_RANK[m.minRole]) return false;
-    if (!capabilities.hasAll(m.requires)) return false;
-    if (m.anyOf && !capabilities.hasAny(m.anyOf)) return false;
+  const roleRank = ROLE_RANK[role] ?? -1;
+
+  return REGISTRY_META.filter((meta) => {
+    if (meta.module !== null && !enabledModules.has(meta.module)) {
+      return false;
+    }
+
+    if (
+      meta.minRole &&
+      roleRank < (ROLE_RANK[meta.minRole] ?? Number.POSITIVE_INFINITY)
+    ) {
+      return false;
+    }
+
+    if (!capabilities.hasAll(meta.requires)) {
+      return false;
+    }
+
+    if (meta.anyOf && !capabilities.hasAny(meta.anyOf)) {
+      return false;
+    }
+
     return true;
   });
 }
 
-function isShown(m: WidgetMeta, prefs: OverviewPreferences): boolean {
-  if (m.kind === 'kpi') {
-    if (prefs.kpiHidden.includes(m.id)) return false;
-  } else if (prefs.hidden.includes(m.id)) {
+function isShown(
+  meta: WidgetMeta,
+  preferences: OverviewPreferences,
+): boolean {
+  const hidden =
+    meta.kind === 'kpi'
+      ? preferences.kpiHidden.includes(meta.id)
+      : preferences.hidden.includes(meta.id);
+
+  if (hidden) {
     return false;
   }
-  if (m.defaultEnabled === false) return prefs.added.includes(m.id);
+
+  if (meta.defaultEnabled === false) {
+    return preferences.added.includes(meta.id);
+  }
+
   return true;
 }
 
-function widgetsColumns(w: 1 | 2 | 3): number {
-  return w * 4; // 1→4, 2→8, 3→12
+function widgetsColumns(width: 1 | 2 | 3): number {
+  return Math.min(width * 4, GRID_COLS);
 }
 
-/** Shelf-pack panels into a 12-col grid in priority order — a sane starting layout; react-grid-layout compacts from here. */
-function autoPack(order: { id: string; w: number; h: number }[]): Record<string, WidgetLayoutRect> {
+function sanitizeLayoutRect(
+  rect: WidgetLayoutRect,
+): WidgetLayoutRect {
+  const x = Number.isFinite(rect.x) ? rect.x : 0;
+  const y = Number.isFinite(rect.y) ? rect.y : 0;
+  const w = Number.isFinite(rect.w) ? rect.w : 1;
+  const h = Number.isFinite(rect.h) ? rect.h : 1;
+
+  return {
+    x: Math.max(0, Math.min(GRID_COLS - 1, Math.trunc(x))),
+    y: Math.max(0, Math.trunc(y)),
+    w: Math.max(1, Math.min(GRID_COLS, Math.trunc(w))),
+    h: Math.max(1, Math.trunc(h)),
+  };
+}
+
+/**
+ * Shelf-packs panels into a 12-column grid in priority order.
+ *
+ * This is intentionally deterministic. react-grid-layout may compact the
+ * result later, but the engine always returns a valid starting arrangement.
+ */
+function autoPack(
+  order: ReadonlyArray<{ id: string; w: number; h: number }>,
+): Record<string, WidgetLayoutRect> {
   const out: Record<string, WidgetLayoutRect> = {};
   let x = 0;
   let y = 0;
   let rowH = 0;
+
   for (const item of order) {
-    const w = Math.min(item.w, GRID_COLS);
-    if (x + w > GRID_COLS) {
+    const w = Math.max(1, Math.min(GRID_COLS, Math.trunc(item.w)));
+    const h = Math.max(1, Math.trunc(item.h));
+
+    if (x > 0 && x + w > GRID_COLS) {
       y += rowH;
       x = 0;
       rowH = 0;
     }
-    out[item.id] = { x, y, w, h: item.h };
+
+    out[item.id] = {
+      x,
+      y,
+      w,
+      h,
+    };
+
     x += w;
-    rowH = Math.max(rowH, item.h);
+    rowH = Math.max(rowH, h);
   }
+
   return out;
 }
 
 function resolvePriority(
-  m: WidgetMeta,
+  meta: WidgetMeta,
   signals: ContextSignals,
   favorite: boolean,
 ): { priority: number; boostReason?: string } {
-  let priority = m.basePriority;
-  let boostReason: string | undefined;
-  const boost = m.contextBoost?.(signals) ?? null;
-  if (boost) {
+  let priority = Number.isFinite(meta.basePriority)
+    ? meta.basePriority
+    : Number.MAX_SAFE_INTEGER;
+
+  const boost = meta.contextBoost?.(signals) ?? null;
+
+  if (boost && Number.isFinite(boost.priority) && boost.priority > 0) {
     priority -= boost.priority;
-    boostReason = boost.reason;
   }
-  if (favorite) priority -= 1000;
-  return { priority, boostReason };
+
+  // Favorite is a strong presentation preference, not an authorization
+  // bypass. Keep it numerically dominant while retaining the original order
+  // as a secondary deterministic tie-breaker.
+  if (favorite) {
+    priority -= 1000;
+  }
+
+  return {
+    priority,
+    boostReason: boost?.reason,
+  };
 }
 
-export function buildOverviewConfig(input: EngineInput): OverviewConfig {
-  const { userId, role, capabilities, enabledModules, scope, preferences, signals } = input;
-  const favorites = new Set(preferences.favorites);
-
-  const eligible = getEligibleMeta({ capabilities, enabledModules, role });
-  const shown = eligible.filter((m) => isShown(m, preferences));
-
-  const resolve = (m: WidgetMeta): ResolvedWidget => {
-    const favorite = favorites.has(m.id);
-    const { priority, boostReason } = resolvePriority(m, signals, favorite);
-    return { meta: m, layout: { x: 0, y: 0, w: widgetsColumns(m.defaultSize.w), h: m.defaultSize.h }, priority, favorite, boostReason };
-  };
-
-  const bySort = (a: ResolvedWidget, b: ResolvedWidget) =>
+function compareResolvedWidgets(
+  a: ResolvedWidget,
+  b: ResolvedWidget,
+): number {
+  return (
     a.priority - b.priority ||
     a.meta.basePriority - b.meta.basePriority ||
-    a.meta.title.localeCompare(b.meta.title);
+    a.meta.id.localeCompare(b.meta.id) ||
+    a.meta.title.localeCompare(b.meta.title)
+  );
+}
 
-  // KPIs — honour an explicit user order first, then priority.
-  const kpis = shown.filter((m) => m.kind === 'kpi').map(resolve).sort((a, b) => {
-    const ia = preferences.kpiOrder.indexOf(a.meta.id);
-    const ib = preferences.kpiOrder.indexOf(b.meta.id);
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-    return bySort(a, b);
+function createResolvedWidget(
+  meta: WidgetMeta,
+  preferences: OverviewPreferences,
+  signals: ContextSignals,
+): ResolvedWidget {
+  const favorite = preferences.favorites.includes(meta.id);
+  const { priority, boostReason } = resolvePriority(
+    meta,
+    signals,
+    favorite,
+  );
+
+  return {
+    meta,
+    layout: {
+      x: 0,
+      y: 0,
+      w: widgetsColumns(meta.defaultSize.w),
+      h: meta.defaultSize.h,
+    },
+    priority,
+    favorite,
+    boostReason,
+  };
+}
+
+/**
+ * Applies an explicit KPI order without making unspecified KPIs outrank one
+ * another unpredictably. Duplicates in the saved order are harmless.
+ */
+function compareKpis(
+  preferences: OverviewPreferences,
+): (a: ResolvedWidget, b: ResolvedWidget) => number {
+  const order = new Map<string, number>();
+
+  for (let index = 0; index < preferences.kpiOrder.length; index += 1) {
+    const id = preferences.kpiOrder[index];
+    if (!order.has(id)) {
+      order.set(id, index);
+    }
+  }
+
+  return (a, b) => {
+    const aIndex = order.get(a.meta.id);
+    const bIndex = order.get(b.meta.id);
+
+    if (aIndex !== undefined || bIndex !== undefined) {
+      if (aIndex === undefined) return 1;
+      if (bIndex === undefined) return -1;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+    }
+
+    return compareResolvedWidgets(a, b);
+  };
+}
+
+function normalizeScope(scope: EffectiveScope): OverviewConfig['scope'] {
+  return {
+    orgId: scope.orgId,
+    folders: scope.folders.map((folder) => folder.id),
+    projects: scope.projects.map((project) => project.id),
+    restricted: Boolean(scope.restricted),
+    connectionIds:
+      scope.connectionIds === 'all'
+        ? 'all'
+        : [...scope.connectionIds].filter(Boolean),
+  };
+}
+
+export function buildOverviewConfig(
+  input: EngineInput,
+): OverviewConfig {
+  const {
+    userId,
+    role,
+    capabilities,
+    enabledModules,
+    scope,
+    preferences,
+    signals,
+  } = input;
+
+  const eligible = getEligibleMeta({
+    capabilities,
+    enabledModules,
+    role,
   });
 
-  // Panels — priority order, then packed, then saved-layout overrides.
-  const panels = shown.filter((m) => m.kind === 'panel').map(resolve).sort(bySort);
-  const packed = autoPack(panels.map((p) => ({ id: p.meta.id, w: p.layout.w, h: p.layout.h })));
-  for (const p of panels) {
-    const saved = preferences.layout[p.meta.id];
-    p.layout = saved ? { ...saved } : packed[p.meta.id];
+  const shown = eligible.filter((meta) =>
+    isShown(meta, preferences),
+  );
+
+  const kpis = shown
+    .filter((meta) => meta.kind === 'kpi')
+    .map((meta) => createResolvedWidget(meta, preferences, signals))
+    .sort(compareKpis(preferences));
+
+  const panels = shown
+    .filter((meta) => meta.kind === 'panel')
+    .map((meta) => createResolvedWidget(meta, preferences, signals))
+    .sort(compareResolvedWidgets);
+
+  const packed = autoPack(
+    panels.map((panel) => ({
+      id: panel.meta.id,
+      w: panel.layout.w,
+      h: panel.layout.h,
+    })),
+  );
+
+  for (const panel of panels) {
+    const saved = preferences.layout[panel.meta.id];
+
+    panel.layout = saved
+      ? sanitizeLayoutRect(saved)
+      : packed[panel.meta.id];
   }
 
   return {
     user: userId,
     role,
-    scope: {
-      orgId: scope.orgId,
-      folders: scope.folders.map((f) => f.id),
-      projects: scope.projects.map((p) => p.id),
-      restricted: scope.restricted,
-      connectionIds: scope.connectionIds,
-    },
+    scope: normalizeScope(scope),
     modules: [...enabledModules].sort(),
     capabilities: capabilities.list(),
-    kpis,
+    kpis: kpis.slice(0, KPI_STRIP_LIMIT),
     widgets: panels,
     signals,
   };

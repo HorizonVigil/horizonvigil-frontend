@@ -1,46 +1,135 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 
 const THEME_KEY = 'horizonvigil_theme';
-type Theme = 'light' | 'dark';
 
-function getInitialTheme(): Theme {
-  try {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === 'light' || stored === 'dark') return stored;
-  } catch {
-    // Privacy-restricted browsers can deny storage access; keep the default.
-  }
-  return 'dark'; // spec: dark mode by default
-}
+export type Theme = 'light' | 'dark';
 
-interface ThemeContextType {
+export interface ThemeContextType {
   theme: Theme;
   toggleTheme: () => void;
+  setTheme: (theme: Theme) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | null>(null);
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      // Theme still applies for the active tab when persistence is unavailable.
-    }
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme(t => (t === 'dark' ? 'light' : 'dark'));
-  }, []);
-
-  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+function isBrowser(): boolean {
+  return typeof window !== 'undefined' && typeof document !== 'undefined';
 }
 
-export function useTheme() {
+function isTheme(value: unknown): value is Theme {
+  return value === 'light' || value === 'dark';
+}
+
+/**
+ * Reads the persisted theme without allowing storage failures to break
+ * application startup. Dark is the product default.
+ */
+function getInitialTheme(): Theme {
+  if (!isBrowser()) {
+    return 'dark';
+  }
+
+  try {
+    const stored = window.localStorage.getItem(THEME_KEY);
+    return isTheme(stored) ? stored : 'dark';
+  } catch {
+    // Storage can be unavailable in privacy-restricted or sandboxed contexts.
+    return 'dark';
+  }
+}
+
+function persistTheme(theme: Theme): void {
+  if (!isBrowser()) return;
+
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // Theme remains active for the current document even when persistence
+    // is unavailable.
+  }
+}
+
+function applyTheme(theme: Theme): void {
+  if (!isBrowser()) return;
+
+  const root = document.documentElement;
+  root.classList.toggle('dark', theme === 'dark');
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
+
+  /**
+   * Apply the theme before the browser paints when possible. useEffect is
+   * retained for SSR compatibility; useLayoutEffect is intentionally avoided
+   * because it produces SSR warnings in server-rendered environments.
+   */
+  useEffect(() => {
+    applyTheme(theme);
+    persistTheme(theme);
+  }, [theme]);
+
+  /**
+   * Keep multiple HorizonVigil tabs/windows synchronized. Ignore malformed
+   * or unrelated storage events.
+   */
+  useEffect(() => {
+    if (!isBrowser()) return;
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== THEME_KEY) return;
+
+      if (isTheme(event.newValue)) {
+        setThemeState(event.newValue);
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  const setTheme = useCallback((nextTheme: Theme) => {
+    setThemeState(nextTheme);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setThemeState(current => (current === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  const value = useMemo<ThemeContextType>(
+    () => ({
+      theme,
+      toggleTheme,
+      setTheme,
+    }),
+    [theme, toggleTheme, setTheme],
+  );
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme(): ThemeContextType {
   const context = useContext(ThemeContext);
-  if (!context) throw new Error('useTheme must be used within ThemeProvider');
+
+  if (context === null) {
+    throw new Error('useTheme must be used within ThemeProvider');
+  }
+
   return context;
 }

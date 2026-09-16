@@ -7,13 +7,29 @@ type Service =
 
 export { isBillingEnabled } from './featureFlags';
 
+/**
+ * Returns whether a service has a configured base URL.
+ * Useful for readiness diagnostics without exposing the actual endpoint URL.
+ */
+export function isServiceConfigured(service: Service): boolean {
+  return normalizeServiceUrl(service).length > 0;
+}
+
+/**
+ * Returns configured service names without exposing credentials or URL values.
+ */
+export function getConfiguredServices(): Service[] {
+  return (Object.keys(SERVICE_URLS) as Service[]).filter(isServiceConfigured);
+}
+
+
 // Every VITE_*_API_URL below is set explicitly in CI for every real
 // deployment (see .github/workflows/deploy.yml) -- there is deliberately
 // no fallback to a hardcoded external domain here. A service left
 // unconfigured resolves to '' (a same-origin, always-404 relative path)
 // rather than silently forwarding the current user's bearer token to some
 // other server, which is what a hardcoded fallback URL would do.
-const SERVICE_URLS: Record<Service, string> = {
+const SERVICE_URLS: Readonly<Record<Service, string>> = {
   overview: import.meta.env.VITE_OVERVIEW_API_URL || '',
   awsAccounts: import.meta.env.VITE_AWS_ACCOUNTS_API_URL || '',
   gcpAccounts: import.meta.env.VITE_GCP_ACCOUNTS_API_URL || '',
@@ -48,12 +64,33 @@ const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
-  status: number;
-  body: unknown;
-  constructor(status: number, message: string, body?: unknown) {
+  readonly status: number;
+  readonly body: unknown;
+  readonly service?: Service;
+  readonly path?: string;
+
+  constructor(
+    status: number,
+    message: string,
+    body?: unknown,
+    context?: { service?: Service; path?: string },
+  ) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
     this.body = body;
+    this.service = context?.service;
+    this.path = context?.path;
+  }
+}
+
+export class ServiceConfigurationError extends Error {
+  readonly service: Service;
+
+  constructor(service: Service) {
+    super(`API service "${service}" is not configured.`);
+    this.name = 'ServiceConfigurationError';
+    this.service = service;
   }
 }
 
@@ -63,6 +100,27 @@ export class RequestTimeoutError extends Error {
     super('The request took too long. Please try again.');
     this.name = 'RequestTimeoutError';
   }
+}
+
+function normalizeServiceUrl(service: Service): string {
+  const configured = SERVICE_URLS[service].trim();
+  return configured.replace(/\/+$/, '');
+}
+
+function pathSegment(value: string, label = 'identifier'): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new TypeError(`${label} must not be empty.`);
+  }
+  return encodeURIComponent(normalized);
+}
+
+function isJsonContentType(contentType: string | null): boolean {
+  return Boolean(contentType && /(?:application\/json|\+json)(?:\s*;|$)/i.test(contentType));
+}
+
+function responseRequestId(response: Response): string | null {
+  return response.headers.get('X-Request-Id') ?? response.headers.get('x-request-id');
 }
 
 const HTTP_ERROR_MESSAGES: Record<number, string> = {
@@ -84,9 +142,37 @@ const HTTP_ERROR_MESSAGES: Record<number, string> = {
  * falls back to `fallback`. Generalizes the 403-detection AdminBilling.tsx
  * used to do inline; use this in any page's catch block instead.
  */
-export function friendlyErrorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
-  if (err instanceof ApiError) return HTTP_ERROR_MESSAGES[err.status] ?? err.message ?? fallback;
-  if (err instanceof Error) return err.message || fallback;
+function safeErrorText(message: string | undefined, fallback: string): string {
+  if (!message) return fallback;
+
+  const singleLine = message.replace(/[\\r\\n\\t]+/g, ' ').trim();
+  if (!singleLine) return fallback;
+
+  // Avoid surfacing giant backend payloads or stack fragments directly in UI.
+  return singleLine.length > 300
+    ? `${singleLine.slice(0, 297)}…`
+    : singleLine;
+}
+
+export function friendlyErrorMessage(
+  err: unknown,
+  fallback = 'Something went wrong. Please try again.',
+): string {
+  if (err instanceof ApiError) {
+    const mapped = HTTP_ERROR_MESSAGES[err.status];
+    if (mapped) return mapped;
+
+    if (err.status >= 500) return fallback;
+
+    return safeErrorText(err.message, fallback);
+  }
+
+  if (err instanceof RequestTimeoutError) return err.message;
+
+  if (err instanceof Error) {
+    return safeErrorText(err.message, fallback);
+  }
+
   return fallback;
 }
 
@@ -129,22 +215,35 @@ function persistOrgId(orgId: string | null): void {
   }
 }
 
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
   const controller = new AbortController();
   let timedOut = false;
-  const onAbort = () => controller.abort(init.signal?.reason);
+
+  const onAbort = () => {
+    controller.abort(init.signal?.reason);
+  };
 
   if (init.signal) {
-    if (init.signal.aborted) onAbort();
-    else init.signal.addEventListener('abort', onAbort, { once: true });
+    if (init.signal.aborted) {
+      onAbort();
+    } else {
+      init.signal.addEventListener('abort', onAbort, { once: true });
+    }
   }
+
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
   }, REQUEST_TIMEOUT_MS);
 
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
   } catch (error) {
     if (timedOut) throw new RequestTimeoutError();
     throw error;
@@ -154,112 +253,257 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
   }
 }
 
-/** Completeness of the last collection run — see ApiClient.getScanHealth. */
-export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'RUNNING' | 'NEVER_RUN';
-
-export interface ScannerFailure {
-  scanner: string;
-  scopes: string[];
-  normalizedCode: string | null;
-  detail: string | null;
-}
-
-export interface ScanHealth {
-  completeness: ScanCompleteness;
-  /** False for anything but COMPLETE: a partial scan's count is a floor, not a total. */
-  countIsAuthoritative: boolean;
-  summary: string;
-  totalSteps: number;
-  succeededSteps: number;
-  failedSteps: number;
-  failures: ScannerFailure[];
-  degradedResourceTypes: string[];
-  runId: string | null;
-  finishedAt: string | null;
-}
-
 class ApiClient {
-  private currentOrgId: string | null = getStoredOrgId();
-
-  setCurrentOrgId(orgId: string | null) {
-    this.currentOrgId = orgId;
-    persistOrgId(orgId);
-  }
-  getCurrentOrgId(): string | null {
-    return this.currentOrgId;
-  }
-
-  /**
-   * The organisation node currently selected in the scope picker, sent to
-   * every service so scope is resolved SERVER-side (Phase 1, 2026-09-08
-   * audits: "A client filter is not authorization").
-   *
-   * Previously the picker only narrowed things the browser happened to
-   * filter, which is why selecting a folder with four connections still
-   * showed all 1,805 org resources: any endpoint without a connection-id
-   * parameter simply returned org-wide data.
-   *
-   * Kept in memory rather than localStorage deliberately -- the picked
-   * scope is per-session UI state, and orgContext already owns its
-   * lifecycle. Org scope sends no header at all, which is exactly the
-   * request an older client makes, so the server default stays correct.
-   */
-  private activeScope: { type: 'org' | 'folder' | 'project'; id: string } | null = null;
-  setActiveScope(scope: { type: 'org' | 'folder' | 'project'; id: string } | null) {
-    this.activeScope = scope && scope.type !== 'org' ? scope : null;
-  }
-
   private async authHeaders(): Promise<Record<string, string>> {
     const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
-    if (this.currentOrgId) headers['X-Org-Id'] = this.currentOrgId;
+
+    const headers: Record<string, string> = {};
+
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+
+    if (this.currentOrgId) {
+      const orgId = this.currentOrgId.trim();
+      if (orgId) headers['X-Org-Id'] = orgId;
+    }
+
     if (this.activeScope) {
       headers['X-Scope-Type'] = this.activeScope.type;
       headers['X-Scope-Id'] = this.activeScope.id;
     }
+
     return headers;
   }
 
-  /** Every one of the 15 services replies with either { ok: true, data } or { ok: false, error }. This unwraps it, or throws ApiError. */
-  private async request<T>(service: Service, path: string, options: RequestInit = {}): Promise<T> {
-    const baseUrl = SERVICE_URLS[service];
-    const url = `${baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(await this.authHeaders()),
-      ...((options.headers as Record<string, string>) || {}),
-    };
-    const response = await fetchWithTimeout(url, { ...options, headers });
-    const body = await response.json().catch(() => null) as { ok?: boolean; data?: T; error?: string } | null;
-    if (!response.ok || !body?.ok) {
-      throw new ApiError(response.status, body?.error || response.statusText || 'Request failed', body);
+  /**
+   * Every service replies with `{ ok: true, data }` or
+   * `{ ok: false, error }`.
+   *
+   * The transport layer owns:
+   * - service configuration validation;
+   * - auth/org/scope headers;
+   * - timeout/abort behavior;
+   * - envelope validation;
+   * - consistent ApiError construction.
+   *
+   * It deliberately does not retry requests: callers may retry reads with
+   * their own policy, while mutations must not be duplicated implicitly.
+   */
+  private async request<T>(
+    service: Service,
+    path: string,
+    options: RequestInit = {},
+  ): Promise<T> {
+    const baseUrl = normalizeServiceUrl(service);
+
+    // Fail closed before obtaining/sending the bearer token. An unconfigured
+    // service must never accidentally receive an authenticated same-origin
+    // request.
+    if (!baseUrl) {
+      throw new ServiceConfigurationError(service);
     }
-    return body.data as T;
-  }
 
-  private get<T>(service: Service, path: string) { return this.request<T>(service, path, { method: 'GET' }); }
-  private post<T>(service: Service, path: string, body?: unknown, headers?: Record<string, string>) {
-    return this.request<T>(service, path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined, headers });
-  }
-  /** Generates a fresh Idempotency-Key per call — pass the SAME key across a retry (e.g. store it in component state across a failed attempt) if you want the backend to actually dedupe; a brand new key every call defeats the point. */
-  private postIdempotent<T>(service: Service, path: string, body: unknown, idempotencyKey: string) {
-    return this.post<T>(service, path, body, { 'Idempotency-Key': idempotencyKey });
-  }
-  private put<T>(service: Service, path: string, body?: unknown) { return this.request<T>(service, path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined }); }
-  private patch<T>(service: Service, path: string, body?: unknown) { return this.request<T>(service, path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined }); }
-  private delete<T>(service: Service, path: string) { return this.request<T>(service, path, { method: 'DELETE' }); }
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const url = `${baseUrl}${normalizedPath}`;
 
-  /** For the two endpoints that return a raw file instead of the {ok,data} envelope (CSV export, report download). */
-  private async downloadRaw(service: Service, path: string, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
-    const baseUrl = SERVICE_URLS[service];
-    const response = await fetchWithTimeout(`${baseUrl}${path}`, { headers: await this.authHeaders() });
+    const headers = new Headers(options.headers);
+    headers.set('Accept', 'application/json');
+
+    if (options.body !== undefined && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    const auth = await this.authHeaders();
+    for (const [key, value] of Object.entries(auth)) {
+      headers.set(key, value);
+    }
+
+    const response = await fetchWithTimeout(url, {
+      ...options,
+      headers,
+    });
+
+    const requestId = responseRequestId(response);
+    const contentType = response.headers.get('content-type');
+
+    let body: unknown = null;
+
+    if (response.status !== 204) {
+      if (isJsonContentType(contentType)) {
+        body = await response.json().catch(() => null);
+      } else {
+        const text = await response.text().catch(() => '');
+        body = text || null;
+      }
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
-      throw new ApiError(response.status, error.error || 'Download failed', error);
+      const errorMessage =
+        body &&
+        typeof body === 'object' &&
+        'error' in body &&
+        typeof (body as { error?: unknown }).error === 'string'
+          ? (body as { error: string }).error
+          : response.statusText || 'Request failed';
+
+      throw new ApiError(
+        response.status,
+        errorMessage,
+        body,
+        {
+          service,
+          path: normalizedPath,
+        },
+      );
     }
-    const disposition = response.headers.get('Content-Disposition') ?? '';
-    const match = /filename="([^"]+)"/.exec(disposition);
-    return { blob: await response.blob(), filename: match?.[1] ?? fallbackFilename };
+
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      (body as { ok?: unknown }).ok !== true
+    ) {
+      throw new ApiError(
+        502,
+        'The service returned an invalid response.',
+        {
+          service,
+          path: normalizedPath,
+          requestId,
+          body,
+        },
+        {
+          service,
+          path: normalizedPath,
+        },
+      );
+    }
+
+    return (body as { ok: true; data: T }).data as T;
+  }
+
+  private get<T>(service: Service, path: string) {
+    return this.request<T>(service, path, { method: 'GET' });
+  }
+
+  private post<T>(
+    service: Service,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ) {
+    return this.request<T>(service, path, {
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers,
+    });
+  }
+
+  /**
+   * Mutations do not retry implicitly. Callers that need idempotency should
+   * generate one key for the logical operation and reuse it for retries.
+   */
+  private postIdempotent<T>(
+    service: Service,
+    path: string,
+    body: unknown,
+    idempotencyKey: string,
+  ) {
+    const key = idempotencyKey.trim();
+    if (!key) throw new TypeError('idempotencyKey must not be empty.');
+
+    return this.post<T>(
+      service,
+      path,
+      body,
+      { 'Idempotency-Key': key },
+    );
+  }
+
+  private put<T>(service: Service, path: string, body?: unknown) {
+    return this.request<T>(service, path, {
+      method: 'PUT',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private patch<T>(service: Service, path: string, body?: unknown) {
+    return this.request<T>(service, path, {
+      method: 'PATCH',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  private delete<T>(service: Service, path: string) {
+    return this.request<T>(service, path, { method: 'DELETE' });
+  }
+
+  /** For raw-file endpoints such as CSV/report downloads. */
+  private async downloadRaw(
+    service: Service,
+    path: string,
+    fallbackFilename: string,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const baseUrl = normalizeServiceUrl(service);
+
+    if (!baseUrl) {
+      throw new ServiceConfigurationError(service);
+    }
+
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const headers = new Headers(await this.authHeaders());
+    headers.set('Accept', '*/*');
+
+    const response = await fetchWithTimeout(
+      `${baseUrl}${normalizedPath}`,
+      { headers },
+    );
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      const body = isJsonContentType(contentType)
+        ? await response.json().catch(() => null)
+        : await response.text().catch(() => null);
+
+      const message =
+        body &&
+        typeof body === 'object' &&
+        'error' in body &&
+        typeof (body as { error?: unknown }).error === 'string'
+          ? (body as { error: string }).error
+          : response.statusText || 'Download failed';
+
+      throw new ApiError(
+        response.status,
+        message,
+        body,
+        { service, path: normalizedPath },
+      );
+    }
+
+    const disposition =
+      response.headers.get('Content-Disposition') ?? '';
+
+    const match =
+      /filename\*?=(?:UTF-8''|)"?([^";]+)"?/i.exec(disposition);
+
+    const headerFilename = match?.[1]
+      ? decodeURIComponent(match[1]).split(/[\\/]/).pop() ?? ''
+      : '';
+
+    const filename =
+      headerFilename.trim() ||
+      fallbackFilename.trim() ||
+      'download';
+
+    return {
+      blob: await response.blob(),
+      filename,
+    };
   }
 
   // ── overview-api ─────────────────────────────────────────────────────────
@@ -272,7 +516,7 @@ class ApiClient {
   getRecentActivity(page = 1, limit = 8, from?: string) { return this.get<Paginated<ActivityEntry>>('overview', `/api/overview/activity${qs({ page, limit, from })}`); }
   getFavorites() { return this.get<{ favorites: Favorite[] }>('overview', '/api/overview/favorites'); }
   addFavorite(data: { type: string; label: string; path: string }) { return this.post<{ favorite: Favorite }>('overview', '/api/overview/favorites', data); }
-  removeFavorite(id: string) { return this.delete<{ removed: string }>('overview', `/api/overview/favorites/${id}`); }
+  removeFavorite(id: string) { return this.delete<{ removed: string }>('overview', `/api/overview/favorites/${pathSegment(id)}`); }
   getQuickActions() { return this.get<{ actions: QuickAction[] }>('overview', '/api/overview/quick-actions'); }
 
   // ── aws-accounts-api ─────────────────────────────────────────────────────
@@ -280,7 +524,7 @@ class ApiClient {
   getAccounts(params: { status?: string; environment?: string; connectionMethod?: string; region?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudConnection>>('awsAccounts', `/api/aws-accounts/accounts${qs(params)}`);
   }
-  getAccount(id: string) { return this.get<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
+  getAccount(id: string) { return this.get<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}`); }
   createAccount(data: {
     connectionName: string; connectionMethod: 'access_key' | 'cross_account_role'; awsAccountId: string;
     accessKeyId?: string; secretAccessKey?: string; roleArn?: string; externalId?: string;
@@ -289,18 +533,18 @@ class ApiClient {
     return this.post<CloudConnection & { planLimitWarning?: string | null }>('awsAccounts', '/api/aws-accounts/accounts', data);
   }
   updateAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null; defaultRegion?: string; scanRegions?: string[]; supportPlan?: string | null }) {
-    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}`, data);
+    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}`, data);
   }
-  disconnectAccount(id: string) { return this.delete<{ disconnected: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}`); }
-  deleteAccountPermanently(id: string) { return this.delete<{ deleted: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permanently`); }
+  disconnectAccount(id: string) { return this.delete<{ disconnected: string }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}`); }
+  deleteAccountPermanently(id: string) { return this.delete<{ deleted: string }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/permanently`); }
   updateAccountCredentials(id: string, data: { accessKeyId: string; secretAccessKey: string }) {
-    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/credentials`, data);
+    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/credentials`, data);
   }
   updateAccountRole(id: string, data: { roleArn: string; externalId: string }) {
-    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${id}/role`, data);
+    return this.put<CloudConnection>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/role`, data);
   }
   testAccount(id: string, service: CloudAccountService = 'awsAccounts') {
-    return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>(service, `${accountsPathPrefix(service)}/accounts/${id}/test`);
+    return this.post<{ credentialsPresent: boolean; liveValidation: false; message: string }>(service, `${accountsPathPrefix(service)}/accounts/${pathSegment(id)}/test`);
   }
 
   // Real resource discovery — one request per step, kept small enough to fit
@@ -327,13 +571,13 @@ class ApiClient {
    */
   startCollectionRun(id: string, service: CloudAccountService = 'awsAccounts') {
     return this.post<{ id: string; status: string; created: boolean; progress: { totalSteps: number; completedSteps: number; failedSteps: number; percent: number } }>(
-      service, `${accountsPathPrefix(service)}/accounts/${id}/collection-runs`, {},
+      service, `${accountsPathPrefix(service)}/accounts/${pathSegment(id)}/collection-runs`, {},
     );
   }
 
   getCollectionRun(runId: string, service: CloudAccountService = 'awsAccounts') {
     return this.get<{ id: string; status: string; explanation: string; progress: { totalSteps: number; completedSteps: number; failedSteps: number; percent: number }; errorSummary: string | null; finishedAt: string | null }>(
-      service, `${accountsPathPrefix(service)}/collection-runs/${runId}`,
+      service, `${accountsPathPrefix(service)}/collection-runs/${pathSegment(runId)}`,
     );
   }
 
@@ -347,16 +591,16 @@ class ApiClient {
    * is a claim the data does not support.
    */
   getScanHealth(id: string, service: CloudAccountService = 'awsAccounts') {
-    return this.get<ScanHealth>(service, `${accountsPathPrefix(service)}/accounts/${id}/scan-health`);
+    return this.get<ScanHealth>(service, `${accountsPathPrefix(service)}/accounts/${pathSegment(id)}/scan-health`);
   }
 
   cancelCollectionRun(runId: string, service: CloudAccountService = 'awsAccounts') {
-    return this.post<{ id: string; status: string }>(service, `${accountsPathPrefix(service)}/collection-runs/${runId}/cancel`, {});
+    return this.post<{ id: string; status: string }>(service, `${accountsPathPrefix(service)}/collection-runs/${pathSegment(runId)}/cancel`, {});
   }
 
   getCollectionRunSteps(runId: string, service: CloudAccountService = 'awsAccounts') {
     return this.get<{ items: { step_id: string; status: string; error_message: string | null }[]; total: number }>(
-      service, `${accountsPathPrefix(service)}/collection-runs/${runId}/steps`,
+      service, `${accountsPathPrefix(service)}/collection-runs/${pathSegment(runId)}/steps`,
     );
   }
 
@@ -379,20 +623,20 @@ class ApiClient {
    */
   discoverCur(id: string) {
     return this.post<{ reportName: string; bucket: string; prefix: string; region: string }>(
-      'awsAccounts', `/api/aws-accounts/accounts/${id}/cur/discover`, {},
+      'awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/cur/discover`, {},
     );
   }
 
   startCurRun(id: string) {
     return this.post<{ id: string; status: string; created: boolean; progress: { totalSteps: number; completedSteps: number; percent: number } }>(
-      'awsAccounts', `/api/aws-accounts/accounts/${id}/cur-runs`, {},
+      'awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/cur-runs`, {},
     );
   }
 
   getGcpAccounts(params: { status?: string; environment?: string; connectionMethod?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<GcpConnection>>('gcpAccounts', `/api/gcp-accounts/accounts${qs(params)}`);
   }
-  getGcpAccount(id: string) { return this.get<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`); }
+  getGcpAccount(id: string) { return this.get<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}`); }
   createGcpAccount(data: {
     connectionName: string; connectionMethod: 'service_account_key' | 'service_account_impersonation'; gcpProjectId: string;
     serviceAccountKeyJson?: string; impersonatedServiceAccount?: string;
@@ -401,12 +645,12 @@ class ApiClient {
     return this.post<GcpConnection & { planLimitWarning?: string | null }>('gcpAccounts', '/api/gcp-accounts/accounts', data);
   }
   updateGcpAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null; defaultRegion?: string; scanRegions?: string[] }) {
-    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`, data);
+    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}`, data);
   }
-  disconnectGcpAccount(id: string) { return this.delete<{ disconnected: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}`); }
-  deleteGcpAccountPermanently(id: string) { return this.delete<{ deleted: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/permanently`); }
+  disconnectGcpAccount(id: string) { return this.delete<{ disconnected: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}`); }
+  deleteGcpAccountPermanently(id: string) { return this.delete<{ deleted: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}/permanently`); }
   updateGcpAccountCredentials(id: string, data: { serviceAccountKeyJson: string }) {
-    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/credentials`, data);
+    return this.put<GcpConnection>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}/credentials`, data);
   }
 
   // Real GCP permission/connection validation (oauth2 tokeninfo identity check
@@ -415,21 +659,21 @@ class ApiClient {
   // above, GCP's own IdentitySummary since a GCP identity is an email + OAuth
   // scopes, not an ARN.
   validateGcpProjectPermissions(id: string) {
-    return this.post<{ status: 'succeeded' | 'failed'; identity: GcpIdentitySummary | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/permissions/validate`);
+    return this.post<{ status: 'succeeded' | 'failed'; identity: GcpIdentitySummary | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${pathSegment(id)}/permissions/validate`);
   }
   getGcpProjectPermissions(id: string) {
-    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/permissions`);
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('gcpAccounts', `/api/gcp-accounts/projects/${pathSegment(id)}/permissions`);
   }
-  getGcpAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('gcpAccounts', `/api/gcp-accounts/projects/${id}/sync-history`); }
+  getGcpAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('gcpAccounts', `/api/gcp-accounts/projects/${pathSegment(id)}/sync-history`); }
   getGcpAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
-    return this.get<Paginated<ActivityEntry>>('gcpAccounts', `/api/gcp-accounts/projects/${id}/activity${qs(params)}`);
+    return this.get<Paginated<ActivityEntry>>('gcpAccounts', `/api/gcp-accounts/projects/${pathSegment(id)}/activity${qs(params)}`);
   }
   /** Searches BigQuery datasets in `bqProjectId` (defaults to this connection's own GCP project) for a standard Cloud Billing export table — see connector-gcp's gcpBilling.ts for why this can't be true auto-discovery. */
   discoverGcpBillingExport(id: string, bqProjectId?: string) {
-    return this.post<{ bqProjectId: string; datasetId: string; tableId: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/billing/discover`, bqProjectId ? { bqProjectId } : {});
+    return this.post<{ bqProjectId: string; datasetId: string; tableId: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}/billing/discover`, bqProjectId ? { bqProjectId } : {});
   }
   /** Pulls real month-to-date cost from the discovered billing export table into cost_snapshots — the GCP analog of syncAccountCost(). Requires discoverGcpBillingExport to have found a table first. */
-  syncGcpBillingCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${id}/billing/sync`); }
+  syncGcpBillingCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('gcpAccounts', `/api/gcp-accounts/accounts/${pathSegment(id)}/billing/sync`); }
 
   // ── azure-accounts-api ────────────────────────────────────────────────────
   // Same one-service-principal-connects-a-subscription shape as GCP's service
@@ -439,7 +683,7 @@ class ApiClient {
   getAzureAccounts(params: { status?: string; environment?: string; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<AzureConnection>>('azureAccounts', `/api/azure-accounts/accounts${qs(params)}`);
   }
-  getAzureAccount(id: string) { return this.get<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
+  getAzureAccount(id: string) { return this.get<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}`); }
   createAzureAccount(data: {
     connectionName: string; azureSubscriptionId: string; azureTenantId: string; azureClientId: string;
     azureAuthType?: 'client_secret' | 'client_certificate'; azureClientSecret?: string; azureCertificatePem?: string; azurePrivateKeyPem?: string;
@@ -451,30 +695,30 @@ class ApiClient {
     return this.post<AzureConnection & { _reconnected?: boolean; planLimitWarning?: string | null }>('azureAccounts', '/api/azure-accounts/accounts', data);
   }
   updateAzureAccount(id: string, data: { connectionName?: string; environment?: string; projectId?: string | null }) {
-    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}`, data);
+    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}`, data);
   }
-  disconnectAzureAccount(id: string) { return this.delete<{ disconnected: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}`); }
-  deleteAzureAccountPermanently(id: string) { return this.delete<{ deleted: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permanently`); }
+  disconnectAzureAccount(id: string) { return this.delete<{ disconnected: string }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}`); }
+  deleteAzureAccountPermanently(id: string) { return this.delete<{ deleted: string }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/permanently`); }
   updateAzureAccountCredentials(id: string, data: { azureAuthType?: 'client_secret' | 'client_certificate'; azureClientSecret?: string; azureCertificatePem?: string; azurePrivateKeyPem?: string }) {
-    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${id}/credentials`, data);
+    return this.put<AzureConnection>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/credentials`, data);
   }
 
-  getAzureAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost`); }
-  syncAzureAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('azureAccounts', `/api/azure-accounts/accounts/${id}/cost/sync`); }
+  getAzureAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/cost`); }
+  syncAzureAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/cost/sync`); }
 
   // Real Azure permission/connection validation (ARM Get Subscription identity
   // check plus Virtual Machines/Storage/SQL/AKS/Key Vault/Role Assignments read
   // probes) — same shape as validateGcpProjectPermissions/getGcpProjectPermissions
   // above, Azure's own IdentitySummary since its identity is a subscription, not an ARN.
   validateAzureAccountPermissions(id: string) {
-    return this.post<{ status: 'succeeded' | 'failed'; identity: AzureIdentitySummary | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permissions/validate`);
+    return this.post<{ status: 'succeeded' | 'failed'; identity: AzureIdentitySummary | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/permissions/validate`);
   }
   getAzureAccountPermissions(id: string) {
-    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/permissions`);
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/permissions`);
   }
-  getAzureAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('azureAccounts', `/api/azure-accounts/accounts/${id}/sync-history`); }
+  getAzureAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/sync-history`); }
   getAzureAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
-    return this.get<Paginated<ActivityEntry>>('azureAccounts', `/api/azure-accounts/accounts/${id}/activity${qs(params)}`);
+    return this.get<Paginated<ActivityEntry>>('azureAccounts', `/api/azure-accounts/accounts/${pathSegment(id)}/activity${qs(params)}`);
   }
 
   getAwsAccountsDashboard() {
@@ -493,7 +737,7 @@ class ApiClient {
   getAzureHealthDetailed() { return this.get<CloudAccountsHealthResponse>('azureAccounts', '/api/azure-accounts/health/detailed'); }
   getGcpHealthDetailed() { return this.get<CloudAccountsHealthResponse>('gcpAccounts', '/api/gcp-accounts/health/detailed'); }
   getAccountHealth(id: string, provider: 'aws' | 'gcp' | 'azure') {
-    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${id}/health` : provider === 'azure' ? `/api/azure-accounts/accounts/${id}/health` : `/api/aws-accounts/accounts/${id}/health`;
+    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${pathSegment(id)}/health` : provider === 'azure' ? `/api/azure-accounts/accounts/${pathSegment(id)}/health` : `/api/aws-accounts/accounts/${pathSegment(id)}/health`;
     return this.get<AccountHealth & { connectionName: string; provider: string; identifier: string; environment: string }>(provider === 'gcp' ? 'gcpAccounts' : provider === 'azure' ? 'azureAccounts' : 'awsAccounts', path);
   }
 
@@ -514,33 +758,33 @@ class ApiClient {
   }
   /** Azure / GCP config-change timeline (Activity Log / Cloud Audit Logs), normalized to the CloudTrail-events shape. */
   getProviderChanges(id: string, provider: 'azure' | 'gcp') {
-    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${id}/changes` : `/api/azure-accounts/accounts/${id}/changes`;
+    const path = provider === 'gcp' ? `/api/gcp-accounts/projects/${pathSegment(id)}/changes` : `/api/azure-accounts/accounts/${pathSegment(id)}/changes`;
     return this.get<{ provider: string; events: ProviderChangeEvent[] }>(provider === 'gcp' ? 'gcpAccounts' : 'azureAccounts', path);
   }
 
   // Real AWS permission/connection validation (sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer probes)
   validateAccountPermissions(id: string) {
-    return this.post<{ status: 'succeeded' | 'failed'; identity: IdentitySummary | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permissions/validate`);
+    return this.post<{ status: 'succeeded' | 'failed'; identity: IdentitySummary | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/permissions/validate`);
   }
   getAccountPermissions(id: string) {
-    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/permissions`);
+    return this.get<{ run: ValidationRun | null; checks: PermissionCheckResult[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/permissions`);
   }
-  getAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/sync-history`); }
+  getAccountSyncHistory(id: string) { return this.get<{ runs: ValidationRun[]; recurringFailures: RecurringFailure[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/sync-history`); }
   getAwsAccountsPermissionsSummary() { return this.get<{ accounts: AccountPermissionSummary[] }>('awsAccounts', '/api/aws-accounts/permissions'); }
 
   getAwsAccountsRegions() { return this.get<{ regions: { region: string; resourceCount: number; accountsEnabled: number; accountsWithResources: number }[] }>('awsAccounts', '/api/aws-accounts/regions'); }
-  getAccountRegions(id: string) { return this.get<{ regions: { region: string; isDefault: boolean; resourceCount: number; lastScan: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/regions`); }
+  getAccountRegions(id: string) { return this.get<{ regions: { region: string; isDefault: boolean; resourceCount: number; lastScan: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/regions`); }
 
-  getAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cost`); }
-  syncAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cost/sync`); }
+  getAccountCost(id: string) { return this.get<{ monthToDate: number; byService: Record<string, number> }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/cost`); }
+  syncAccountCost(id: string) { return this.post<{ synced: number; start: string; end: string }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/cost/sync`); }
   getAwsAccountsCostSummary() { return this.get<{ topCostAccounts: { connectionId: string; connectionName: string; monthToDate: number }[]; totalMonthToDate: number }>('awsAccounts', '/api/aws-accounts/cost-summary'); }
 
-  getAccountRecommendations(id: string) { return this.get<{ recommendations: CostRecommendation[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations`); }
+  getAccountRecommendations(id: string) { return this.get<{ recommendations: CostRecommendation[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/recommendations`); }
   getAwsAccountsRecommendationsSummary() { return this.get<{ openRecommendations: number; totalPotentialMonthlySavings: number }>('awsAccounts', '/api/aws-accounts/recommendations'); }
   /** Real Reserved Instance / Savings Plan / Rightsizing recommendations from AWS Cost Explorer's own recommendation APIs — separate from the homegrown idle/unattached heuristic, which runs on its own schedule. Savings Plans generation is async on AWS's side; call this again later to pick up the result once savingsPlansStatus comes back 'generating'. */
-  syncAwsRecommendations(id: string) { return this.post<{ inserted: number; savingsPlansStatus: 'generating' | 'ready' | 'error' | 'not_started'; errors: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${id}/recommendations/sync`); }
+  syncAwsRecommendations(id: string) { return this.post<{ inserted: number; savingsPlansStatus: 'generating' | 'ready' | 'error' | 'not_started'; errors: string[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/recommendations/sync`); }
 
-  getAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${id}/activity${qs(params)}`); }
+  getAccountActivity(id: string, params: { action?: string; actorId?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/activity${qs(params)}`); }
   getAwsAccountsActivity(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('awsAccounts', `/api/aws-accounts/activity${qs(params)}`); }
   /**
    * AWS-P1-05: defaults to configuration CHANGES. Pass includeReadOnly to
@@ -548,15 +792,15 @@ class ApiClient {
    * outnumbers real changes by orders of magnitude.
    */
   getAccountCloudTrailEvents(id: string, params: { region?: string; attributeKey?: string; attributeValue?: string; from?: string; to?: string; nextToken?: string; includeReadOnly?: boolean } = {}) {
-    return this.get<{ events: CloudTrailEvent[]; nextToken: string | null; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${id}/cloudtrail-events${qs(params)}`);
+    return this.get<{ events: CloudTrailEvent[]; nextToken: string | null; region: string }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(id)}/cloudtrail-events${qs(params)}`);
   }
 
   async downloadAwsAccountsReport(kind: 'account-summary' | 'health' | 'permissions' | 'sync' | 'cost') {
-    return this.downloadRaw('awsAccounts', `/api/aws-accounts/reports/${kind}`, `aws-accounts-${kind}.csv`);
+    return this.downloadRaw('awsAccounts', `/api/aws-accounts/reports/${pathSegment(kind)}`, `aws-accounts-${kind}.csv`);
   }
   getCrossAccountRoles() { return this.get<{ roles: CrossAccountRole[] }>('awsAccounts', '/api/aws-accounts/cross-account-roles'); }
   getAccountCredentials(id: string) {
-    return this.get<{ connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; roleArn: string | null; externalId: string | null }>('awsAccounts', `/api/aws-accounts/credentials/${id}`);
+    return this.get<{ connectionMethod: string; maskedAccessKey: string | null; keyRotatedAt: string | null; rotationDueInDays: number | null; roleArn: string | null; externalId: string | null }>('awsAccounts', `/api/aws-accounts/credentials/${pathSegment(id)}`);
   }
 
   // Safe Automated Remediation — real AWS mutation calls (StopInstances/StartInstances/ReleaseAddress/DeleteVolume/DeleteSnapshot/DeregisterImage/ModifyInstanceAttribute) using the connection's own credentials, gated by request -> approve -> dry-run -> execute.
@@ -564,23 +808,23 @@ class ApiClient {
   requestRemediation(data: { connectionId: string; resourceId: string; actionType: RemediationActionType; recommendationId?: string; targetConfig?: { targetInstanceType?: string } }) {
     return this.post<RemediationRequest>('awsAccounts', '/api/aws-accounts/remediation/request', data);
   }
-  approveRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/approve`); }
-  rejectRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/reject`); }
-  dryRunRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/dry-run`); }
-  executeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/execute`); }
+  approveRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/approve`); }
+  rejectRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/reject`); }
+  dryRunRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/dry-run`); }
+  executeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/execute`); }
   /** Polled by the caller (Automation's Remediation tab) while a resize_instance request sits in 'awaiting_stop' — AWS's StopInstances is async, so this re-checks live state each call and only finishes (ModifyInstanceAttribute + StartInstances) once the instance is actually stopped. */
-  finishResizeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/finish-resize`); }
-  rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${id}/rollback`); }
+  finishResizeRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/finish-resize`); }
+  rollbackRemediation(id: string) { return this.post<RemediationRequest>('awsAccounts', `/api/aws-accounts/remediation/${pathSegment(id)}/rollback`); }
 
   // GCP's own Safe Automated Remediation — same remediation_requests table (provider='gcp'), same request -> approve -> dry-run -> execute lifecycle, currently stop_instance/start_instance only (see gcp-accounts-api/src/routes/remediation.ts).
   listGcpRemediation(params: { status?: string; connectionId?: string } = {}) { return this.get<{ items: RemediationRequest[] }>('gcpAccounts', `/api/gcp-accounts/remediation${qs(params)}`); }
   requestGcpRemediation(data: { connectionId: string; resourceId: string; actionType: 'stop_instance' | 'start_instance'; recommendationId?: string }) {
     return this.post<RemediationRequest>('gcpAccounts', '/api/gcp-accounts/remediation/request', data);
   }
-  approveGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/approve`); }
-  rejectGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/reject`); }
-  dryRunGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/dry-run`); }
-  executeGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${id}/execute`); }
+  approveGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${pathSegment(id)}/approve`); }
+  rejectGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${pathSegment(id)}/reject`); }
+  dryRunGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${pathSegment(id)}/dry-run`); }
+  executeGcpRemediation(id: string) { return this.post<RemediationRequest>('gcpAccounts', `/api/gcp-accounts/remediation/${pathSegment(id)}/execute`); }
 
   // Cost & Usage Report (CUR) ingestion — real per-resource cost, populating resource_costs for the existing Cost Allocation/Chargeback/Showback pages in cost-management-api.
 
@@ -588,9 +832,9 @@ class ApiClient {
   getIdentities(params: { provider?: string; identityType?: string; privilegeLevel?: string; isHuman?: boolean; search?: string; sort?: string; sortDir?: 'asc' | 'desc'; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudIdentity>>('awsAccounts', `/api/aws-accounts/identities${qs(params)}`);
   }
-  getIdentity(id: string) { return this.get<CloudIdentity>('awsAccounts', `/api/aws-accounts/identities/${id}`); }
+  getIdentity(id: string) { return this.get<CloudIdentity>('awsAccounts', `/api/aws-accounts/identities/${pathSegment(id)}`); }
   getIdentitySummary() { return this.get<IdentitySummary>('awsAccounts', '/api/aws-accounts/identities/summary'); }
-  getIdentityEdges(id: string) { return this.get<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] }>('awsAccounts', `/api/aws-accounts/identities/${id}/edges`); }
+  getIdentityEdges(id: string) { return this.get<{ outbound: IdentityEdge[]; inbound: IdentityEdge[] }>('awsAccounts', `/api/aws-accounts/identities/${pathSegment(id)}/edges`); }
 
   // ── resources-api ────────────────────────────────────────────────────────
 
@@ -600,10 +844,10 @@ class ApiClient {
   getResourceInventory(params: { connectionId?: string; category?: string; service?: string; region?: string; status?: string; search?: string; includeDeleted?: boolean; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/inventory${qs(params)}`);
   }
-  getResource(id: string) { return this.get<CloudResource>('resources', `/api/resources/inventory/${id}`); }
+  getResource(id: string) { return this.get<CloudResource>('resources', `/api/resources/inventory/${pathSegment(id)}`); }
   // Real, on-demand CloudWatch Logs pull -- Lambda functions only for now (see connector-aws's logs.ts). Nothing is stored; this calls FilterLogEvents live each time.
   getResourceLogs(connectionId: string, resourceId: string, params: { from?: string; to?: string } = {}) {
-    return this.get<{ logGroupName: string; events: { timestamp: string | null; message: string; logStream: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${connectionId}/resources/${resourceId}/logs${qs(params)}`);
+    return this.get<{ logGroupName: string; events: { timestamp: string | null; message: string; logStream: string | null }[] }>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(connectionId)}/resources/${pathSegment(resourceId)}/logs${qs(params)}`);
   }
   getResourceExplorer(params: { connectionId?: string; region?: string } = {}) { return this.get<{ total: number; categories: { category: string; total: number; services: { service: string; count: number }[] }[] }>('resources', `/api/resources/explorer${qs(params)}`); }
   getResourceExplorerCategory(category: string, params: { page?: number; limit?: number } = {}) {
@@ -613,7 +857,7 @@ class ApiClient {
     return this.get<Paginated<CloudResource>>('resources', `/api/resources/explorer/${encodeURIComponent(category)}/${encodeURIComponent(service)}${qs(params)}`);
   }
   searchResources(q: string, connectionId?: string) { return this.get<{ query: string; items: CloudResource[]; capped?: boolean }>('resources', `/api/resources/search${qs({ q, connectionId })}`); }
-  getResourceRelationships(id: string) { return this.get<{ resource: { id: string; resourceId: string; resourceName: string | null }; relationships: unknown }>('resources', `/api/resources/${id}/relationships`); }
+  getResourceRelationships(id: string) { return this.get<{ resource: { id: string; resourceId: string; resourceName: string | null }; relationships: unknown }>('resources', `/api/resources/${pathSegment(id)}/relationships`); }
   getDependencyGraph(resourceId: string) {
     return this.get<{ nodes: { id: string; resourceId: string; label: string | null; resourceTypeKey: string; category: string }[]; edges: { from: string; to: string; relation: string }[]; hops: number }>('resources', `/api/resources/dependency-graph${qs({ resourceId })}`);
   }
@@ -643,7 +887,7 @@ class ApiClient {
   getEksHelmReleases() { return this.get<NotIntegrated>('containers', '/api/containers/eks/helm-releases'); }
   /** Real, per-pod EKS cost allocation (OpenCost/CNCF technique — node cost x pod's CPU-request share of that node's allocatable CPU). `clusterId` is "<region>/<clusterName>" (matches the scanner's own resource_id prefix); omitted aggregates every EKS cluster on this connection. Requires Discovery/Sync to have run since providerID/resource-request capture shipped, or nodes/pods will be missing the fields this needs. */
   getEksCostAllocation(connectionId: string, clusterId?: string) {
-    return this.get<EksCostAllocation>('awsAccounts', `/api/aws-accounts/accounts/${connectionId}/eks/cost-allocation${clusterId ? `?clusterId=${encodeURIComponent(clusterId)}` : ''}`);
+    return this.get<EksCostAllocation>('awsAccounts', `/api/aws-accounts/accounts/${pathSegment(connectionId)}/eks/cost-allocation${clusterId ? `?clusterId=${encodeURIComponent(clusterId)}` : ''}`);
   }
   getEksAccessEntries(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/access-entries${qs(params)}`); }
   getEksAuthMappings(params: ContainerListParams = {}) { return this.get<Paginated<CloudResource> & { matchedTypeKeys: string[] }>('containers', `/api/containers/eks/auth-mappings${qs(params)}`); }
@@ -693,9 +937,9 @@ class ApiClient {
     return this.post<Budget>('costManagement', '/api/cost-management/budgets', data);
   }
   updateBudget(id: string, data: { name?: string; monthlyLimit?: number; alertThresholds?: number[]; scopeType?: BudgetScopeType; scopeId?: string }) {
-    return this.put<Budget>('costManagement', `/api/cost-management/budgets/${id}`, data);
+    return this.put<Budget>('costManagement', `/api/cost-management/budgets/${pathSegment(id)}`, data);
   }
-  deleteBudget(id: string) { return this.delete<{ deleted: string }>('costManagement', `/api/cost-management/budgets/${id}`); }
+  deleteBudget(id: string) { return this.delete<{ deleted: string }>('costManagement', `/api/cost-management/budgets/${pathSegment(id)}`); }
   getCostExplorer(params: { connectionId?: string; connectionIds?: string[]; from?: string; to?: string; service?: string; region?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CostSnapshot>>('costManagement', `/api/cost-management/explorer${qs({ connectionId: params.connectionId, connection_ids: params.connectionIds?.join(','), from: params.from, to: params.to, service: params.service, region: params.region, page: params.page, limit: params.limit })}`);
   }
@@ -724,19 +968,19 @@ class ApiClient {
   getReservedInstances(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/reserved-instances${recQs(params)}`); }
   getSavingsPlans(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/savings-plans${recQs(params)}`); }
   getOptimizationHistory(params: RecommendationListParams = {}) { return this.get<Paginated<CostRecommendation>>('costOptimization', `/api/cost-optimization/optimization-history${recQs(params)}`); }
-  updateSavingsOpportunity(id: string, status: 'applied' | 'dismissed') { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}`, { status }); }
+  updateSavingsOpportunity(id: string, status: 'applied' | 'dismissed') { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}`, { status }); }
   /** Skips a recommendation from the "open" views for a stated reason/duration without dismissing it outright — it re-surfaces on its own once excluded_until passes (or never, for a permanent exclusion). */
   excludeSavingsOpportunity(id: string, data: { reason: ExclusionReason; justification?: string; duration: ExclusionDuration; until?: string }) {
-    return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/exclude`, data);
+    return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/exclude`, data);
   }
-  unexcludeSavingsOpportunity(id: string) { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/unexclude`); }
+  unexcludeSavingsOpportunity(id: string) { return this.patch<CostRecommendation>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/unexclude`); }
   /** Assigns (optional) and/or emails (best-effort — see emailSent in the response) an owner about this recommendation. */
   notifyOwner(id: string, data: { recipientUserId?: string; additionalEmails?: string[] }) {
-    return this.patch<CostRecommendation & { emailSent: boolean; emailError: string | null }>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/notify-owner`, data);
+    return this.patch<CostRecommendation & { emailSent: boolean; emailError: string | null }>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/notify-owner`, data);
   }
   /** Real end-to-end: reads the actual file from the connected repo, finds the current instance_type/instanceType by exact literal match, commits the change on a new branch, opens a real PR. Fails honestly (400) if the match isn't found exactly once — see lib/github.ts's openResizeAutoPr server-side. */
   openAutoPr(id: string, data: { installationRowId: string; repoFullName: string; filePath: string }) {
-    return this.patch<{ prUrl: string }>('costOptimization', `/api/cost-optimization/savings-opportunities/${id}/auto-pr`, data);
+    return this.patch<{ prUrl: string }>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/auto-pr`, data);
   }
   // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
   generateRecommendations(connectionId?: string) {
@@ -745,7 +989,7 @@ class ApiClient {
   getCostAnomalies(params: { connectionId?: string; connectionIds?: string[]; status?: string; service?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<CostAnomaly>>('costOptimization', `/api/cost-optimization/anomalies${qs({ connectionId: params.connectionId, connection_ids: params.connectionIds?.join(','), status: params.status, service: params.service, page: params.page, limit: params.limit })}`);
   }
-  updateCostAnomaly(id: string, status: 'acknowledged' | 'resolved') { return this.patch<CostAnomaly>('costOptimization', `/api/cost-optimization/anomalies/${id}`, { status }); }
+  updateCostAnomaly(id: string, status: 'acknowledged' | 'resolved') { return this.patch<CostAnomaly>('costOptimization', `/api/cost-optimization/anomalies/${pathSegment(id)}`, { status }); }
   // Re-runs day-over-day spike detection over cost_snapshots — called automatically after a cost sync completes (see AwsAccountDetail.tsx's syncCost).
   detectCostAnomalies(connectionId?: string) {
     return this.post<{ connectionsScanned: number; flagged: number }>('costOptimization', '/api/cost-optimization/anomalies/detect', connectionId ? { connectionId } : {});
@@ -754,8 +998,8 @@ class ApiClient {
   // GitHub App integration for the Guided Fix "Auto-PR" workflow — real installation-token exchange server-side; this client only ever sees the installation id/repo names, never a token.
   getGitInstallations() { return this.get<{ items: GitInstallation[] }>('costOptimization', '/api/cost-optimization/git/installations'); }
   connectGitInstallation(installationId: number) { return this.post<GitInstallation>('costOptimization', '/api/cost-optimization/git/installations', { installationId }); }
-  disconnectGitInstallation(id: string) { return this.delete<{ removed: string }>('costOptimization', `/api/cost-optimization/git/installations/${id}`); }
-  getInstallationRepos(installationRowId: string) { return this.get<{ items: GitRepo[] }>('costOptimization', `/api/cost-optimization/git/installations/${installationRowId}/repos`); }
+  disconnectGitInstallation(id: string) { return this.delete<{ removed: string }>('costOptimization', `/api/cost-optimization/git/installations/${pathSegment(id)}`); }
+  getInstallationRepos(installationRowId: string) { return this.get<{ items: GitRepo[] }>('costOptimization', `/api/cost-optimization/git/installations/${pathSegment(installationRowId)}/repos`); }
 
   // ── vulnerability-management-api ────────────────────────────────────────
 
@@ -765,9 +1009,9 @@ class ApiClient {
   getFindings(params: { severity?: string; status?: string; finding_source?: string; region?: string; connection_id?: string; search?: string; page?: number; limit?: number; criticalNow?: boolean } = {}) {
     return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/findings${qs(params)}`);
   }
-  getFinding(id: string) { return this.get<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`); }
+  getFinding(id: string) { return this.get<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${pathSegment(id)}`); }
   updateFindingStatus(id: string, status: 'open' | 'resolved' | 'suppressed', reason?: string) {
-    return this.patch<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${id}`, reason ? { status, reason } : { status });
+    return this.patch<VulnerabilityFinding>('vulnerabilityManagement', `/api/vulnerability-management/findings/${pathSegment(id)}`, reason ? { status, reason } : { status });
   }
   /** Additive beyond the original single-finding action -- same PATCH semantics, up to 200 ids per call, one audit log entry per finding server-side. */
   bulkUpdateFindingStatus(ids: string[], status: 'open' | 'resolved' | 'suppressed', reason?: string) {
@@ -780,7 +1024,7 @@ class ApiClient {
   // a live network capture: the backend already filters correctly on all
   // three, this was a pure frontend gap.
   getFindingsBySource(source: 'security-hub' | 'guardduty' | 'inspector' | 'iam-access-analyzer' | 'aws-config' | 'trusted-advisor' | 'container-images' | 'gcp-scc' | 'defender', params: { page?: number; limit?: number; severity?: string; status?: string; search?: string } = {}) {
-    return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${source}${qs(params)}`);
+    return this.get<Paginated<VulnerabilityFinding>>('vulnerabilityManagement', `/api/vulnerability-management/${pathSegment(source)}${qs(params)}`);
   }
   // ── Cloud Compliance (§10.2) — its own module, its own namespace ────────
   // These replace getComplianceBenchmarks below, which reads a V2-namespaced
@@ -877,32 +1121,32 @@ class ApiClient {
     return this.get<{ scanners: Array<{ scanner: string; reachable: boolean; error?: string }> }>('vulnerabilityManagement', '/api/vulnerability-management/scanners');
   }
   startScan(scanner: string, body: { scan_type: string; target: { type: string; uri: string }; options?: Record<string, unknown>; asset_id?: string; provider?: string }) {
-    return this.post<{ scan_id?: string; status?: string; error?: string }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans`, body);
+    return this.post<{ scan_id?: string; status?: string; error?: string }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${pathSegment(scanner)}/scans`, body);
   }
   getScanStatus(scanner: string, scanId: string) {
-    return this.get<ScanRecord>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans/${scanId}`);
+    return this.get<ScanRecord>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${pathSegment(scanner)}/scans/${pathSegment(scanId)}`);
   }
   getScanResults(scanner: string, scanId: string, params: { severity?: string; status?: string; page?: number; limit?: number } = {}) {
-    return this.get<Paginated<ScannerFinding>>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans/${scanId}/results${qs(params)}`);
+    return this.get<Paginated<ScannerFinding>>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${pathSegment(scanner)}/scans/${pathSegment(scanId)}/results${qs(params)}`);
   }
   /** A tenant's own scan history for one scanner, newest first -- real,
    * persisted, independently-queryable (not session-ephemeral). As of this
    * pass, only implemented upstream by semgrep; the other 9 scanners 404
    * until their own /v1/scans route is rolled out. */
   listScans(scanner: string, params: { limit?: number; offset?: number } = {}) {
-    return this.get<{ items: ScanRecord[]; total: number; limit: number; offset: number }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${scanner}/scans${qs(params)}`);
+    return this.get<{ items: ScanRecord[]; total: number; limit: number; offset: number }>('vulnerabilityManagement', `/api/vulnerability-management/scanners/${pathSegment(scanner)}/scans${qs(params)}`);
   }
 
   // ── alerts-api ───────────────────────────────────────────────────────────
 
   getActiveAlerts(params: { severity?: string; connection_id?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<AlertRow>>('alerts', `/api/alerts/active${qs(params)}`); }
   getAlertHistory(params: { status?: string; severity?: string; connection_id?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<AlertRow>>('alerts', `/api/alerts/history${qs(params)}`); }
-  updateAlertStatus(id: string, status: 'open' | 'acknowledged' | 'in_progress' | 'resolved') { return this.patch<AlertRow>('alerts', `/api/alerts/alerts/${id}`, { status }); }
+  updateAlertStatus(id: string, status: 'open' | 'acknowledged' | 'in_progress' | 'resolved') { return this.patch<AlertRow>('alerts', `/api/alerts/alerts/${pathSegment(id)}`, { status }); }
 
   getAlertRules(params: { enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<AlertRule>>('alerts', `/api/alerts/rules${qs(params)}`); }
   createAlertRule(data: { name: string; condition?: unknown; severity?: string; notificationChannels?: unknown[]; enabled?: boolean; escalationPolicyId?: string | null }) { return this.post<AlertRule>('alerts', '/api/alerts/rules', data); }
-  updateAlertRule(id: string, data: Partial<{ name: string; condition: unknown; severity: string; notificationChannels: unknown[]; enabled: boolean; escalationPolicyId: string | null }>) { return this.put<AlertRule>('alerts', `/api/alerts/rules/${id}`, data); }
-  deleteAlertRule(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/rules/${id}`); }
+  updateAlertRule(id: string, data: Partial<{ name: string; condition: unknown; severity: string; notificationChannels: unknown[]; enabled: boolean; escalationPolicyId: string | null }>) { return this.put<AlertRule>('alerts', `/api/alerts/rules/${pathSegment(id)}`, data); }
+  deleteAlertRule(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/rules/${pathSegment(id)}`); }
   // Evaluates enabled alert_rules against monitoring_alarms/cloud_resources and inserts real alerts rows -- called automatically after a Discover Resources scan finishes (see syncContext.tsx, mirroring generateRecommendations) and from a manual "Evaluate Now" button.
   evaluateAlertRules(connectionId?: string) {
     return this.post<{ evaluated: number; created: number }>('alerts', '/api/alerts/evaluate', connectionId ? { connectionId } : {});
@@ -910,28 +1154,28 @@ class ApiClient {
 
   getNotificationChannels(params: { channel_type?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<NotificationChannel>>('alerts', `/api/alerts/channels${qs(params)}`); }
   createNotificationChannel(data: { channelType: string; name: string; config?: unknown; enabled?: boolean }) { return this.post<NotificationChannel>('alerts', '/api/alerts/channels', data); }
-  updateNotificationChannel(id: string, data: Partial<{ name: string; channelType: string; config: unknown; enabled: boolean }>) { return this.put<NotificationChannel>('alerts', `/api/alerts/channels/${id}`, data); }
-  deleteNotificationChannel(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/channels/${id}`); }
+  updateNotificationChannel(id: string, data: Partial<{ name: string; channelType: string; config: unknown; enabled: boolean }>) { return this.put<NotificationChannel>('alerts', `/api/alerts/channels/${pathSegment(id)}`, data); }
+  deleteNotificationChannel(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/channels/${pathSegment(id)}`); }
 
   getEscalationPolicies(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<EscalationPolicy>>('alerts', `/api/alerts/escalation-policies${qs(params)}`); }
   createEscalationPolicy(data: { name: string; steps?: unknown[] }) { return this.post<EscalationPolicy>('alerts', '/api/alerts/escalation-policies', data); }
-  updateEscalationPolicy(id: string, data: Partial<{ name: string; steps: unknown[] }>) { return this.put<EscalationPolicy>('alerts', `/api/alerts/escalation-policies/${id}`, data); }
-  deleteEscalationPolicy(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/escalation-policies/${id}`); }
+  updateEscalationPolicy(id: string, data: Partial<{ name: string; steps: unknown[] }>) { return this.put<EscalationPolicy>('alerts', `/api/alerts/escalation-policies/${pathSegment(id)}`, data); }
+  deleteEscalationPolicy(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/escalation-policies/${pathSegment(id)}`); }
 
   getMaintenanceWindows(params: { connection_id?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<MaintenanceWindow>>('alerts', `/api/alerts/maintenance-windows${qs(params)}`); }
   createMaintenanceWindow(data: { name: string; connectionId?: string; startsAt: string; endsAt: string; recurrence?: unknown }) { return this.post<MaintenanceWindow>('alerts', '/api/alerts/maintenance-windows', data); }
-  updateMaintenanceWindow(id: string, data: Partial<{ name: string; connectionId: string; startsAt: string; endsAt: string; recurrence: unknown }>) { return this.put<MaintenanceWindow>('alerts', `/api/alerts/maintenance-windows/${id}`, data); }
-  deleteMaintenanceWindow(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/maintenance-windows/${id}`); }
+  updateMaintenanceWindow(id: string, data: Partial<{ name: string; connectionId: string; startsAt: string; endsAt: string; recurrence: unknown }>) { return this.put<MaintenanceWindow>('alerts', `/api/alerts/maintenance-windows/${pathSegment(id)}`, data); }
+  deleteMaintenanceWindow(id: string) { return this.delete<{ deleted: string }>('alerts', `/api/alerts/maintenance-windows/${pathSegment(id)}`); }
 
   // ── reports-api ──────────────────────────────────────────────────────────
 
   getReports(params: { category?: string; status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ReportRow>>('reports', `/api/reports/reports${qs(params)}`); }
-  getReport(id: string) { return this.get<ReportRow>('reports', `/api/reports/reports/${id}`); }
+  getReport(id: string) { return this.get<ReportRow>('reports', `/api/reports/reports/${pathSegment(id)}`); }
   createReport(data: { category: 'cost' | 'security' | 'resource' | 'operational' | 'compliance' | 'savings'; name: string; format?: 'pdf' | 'csv' | 'xlsx'; scope?: { connectionIds?: string[]; dateFrom?: string; dateTo?: string } }) {
     return this.post<ReportRow>('reports', '/api/reports/reports', data);
   }
   async downloadReport(id: string): Promise<{ blob: Blob; filename: string }> {
-    return this.downloadRaw('reports', `/api/reports/reports/${id}/download`, `report-${id}`);
+    return this.downloadRaw('reports', `/api/reports/reports/${pathSegment(id)}/download`, `report-${pathSegment(id)}`);
   }
   /** §15.1 preview: what this report would contain, and whether it can be generated at all. Generates nothing. */
   previewReport(data: { category: string; scope?: { connectionIds?: string[]; dateFrom?: string; dateTo?: string } }) {
@@ -943,25 +1187,25 @@ class ApiClient {
   // -- so a client method for them is a call that can only ever fail.
   // getScheduledReports and deleteScheduledReport are kept deliberately, so
   // a schedule saved before this release can still be seen and removed.
-  deleteScheduledReport(id: string) { return this.delete<{ deleted: string }>('reports', `/api/reports/scheduled/${id}`); }
+  deleteScheduledReport(id: string) { return this.delete<{ deleted: string }>('reports', `/api/reports/scheduled/${pathSegment(id)}`); }
   getExportCenter(params: { category?: string; status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ReportRow>>('reports', `/api/reports/export-center${qs(params)}`); }
 
   // ── users-api ────────────────────────────────────────────────────────────
 
   getMembers() { return this.get<{ members: Member[]; pendingInvites: PendingInvite[] }>('users', '/api/users/members'); }
   inviteMember(email: string, role: Role) { return this.post<PendingInviteRow & { emailSent: boolean }>('users', '/api/users/invite', { email, role }); }
-  getInvitePreview(token: string) { return this.get<{ orgName: string; inviterName: string; role: Role; email: string }>('users', `/api/users/invites/${token}`); }
-  acceptInvite(token: string) { return this.post<{ orgId: string; role: Role }>('users', `/api/users/invites/${token}/accept`); }
-  cancelInvite(id: string) { return this.delete<{ removed: string }>('users', `/api/users/invites/${id}`); }
-  updateRoleGrant(id: string, role: Role) { return this.put<{ id: string; role: Role }>('users', `/api/users/role-grants/${id}`, { role }); }
-  deleteRoleGrant(id: string) { return this.delete<{ removed: string }>('users', `/api/users/role-grants/${id}`); }
+  getInvitePreview(token: string) { return this.get<{ orgName: string; inviterName: string; role: Role; email: string }>('users', `/api/users/invites/${pathSegment(token)}`); }
+  acceptInvite(token: string) { return this.post<{ orgId: string; role: Role }>('users', `/api/users/invites/${pathSegment(token)}/accept`); }
+  cancelInvite(id: string) { return this.delete<{ removed: string }>('users', `/api/users/invites/${pathSegment(id)}`); }
+  updateRoleGrant(id: string, role: Role) { return this.put<{ id: string; role: Role }>('users', `/api/users/role-grants/${pathSegment(id)}`, { role }); }
+  deleteRoleGrant(id: string) { return this.delete<{ removed: string }>('users', `/api/users/role-grants/${pathSegment(id)}`); }
   transferOwnership(newOwnerUserId: string) { return this.post<{ newOwnerUserId: string; previousOwnerRole: Role }>('users', '/api/users/transfer-ownership', { newOwnerUserId }); }
 
   getGroups() { return this.get<{ groups: UserGroup[] }>('users', '/api/users/groups'); }
   createGroup(name: string) { return this.post<{ id: string; org_id: string; name: string }>('users', '/api/users/groups', { name }); }
-  deleteGroup(id: string) { return this.delete<{ removed: string }>('users', `/api/users/groups/${id}`); }
-  addGroupMember(groupId: string, userId: string) { return this.post<{ groupId: string; userId: string }>('users', `/api/users/groups/${groupId}/members`, { userId }); }
-  removeGroupMember(groupId: string, userId: string) { return this.delete<{ removed: string }>('users', `/api/users/groups/${groupId}/members/${userId}`); }
+  deleteGroup(id: string) { return this.delete<{ removed: string }>('users', `/api/users/groups/${pathSegment(id)}`); }
+  addGroupMember(groupId: string, userId: string) { return this.post<{ groupId: string; userId: string }>('users', `/api/users/groups/${pathSegment(groupId)}/members`, { userId }); }
+  removeGroupMember(groupId: string, userId: string) { return this.delete<{ removed: string }>('users', `/api/users/groups/${pathSegment(groupId)}/members/${pathSegment(userId)}`); }
 
   getRoles() { return this.get<{ roles: { role: Role; description: string }[] }>('users', '/api/users/roles'); }
   getMyPermissions() { return this.get<{ role: Role; description: string; effectivePermissions: { role: Role; description: string } }>('users', '/api/users/permissions'); }
@@ -976,7 +1220,7 @@ class ApiClient {
     return this.put<MenuPermissionRow>('users', '/api/users/menu-permissions', data);
   }
   deleteMenuPermission(id: string) {
-    return this.delete<{ deleted: boolean }>('users', `/api/users/menu-permissions/${id}`);
+    return this.delete<{ deleted: boolean }>('users', `/api/users/menu-permissions/${pathSegment(id)}`);
   }
 
   getEffectiveResourceGrants(userId?: string) {
@@ -989,18 +1233,18 @@ class ApiClient {
     return this.put<ResourceGrantRow>('users', '/api/users/resource-grants', { userId, connectionId });
   }
   deleteResourceGrant(id: string) {
-    return this.delete<{ deleted: boolean }>('users', `/api/users/resource-grants/${id}`);
+    return this.delete<{ deleted: boolean }>('users', `/api/users/resource-grants/${pathSegment(id)}`);
   }
 
   getApiKeys() { return this.get<{ apiKeys: ApiKeySummary[] }>('users', '/api/users/api-keys'); }
   createApiKey(name: string) { return this.post<{ apiKey: string; id: string; name: string; keyPrefix: string; note: string }>('users', '/api/users/api-keys', { name }); }
-  revokeApiKey(id: string) { return this.delete<ApiKeySummary>('users', `/api/users/api-keys/${id}`); }
+  revokeApiKey(id: string) { return this.delete<ApiKeySummary>('users', `/api/users/api-keys/${pathSegment(id)}`); }
 
   getUserAuditLog(params: { action?: string; from?: string; to?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('users', `/api/users/audit-logs${qs(params)}`); }
 
   /** Full replace, not merge — sets the ABAC attribute bag (department, clearance, ...) an abac_policies "user.<key>" condition reads. */
   updateMemberAttributes(userId: string, attributes: Record<string, unknown>) {
-    return this.put<{ id: string; attributes: Record<string, unknown> }>('users', `/api/users/members/${userId}/attributes`, { attributes });
+    return this.put<{ id: string; attributes: Record<string, unknown> }>('users', `/api/users/members/${pathSegment(userId)}/attributes`, { attributes });
   }
 
   // ABAC — attribute-based policies layered on top of role/menu-permission RBAC. A policy only fires when its conditions match; everything else falls through to RBAC unchanged.
@@ -1009,9 +1253,9 @@ class ApiClient {
     return this.post<AbacPolicyRow>('users', '/api/users/abac-policies', data);
   }
   updateAbacPolicy(id: string, data: Partial<{ name: string; description: string; effect: 'allow' | 'deny'; menuKey: string | null; conditions: AbacCondition[]; priority: number; enabled: boolean }>) {
-    return this.put<AbacPolicyRow>('users', `/api/users/abac-policies/${id}`, data);
+    return this.put<AbacPolicyRow>('users', `/api/users/abac-policies/${pathSegment(id)}`, data);
   }
-  deleteAbacPolicy(id: string) { return this.delete<{ deleted: boolean }>('users', `/api/users/abac-policies/${id}`); }
+  deleteAbacPolicy(id: string) { return this.delete<{ deleted: boolean }>('users', `/api/users/abac-policies/${pathSegment(id)}`); }
   /** Dry-run — never touches real access, just reports what the policy engine would decide for a hypothetical (user, menu, resource attributes) triple. */
   testAbacPolicy(data: { userId: string; menuKey: string; resourceAttributes?: Record<string, unknown> }) {
     return this.post<AbacTestResult>('users', '/api/users/abac-policies/test', data);
@@ -1020,7 +1264,7 @@ class ApiClient {
   // SCIM 2.0 token management — the tokens an IdP (Okta, Entra ID) authenticates with against /scim/v2/*. The provisioning protocol itself has no UI (an IdP calls it directly), only the token lifecycle does.
   getScimTokens() { return this.get<{ items: ScimTokenSummary[] }>('users', '/api/users/scim-tokens'); }
   createScimToken(name: string) { return this.post<ScimTokenSummary & { token: string }>('users', '/api/users/scim-tokens', { name }); }
-  revokeScimToken(id: string) { return this.delete<{ revoked: boolean }>('users', `/api/users/scim-tokens/${id}`); }
+  revokeScimToken(id: string) { return this.delete<{ revoked: boolean }>('users', `/api/users/scim-tokens/${pathSegment(id)}`); }
 
   // ── organization-management-api ─────────────────────────────────────────
 
@@ -1030,7 +1274,7 @@ class ApiClient {
   createOrganization(name: string) { return this.post<OrganizationRow>('organizationManagement', '/api/organization-management/organizations', { name }); }
   getOrganization() { return this.get<OrganizationRow>('organizationManagement', '/api/organization-management/organizations'); }
   updateOrganization(id: string, data: Partial<{ name: string; branding: Record<string, unknown>; mfaRequired: boolean; ipAllowlist: string[] }>) {
-    return this.put<OrganizationRow>('organizationManagement', `/api/organization-management/organizations/${id}`, data);
+    return this.put<OrganizationRow>('organizationManagement', `/api/organization-management/organizations/${pathSegment(id)}`, data);
   }
 
   getFolders() { return this.get<{ folders: FolderRow[] }>('organizationManagement', '/api/organization-management/folders'); }
@@ -1038,28 +1282,28 @@ class ApiClient {
     return this.post<FolderRow>('organizationManagement', '/api/organization-management/folders', data);
   }
   updateFolder(id: string, data: Partial<{ name: string; parentFolderId: string | null; monthlyBudget: number; requiredTags: string[]; allowedRegions: string[]; businessUnitId: string | null; costCenterId: string | null }>) {
-    return this.put<FolderRow>('organizationManagement', `/api/organization-management/folders/${id}`, data);
+    return this.put<FolderRow>('organizationManagement', `/api/organization-management/folders/${pathSegment(id)}`, data);
   }
-  deleteFolder(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/folders/${id}`); }
+  deleteFolder(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/folders/${pathSegment(id)}`); }
 
   getProjects(folderId?: string) { return this.get<{ projects: ProjectRow[] }>('organizationManagement', `/api/organization-management/projects${qs({ folderId })}`); }
   createProject(data: { name: string; slug: string; folderId?: string; monthlyBudget?: number; businessUnitId?: string; costCenterId?: string }) {
     return this.post<ProjectRow>('organizationManagement', '/api/organization-management/projects', data);
   }
   updateProject(id: string, data: Partial<{ name: string; slug: string; folderId: string | null; monthlyBudget: number; businessUnitId: string | null; costCenterId: string | null }>) {
-    return this.put<ProjectRow>('organizationManagement', `/api/organization-management/projects/${id}`, data);
+    return this.put<ProjectRow>('organizationManagement', `/api/organization-management/projects/${pathSegment(id)}`, data);
   }
-  deleteProject(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/projects/${id}`); }
+  deleteProject(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/projects/${pathSegment(id)}`); }
 
   getBusinessUnits() { return this.get<{ businessUnits: BusinessUnit[] }>('organizationManagement', '/api/organization-management/business-units'); }
   createBusinessUnit(data: { name: string; code?: string }) { return this.post<BusinessUnit>('organizationManagement', '/api/organization-management/business-units', data); }
-  updateBusinessUnit(id: string, data: Partial<{ name: string; code: string }>) { return this.put<BusinessUnit>('organizationManagement', `/api/organization-management/business-units/${id}`, data); }
-  deleteBusinessUnit(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/business-units/${id}`); }
+  updateBusinessUnit(id: string, data: Partial<{ name: string; code: string }>) { return this.put<BusinessUnit>('organizationManagement', `/api/organization-management/business-units/${pathSegment(id)}`, data); }
+  deleteBusinessUnit(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/business-units/${pathSegment(id)}`); }
 
   getCostCenters() { return this.get<{ costCenters: CostCenter[] }>('organizationManagement', '/api/organization-management/cost-centers'); }
   createCostCenter(data: { name: string; code?: string; businessUnitId?: string }) { return this.post<CostCenter>('organizationManagement', '/api/organization-management/cost-centers', data); }
-  updateCostCenter(id: string, data: Partial<{ name: string; code: string; businessUnitId: string }>) { return this.put<CostCenter>('organizationManagement', `/api/organization-management/cost-centers/${id}`, data); }
-  deleteCostCenter(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/cost-centers/${id}`); }
+  updateCostCenter(id: string, data: Partial<{ name: string; code: string; businessUnitId: string }>) { return this.put<CostCenter>('organizationManagement', `/api/organization-management/cost-centers/${pathSegment(id)}`, data); }
+  deleteCostCenter(id: string) { return this.delete<{ removed: string }>('organizationManagement', `/api/organization-management/cost-centers/${pathSegment(id)}`); }
 
   getEnvironments() { return this.get<{ environments: { environment: string; count: number }[] }>('organizationManagement', '/api/organization-management/environments'); }
   getOrgTags() { return this.get<{ tags: { key: string; resourceCount: number; values: { value: string; count: number }[] }[] }>('organizationManagement', '/api/organization-management/tags'); }
@@ -1081,7 +1325,7 @@ class ApiClient {
   }
 
   deleteOwnershipRule(id: string) {
-    return this.delete<{ id: string; assignmentsRetained: number }>('resources', `/api/resources/ownership/rules/${id}`);
+    return this.delete<{ id: string; assignmentsRetained: number }>('resources', `/api/resources/ownership/rules/${pathSegment(id)}`);
   }
 
   /** A person stating who owns a resource. Outranks every inferred value permanently. */
@@ -1105,32 +1349,32 @@ class ApiClient {
   getSharedDashboards(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<CustomDashboard>>('customDashboards', `/api/custom-dashboards/shared-dashboards${qs(params)}`); }
   getDashboardTemplates(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<CustomDashboard>>('customDashboards', `/api/custom-dashboards/templates${qs(params)}`); }
   createDashboard(data: { name: string; description?: string; widgets?: unknown[] }) { return this.post<CustomDashboard>('customDashboards', '/api/custom-dashboards/dashboards', data); }
-  getDashboard(id: string) { return this.get<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}`); }
-  updateDashboard(id: string, data: Partial<{ name: string; description: string; widgets: unknown[] }>) { return this.put<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}`, data); }
-  deleteDashboard(id: string) { return this.delete<{ deleted: string }>('customDashboards', `/api/custom-dashboards/dashboards/${id}`); }
-  shareDashboard(id: string, share: boolean) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}/share`, { share }); }
-  useTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/templates/${id}/use`); }
-  saveAsTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${id}/save-as-template`); }
+  getDashboard(id: string) { return this.get<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${pathSegment(id)}`); }
+  updateDashboard(id: string, data: Partial<{ name: string; description: string; widgets: unknown[] }>) { return this.put<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${pathSegment(id)}`, data); }
+  deleteDashboard(id: string) { return this.delete<{ deleted: string }>('customDashboards', `/api/custom-dashboards/dashboards/${pathSegment(id)}`); }
+  shareDashboard(id: string, share: boolean) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${pathSegment(id)}/share`, { share }); }
+  useTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/templates/${pathSegment(id)}/use`); }
+  saveAsTemplate(id: string) { return this.post<CustomDashboard>('customDashboards', `/api/custom-dashboards/dashboards/${pathSegment(id)}/save-as-template`); }
   getWidgetLibrary(category?: string) { return this.get<{ widgets: DashboardWidgetCatalogEntry[] }>('customDashboards', `/api/custom-dashboards/widget-library${qs({ category })}`); }
 
   // ── automation-api ───────────────────────────────────────────────────────
 
   getRunbooks(params: { category?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<Runbook>>('automation', `/api/automation/runbooks${qs(params)}`); }
   createRunbook(data: { name: string; description?: string; category?: string; steps?: unknown[] }) { return this.post<Runbook>('automation', '/api/automation/runbooks', data); }
-  updateRunbook(id: string, data: Partial<{ name: string; description: string; category: string; steps: unknown[] }>) { return this.put<Runbook>('automation', `/api/automation/runbooks/${id}`, data); }
-  deleteRunbook(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/runbooks/${id}`); }
-  executeRunbook(id: string) { return this.post<AutomationExecution>('automation', `/api/automation/runbooks/${id}/execute`); }
+  updateRunbook(id: string, data: Partial<{ name: string; description: string; category: string; steps: unknown[] }>) { return this.put<Runbook>('automation', `/api/automation/runbooks/${pathSegment(id)}`, data); }
+  deleteRunbook(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/runbooks/${pathSegment(id)}`); }
+  executeRunbook(id: string) { return this.post<AutomationExecution>('automation', `/api/automation/runbooks/${pathSegment(id)}/execute`); }
 
   getWorkflows(params: { enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<Workflow>>('automation', `/api/automation/workflows${qs(params)}`); }
   createWorkflow(data: { name: string; description?: string; trigger?: unknown; steps?: unknown[]; enabled?: boolean }) { return this.post<Workflow>('automation', '/api/automation/workflows', data); }
-  updateWorkflow(id: string, data: Partial<{ name: string; description: string; trigger: unknown; steps: unknown[]; enabled: boolean }>) { return this.put<Workflow>('automation', `/api/automation/workflows/${id}`, data); }
-  deleteWorkflow(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/workflows/${id}`); }
-  executeWorkflow(id: string) { return this.post<AutomationExecution>('automation', `/api/automation/workflows/${id}/execute`); }
+  updateWorkflow(id: string, data: Partial<{ name: string; description: string; trigger: unknown; steps: unknown[]; enabled: boolean }>) { return this.put<Workflow>('automation', `/api/automation/workflows/${pathSegment(id)}`, data); }
+  deleteWorkflow(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/workflows/${pathSegment(id)}`); }
+  executeWorkflow(id: string) { return this.post<AutomationExecution>('automation', `/api/automation/workflows/${pathSegment(id)}/execute`); }
 
   getScheduledJobs(params: { jobType?: string; enabled?: boolean; page?: number; limit?: number } = {}) { return this.get<Paginated<ScheduledJob>>('automation', `/api/automation/scheduled-jobs${qs(params)}`); }
   createScheduledJob(data: { name: string; jobType: string; scheduleCron: string; target?: unknown; enabled?: boolean }) { return this.post<ScheduledJob>('automation', '/api/automation/scheduled-jobs', data); }
-  updateScheduledJob(id: string, data: Partial<{ name: string; jobType: string; scheduleCron: string; target: unknown; enabled: boolean }>) { return this.put<ScheduledJob>('automation', `/api/automation/scheduled-jobs/${id}`, data); }
-  deleteScheduledJob(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/scheduled-jobs/${id}`); }
+  updateScheduledJob(id: string, data: Partial<{ name: string; jobType: string; scheduleCron: string; target: unknown; enabled: boolean }>) { return this.put<ScheduledJob>('automation', `/api/automation/scheduled-jobs/${pathSegment(id)}`, data); }
+  deleteScheduledJob(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/scheduled-jobs/${pathSegment(id)}`); }
 
   getRemediationHistory(params: { status?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<AutomationExecution>>('automation', `/api/automation/remediation${qs(params)}`); }
   getExecutionHistory(params: { automationType?: string; status?: string; from?: string; to?: string; page?: number; limit?: number } = {}) {
@@ -1139,12 +1383,12 @@ class ApiClient {
 
   getWebhooks(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<Webhook>>('automation', `/api/automation/webhooks${qs(params)}`); }
   createWebhook(data: { name: string; url: string; events?: string[]; platform?: 'generic' | 'slack' }) { return this.post<{ webhook: Webhook; secret: string }>('automation', '/api/automation/webhooks', data); }
-  updateWebhook(id: string, data: Partial<{ name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean }>) { return this.put<Webhook>('automation', `/api/automation/webhooks/${id}`, data); }
-  deleteWebhook(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/webhooks/${id}`); }
-  triggerTestWebhook(id: string) { return this.post<{ delivered: boolean; httpStatus?: number; error?: string; payload: unknown }>('automation', `/api/automation/webhooks/${id}/trigger-test`); }
+  updateWebhook(id: string, data: Partial<{ name: string; url: string; events: string[]; platform: 'generic' | 'slack'; enabled: boolean }>) { return this.put<Webhook>('automation', `/api/automation/webhooks/${pathSegment(id)}`, data); }
+  deleteWebhook(id: string) { return this.delete<{ deleted: string }>('automation', `/api/automation/webhooks/${pathSegment(id)}`); }
+  triggerTestWebhook(id: string) { return this.post<{ delivered: boolean; httpStatus?: number; error?: string; payload: unknown }>('automation', `/api/automation/webhooks/${pathSegment(id)}/trigger-test`); }
 
   getAutomationIntegrations(params: { category?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<Integration>>('automation', `/api/automation/integrations${qs(params)}`); }
-  updateAutomationIntegration(id: string, data: { status?: string; config?: unknown; accountRegion?: string }) { return this.put<Integration & { verified: false; note?: string }>('automation', `/api/automation/integrations/${id}`, data); }
+  updateAutomationIntegration(id: string, data: { status?: string; config?: unknown; accountRegion?: string }) { return this.put<Integration & { verified: false; note?: string }>('automation', `/api/automation/integrations/${pathSegment(id)}`, data); }
 
   // Jira — email + API token (both created by the user in their own Atlassian account, no OAuth app needed); every write real-verifies against Jira before being marked connected.
   getJiraIntegration() { return this.get<{ connected: boolean; config?: { siteUrl: string; email: string; defaultProjectKey: string | null; defaultIssueType: string; autoFileEvents: string[] } }>('automation', '/api/automation/integrations/jira'); }
@@ -1197,26 +1441,26 @@ class ApiClient {
 
   sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
   getConversations() { return this.get<{ items: ConversationSummary[] }>('aiCopilot', '/api/ai-copilot/conversations'); }
-  getConversationMessages(id: string) { return this.get<{ items: ChatMessage[] }>('aiCopilot', `/api/ai-copilot/conversations/${id}/messages`); }
-  renameConversation(id: string, title: string) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { title }); }
-  pinConversation(id: string, pinned: boolean) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${id}`, { pinned }); }
-  deleteConversation(id: string) { return this.delete<{ deleted: boolean }>('aiCopilot', `/api/ai-copilot/conversations/${id}`); }
+  getConversationMessages(id: string) { return this.get<{ items: ChatMessage[] }>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}/messages`); }
+  renameConversation(id: string, title: string) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}`, { title }); }
+  pinConversation(id: string, pinned: boolean) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}`, { pinned }); }
+  deleteConversation(id: string) { return this.delete<{ deleted: boolean }>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}`); }
 
   // ── incidents ────────────────────────────────────────────────────────────
 
   getIncidents(params: { status?: string; severity?: string; connectionId?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<Incident>>('incidents', `/api/incidents/incidents${qs(params)}`);
   }
-  getIncident(id: string) { return this.get<IncidentDetail>('incidents', `/api/incidents/incidents/${id}`); }
+  getIncident(id: string) { return this.get<IncidentDetail>('incidents', `/api/incidents/incidents/${pathSegment(id)}`); }
   createIncident(data: { title: string; severity: string; description?: string; connectionId?: string; resourceId?: string; environment?: string }) {
     return this.post<Incident>('incidents', '/api/incidents/incidents', data);
   }
-  updateIncidentStatus(id: string, status: string) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/status`, { status }); }
-  addIncidentComment(id: string, comment: string) { return this.post<IncidentEvent>('incidents', `/api/incidents/incidents/${id}/comment`, { comment }); }
-  assignIncident(id: string, assigneeId: string | null) { return this.post<Incident>('incidents', `/api/incidents/incidents/${id}/assign`, { assigneeId }); }
+  updateIncidentStatus(id: string, status: string) { return this.post<Incident>('incidents', `/api/incidents/incidents/${pathSegment(id)}/status`, { status }); }
+  addIncidentComment(id: string, comment: string) { return this.post<IncidentEvent>('incidents', `/api/incidents/incidents/${pathSegment(id)}/comment`, { comment }); }
+  assignIncident(id: string, assigneeId: string | null) { return this.post<Incident>('incidents', `/api/incidents/incidents/${pathSegment(id)}/assign`, { assigneeId }); }
   // Real checks (CloudWatch alarms, resource status, latest deployment, optional synthetic HTTP request) -- never a fabricated pass.
-  verifyIncident(id: string, url?: string) { return this.post<VerificationRun>('incidents', `/api/incidents/incidents/${id}/verify`, url ? { url } : {}); }
-  getIncidentVerifications(id: string) { return this.get<{ runs: VerificationRun[] }>('incidents', `/api/incidents/incidents/${id}/verifications`); }
+  verifyIncident(id: string, url?: string) { return this.post<VerificationRun>('incidents', `/api/incidents/incidents/${pathSegment(id)}/verify`, url ? { url } : {}); }
+  getIncidentVerifications(id: string) { return this.get<{ runs: VerificationRun[] }>('incidents', `/api/incidents/incidents/${pathSegment(id)}/verifications`); }
 }
 
 export const api = new ApiClient();

@@ -1,90 +1,235 @@
 /**
- * Level-3 context awareness (issue §15): the live risk signals that let the
- * engine promote a widget to the top of the Overview and let
- * <SignalCenter> surface a banner — a critical incident, a spend anomaly, a
- * failed deploy, a fresh critical vulnerability.
+ * Level-3 context awareness: live risk signals used to prioritize Overview
+ * widgets and populate <SignalCenter>.
  *
- * One capability-gated `Promise.allSettled` fan-out — a sub-call is only
- * fired if the user could act on what it returns, and any individual failure
- * degrades that signal to 0 rather than blanking the rest.
+ * This is a presentation/query orchestration layer, not an authorization
+ * boundary. Every backend endpoint must enforce authorization independently.
+ *
+ * Design goals:
+ * - fan out only to endpoints the current UI can legitimately consume;
+ * - isolate failures with Promise.allSettled;
+ * - keep successful signals when another endpoint fails;
+ * - preserve zero as a valid result;
+ * - avoid using stale/V2 data when the feature is disabled;
+ * - scope tenant-sensitive requests consistently.
  */
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api';
 import { daysAgoISO } from '../format';
 import { dateRangeToDays, useFilters } from '../filterContext';
 import { scopedConnectionId } from './scope';
-import { isCloudOnlyMode, isVulnerabilityDataEnabled } from '../featureFlags';
-import { EMPTY_SIGNALS, scopeQueryKey, type Capabilities, type ContextSignals, type EffectiveScope } from './types';
+import {
+  isCloudOnlyMode,
+  isVulnerabilityDataEnabled,
+} from '../featureFlags';
+import {
+  EMPTY_SIGNALS,
+  scopeQueryKey,
+  type Capabilities,
+  type ContextSignals,
+  type EffectiveScope,
+} from './types';
 
-async function fetchSignals(scope: EffectiveScope, can: Capabilities, fromISO: string): Promise<ContextSignals> {
+const SIGNALS_STALE_TIME_MS = 60_000;
+const SIGNALS_GC_TIME_MS = 5 * 60_000;
+const DEPLOYMENT_LIMIT = 50;
+const ANOMALY_LIMIT = 50;
+
+type SettledValue<T> = T | null;
+
+function settledValue<T>(
+  result: PromiseSettledResult<SettledValue<T>>,
+): T | null {
+  return result.status === 'fulfilled' ? result.value : null;
+}
+
+function isFailedDeploymentStatus(status: unknown): boolean {
+  return typeof status === 'string' &&
+    /^(?:fail|failed|failure|rollback|rolled_back|delete_failed|cancel|cancelled)(?:_|$)/i.test(
+      status.trim(),
+    );
+}
+
+function countFailedDeployments(rows: readonly { status?: unknown }[]): number {
+  return rows.reduce(
+    (count, row) => count + (isFailedDeploymentStatus(row.status) ? 1 : 0),
+    0,
+  );
+}
+
+function sumDollarImpact(rows: readonly { dollar_impact?: unknown }[]): number {
+  return rows.reduce((sum, row) => {
+    const value =
+      typeof row.dollar_impact === 'number'
+        ? row.dollar_impact
+        : typeof row.dollar_impact === 'string'
+          ? Number(row.dollar_impact)
+          : 0;
+
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+}
+
+/**
+ * Fetch the currently eligible signal sources.
+ *
+ * A feature flag intentionally participates in eligibility in addition to the
+ * capability check. Capabilities answer "could the user see/act on this?",
+ * while the feature flag answers "does this product currently expose the
+ * underlying data?". Both gates are required.
+ */
+async function fetchSignals(
+  scope: EffectiveScope,
+  can: Capabilities,
+  fromISO: string,
+): Promise<ContextSignals> {
   const connectionId = scopedConnectionId(scope);
-  // The Incidents module/backend is gone in cloud-only mode (see
-  // navConfig.ts's hiddenInCloudOnlyMode and, more fundamentally,
-  // cloudops-360's incidents Cloud Run service, deleted 2026-09-07) --
-  // can.has('incident.read') alone doesn't account for that (a raw menu
-  // permission grant can outlive a module's own nav visibility), so this
-  // fired a real, always-failing request on every Overview load for any
-  // user who happens to hold that permission. getEligibleMeta() already
-  // gates the *widget* surfaces correctly via enabledModules -- this fixes
-  // the one signal-fetching path that didn't go through that same gate.
-  const wantIncidents = !isCloudOnlyMode() && can.has('incident.read');
-  // Same class of bug as wantIncidents above, and the one the 2026-09-08
-  // production-readiness audit caught live: `security.read` alone kept
-  // fetching the V2 vulnerability dashboard and attack paths, so
-  // <SignalCenter> rendered "167 critical vulnerabilities open" (and an
-  // attack-path banner) on the V1 Overview, linking to routes that now
-  // redirect to a V2 notice. Every row behind those counts is V2 -- see
-  // isVulnerabilityDataEnabled()'s note on the verified production
-  // finding_source breakdown.
-  const wantSecurity = isVulnerabilityDataEnabled() && can.has('security.read');
+
+  const wantIncidents =
+    !isCloudOnlyMode() && can.has('incident.read');
+
+  const wantSecurity =
+    isVulnerabilityDataEnabled() && can.has('security.read');
+
   const wantCost = can.has('cost.read');
   const wantDevops = can.has('devops.read');
   const wantObs = can.has('observability.read');
 
-  const [openInc, invInc, vulns, paths, anomalies, deploys, alerts] = await Promise.allSettled([
-    wantIncidents ? api.getIncidents({ status: 'open', limit: 1 }) : Promise.resolve(null),
-    wantIncidents ? api.getIncidents({ status: 'investigating', limit: 1 }) : Promise.resolve(null),
-    wantSecurity ? api.getVulnerabilityDashboard() : Promise.resolve(null),
-    wantSecurity ? api.getAttackPaths() : Promise.resolve(null),
-    wantCost ? api.getCostAnomalies({ status: 'open', limit: 50, ...(connectionId ? { connectionId } : {}) }) : Promise.resolve(null),
-    wantDevops ? api.getDeploymentEvents({ from: fromISO, limit: 50, ...(connectionId ? { connectionId } : {}) }) : Promise.resolve(null),
-    wantObs ? api.getActiveAlerts({ severity: 'critical', limit: 1 }) : Promise.resolve(null),
+  /**
+   * Keep every branch as a Promise so Promise.allSettled has a stable tuple
+   * shape even when a source is intentionally disabled.
+   */
+  const incidentOpenRequest = wantIncidents
+    ? api.getIncidents({ status: 'open', limit: 1 })
+    : Promise.resolve(null);
+
+  const incidentInvestigatingRequest = wantIncidents
+    ? api.getIncidents({ status: 'investigating', limit: 1 })
+    : Promise.resolve(null);
+
+  const vulnerabilityRequest = wantSecurity
+    ? api.getVulnerabilityDashboard()
+    : Promise.resolve(null);
+
+  const attackPathRequest = wantSecurity
+    ? api.getAttackPaths()
+    : Promise.resolve(null);
+
+  const anomalyRequest = wantCost
+    ? api.getCostAnomalies({
+        status: 'open',
+        limit: ANOMALY_LIMIT,
+        ...(connectionId ? { connectionId } : {}),
+      })
+    : Promise.resolve(null);
+
+  const deploymentRequest = wantDevops
+    ? api.getDeploymentEvents({
+        from: fromISO,
+        limit: DEPLOYMENT_LIMIT,
+        ...(connectionId ? { connectionId } : {}),
+      })
+    : Promise.resolve(null);
+
+  const alertRequest = wantObs
+    ? api.getActiveAlerts({
+        severity: 'critical',
+        limit: 1,
+      })
+    : Promise.resolve(null);
+
+  const [
+    openIncidents,
+    investigatingIncidents,
+    vulnerabilities,
+    attackPaths,
+    anomalies,
+    deployments,
+    alerts,
+  ] = await Promise.allSettled([
+    incidentOpenRequest,
+    incidentInvestigatingRequest,
+    vulnerabilityRequest,
+    attackPathRequest,
+    anomalyRequest,
+    deploymentRequest,
+    alertRequest,
   ]);
 
-  const val = <T,>(r: PromiseSettledResult<T | null>): T | null => (r.status === 'fulfilled' ? r.value : null);
+  const openIncidentData = settledValue(openIncidents);
+  const investigatingIncidentData = settledValue(investigatingIncidents);
+  const vulnerabilityData = settledValue(vulnerabilities);
+  const attackPathData = settledValue(attackPaths);
+  const anomalyData = settledValue(anomalies);
+  const deploymentData = settledValue(deployments);
+  const alertData = settledValue(alerts);
 
-  const vulnDash = val(vulns);
-  const anomalyRows = val(anomalies)?.items ?? [];
-  const deployRows = val(deploys)?.items ?? [];
-  const failedDeploys = deployRows.filter((d) => /fail|rollback|delete_failed|cancel/i.test(d.status)).length;
+  const anomalyRows = anomalyData?.items ?? [];
+  const deploymentRows = deploymentData?.items ?? [];
 
   return {
-    criticalIncidents: val(openInc)?.pagination.total ?? 0,
-    investigatingIncidents: val(invInc)?.pagination.total ?? 0,
-    criticalVulns: vulnDash?.bySeverity?.critical ?? 0,
-    openAttackPaths: val(paths)?.items.length ?? 0,
+    criticalIncidents:
+      openIncidentData?.pagination?.total ?? 0,
+
+    investigatingIncidents:
+      investigatingIncidentData?.pagination?.total ?? 0,
+
+    criticalVulns:
+      vulnerabilityData?.bySeverity?.critical ?? 0,
+
+    openAttackPaths:
+      attackPathData?.items?.length ?? 0,
+
     costAnomalies: anomalyRows.length,
-    anomalyDollarImpact: anomalyRows.reduce((s, a) => s + (Number(a.dollar_impact) || 0), 0),
-    failedDeployments: failedDeploys,
-    criticalAlerts: val(alerts)?.pagination.total ?? 0,
+
+    anomalyDollarImpact:
+      sumDollarImpact(anomalyRows),
+
+    failedDeployments:
+      countFailedDeployments(deploymentRows),
+
+    criticalAlerts:
+      alertData?.pagination?.total ?? 0,
+
     generatedAt: new Date().toISOString(),
   };
 }
 
-export function useContextSignals(scope: EffectiveScope, can: Capabilities): { signals: ContextSignals; loading: boolean; error: boolean } {
+export function useContextSignals(
+  scope: EffectiveScope,
+  can: Capabilities,
+): {
+  signals: ContextSignals;
+  loading: boolean;
+  error: boolean;
+} {
   const { dateRange } = useFilters();
   const fromISO = daysAgoISO(dateRangeToDays(dateRange));
 
+  /**
+   * `can.list()` is sorted by ALL_CAPABILITIES in the capability helper, so
+   * the serialization remains deterministic and avoids unnecessary refetches
+   * when the Set instance changes but effective capabilities do not.
+   */
+  const capabilityKey = can.list().join(',');
+
   const query = useQuery({
-    queryKey: ['overview', 'context-signals', scopeQueryKey(scope), can.list().join(','), dateRange],
+    queryKey: [
+      'overview',
+      'context-signals',
+      scopeQueryKey(scope),
+      capabilityKey,
+      dateRange,
+    ],
     queryFn: () => fetchSignals(scope, can, fromISO),
-    staleTime: 60_000,
+    staleTime: SIGNALS_STALE_TIME_MS,
+    gcTime: SIGNALS_GC_TIME_MS,
     enabled: Boolean(scope.orgId),
   });
 
   return {
     signals: query.data ?? EMPTY_SIGNALS,
-    loading: query.isLoading,
+    loading: query.isPending,
     error: query.isError,
   };
 }
