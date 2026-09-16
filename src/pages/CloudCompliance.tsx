@@ -4,6 +4,7 @@ import { Badge } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { useTabParam } from '../lib/useTabParam';
 import { api, ApiError, type ComplianceOverview, type ComplianceFramework, type ComplianceControl, type ControlEvaluation, type ComplianceException } from '../lib/api';
+import { RunEvaluation } from '../components/cloudCompliance/RunEvaluation';
 
 /**
  * Cloud Compliance — its own module at its own canonical route (§10.2).
@@ -174,22 +175,32 @@ export default function CloudCompliance() {
           )}
         </div>
       ) : tab === 'Frameworks' ? (
-        frameworks.length === 0 ? (
-          <EmptyState message="No compliance frameworks are configured for this organization yet." />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {frameworks.map(f => (
-              <div key={f.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-medium text-slate-900 dark:text-slate-50">{f.name}</h2>
-                  <Badge tone="neutral">v{f.version}</Badge>
+        <div className="space-y-4">
+          {/*
+            Above the list, deliberately. With no frameworks configured the
+            list is empty, and the only useful action on an empty page is the
+            one that populates it — running an evaluation also declares the
+            catalog, so this is how an organization gets its frameworks at all.
+          */}
+          <RunEvaluation onComplete={() => { void load(); }} />
+
+          {frameworks.length === 0 ? (
+            <EmptyState message="No compliance frameworks are declared yet. Running an evaluation declares the frameworks HorizonVigil can evidence and records a verdict for each of their controls." />
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {frameworks.map(f => (
+                <div key={f.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-medium text-slate-900 dark:text-slate-50">{f.name}</h2>
+                    <Badge tone="neutral">v{f.version}</Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{f.publisher ?? 'Publisher not stated'} · {f.evidence_basis.replace(/_/g, ' ')}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{f.limitations}</p>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{f.publisher ?? 'Publisher not stated'} · {f.evidence_basis.replace(/_/g, ' ')}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{f.limitations}</p>
-              </div>
-            ))}
-          </div>
-        )
+              ))}
+            </div>
+          )}
+        </div>
       ) : tab === 'Controls' ? (
         controls.length === 0
           ? <EmptyState message="No controls are defined yet. Controls appear once a framework is configured for your organization." />
