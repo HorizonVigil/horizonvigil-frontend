@@ -1048,6 +1048,38 @@ class ApiClient {
 
   getEnvironments() { return this.get<{ environments: { environment: string; count: number }[] }>('organizationManagement', '/api/organization-management/environments'); }
   getOrgTags() { return this.get<{ tags: { key: string; resourceCount: number; values: { value: string; count: number }[] }[] }>('organizationManagement', '/api/organization-management/tags'); }
+  // --- Resource ownership (AWS-20) -----------------------------------------
+  // The backend has had these five endpoints for a while and nothing in the
+  // product called them, so ownership coverage sat at 0% with no way for a
+  // customer to change it.
+
+  getOwnershipCoverage() {
+    return this.get<OwnershipCoverage>('resources', '/api/resources/ownership/coverage');
+  }
+
+  getOwnershipRules() {
+    return this.get<{ items: OwnershipRule[] }>('resources', '/api/resources/ownership/rules');
+  }
+
+  createOwnershipRule(rule: { relation: OwnershipRelation; tagKey: string; priority?: number }) {
+    return this.post<OwnershipRule>('resources', '/api/resources/ownership/rules', rule);
+  }
+
+  deleteOwnershipRule(id: string) {
+    return this.delete<{ id: string; assignmentsRetained: number }>('resources', `/api/resources/ownership/rules/${id}`);
+  }
+
+  /** A person stating who owns a resource. Outranks every inferred value permanently. */
+  assignOwnership(body: { resourceId: string; relation: OwnershipRelation; value: string }) {
+    return this.put<{ resourceId: string; relation: OwnershipRelation; value: string; source: string }>(
+      'resources', '/api/resources/ownership/assign', body,
+    );
+  }
+
+  applyOwnershipRules() {
+    return this.post<OwnershipRuleRun>('resources', '/api/resources/ownership/apply-rules', {});
+  }
+
   getOwnership(tagKey?: string) { return this.get<{ tagKey: string; owners: { owner: string; resourceCount: number }[] }>('organizationManagement', `/api/organization-management/ownership${qs({ tagKey })}`); }
   getHierarchyExplorer() { return this.get<HierarchyNode>('organizationManagement', '/api/organization-management/hierarchy-explorer'); }
   getOrgHierarchyAuditLog(params: { targetType?: string; page?: number; limit?: number } = {}) { return this.get<Paginated<ActivityEntry>>('organizationManagement', `/api/organization-management/audit-log${qs(params)}`); }
@@ -1285,6 +1317,44 @@ export interface PostureCheckReport {
   summary: { failing: number; passing: number; notApplicable: number; notCollected: number; affectedResources: number };
   provenance: 'derived_by_horizonvigil';
   connectionsInScope: number;
+}
+
+export type OwnershipRelation = 'owner' | 'team' | 'application';
+
+export interface OwnershipRule {
+  id: string;
+  relation: OwnershipRelation;
+  tag_key: string;
+  priority: number;
+  created_at: string;
+}
+
+export interface OwnershipCoverageMetric {
+  relation: OwnershipRelation;
+  covered: number;
+  /** Floored, never rounded up: 9 of 1,799 shows as 0%, not 1%. */
+  percent: number;
+  explanation: string;
+}
+
+export interface OwnershipCoverage {
+  /** Real infrastructure only — aliases and status rows are excluded. */
+  totalAssets: number;
+  ownership: OwnershipCoverageMetric[];
+  iac: {
+    covered: number;
+    percent: number;
+    /** `unknown` is the honest default: not having compared is not "no drift". */
+    byDriftState: Record<string, number>;
+    explanation: string;
+  };
+}
+
+export interface OwnershipRuleRun {
+  resourcesWithAnyTag: number;
+  assignmentsWritten: number;
+  skippedBecauseDirectlyAssigned: number;
+  explanation: string;
 }
 
 export interface IdentitySummary { total: number; users: number; roles: number; adminEquivalent: number; broad: number; scoped: number; humanWithoutMfa: number }

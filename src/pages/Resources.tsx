@@ -16,9 +16,10 @@ import { useFilters } from '../lib/filterContext';
 import { useResourcesUrlFilters } from '../lib/useResourcesUrlFilters';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type CloudResource, type ResourceCatalogEntry, type ResourceLifecycleEvent } from '../lib/api';
+import { OwnershipPanel } from '../components/resources/OwnershipPanel';
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
-const TABS = ['All Resources', 'Global Search', 'Resource Relationships', 'Tags Explorer', 'Resource Timeline'] as const;
+const TABS = ['All Resources', 'Global Search', 'Resource Relationships', 'Ownership', 'Tags Explorer', 'Resource Timeline'] as const;
 type Tab = typeof TABS[number];
 
 /** Best-effort human label for a catalog `service` key (e.g. "ec2" -> "EC2") —
@@ -1102,6 +1103,15 @@ export function Resources() {
           </div>
         </div>
       )}
+
+      {/*
+        Ownership sits beside Tags Explorer deliberately. Tag rules are the
+        path for customers who already tag; on this estate 9 of 1,799
+        resources carry any tag at all, so direct assignment is the one that
+        works today and the panel leads with coverage rather than a list of
+        "Unassigned".
+      */}
+      {tab === 'Ownership' && <OwnershipPanel />}
 
       {tab === 'Tags Explorer' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
