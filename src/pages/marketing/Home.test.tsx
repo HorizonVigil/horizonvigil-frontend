@@ -1,14 +1,25 @@
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
+
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+
 import { ThemeProvider } from '../../lib/theme';
 import { MarketingHome } from './Home';
 
-// Real, live pre-login homepage -- no api/auth/filter context needed (pure
-// static content + local useState), unlike the authenticated app pages'
-// heavier renderPage helper. Only ThemeProvider (MarketingNav calls
-// useTheme()) and MemoryRouter (Link/useLocation) are required.
+/**
+ * Renders the real pre-login marketing homepage with only the providers
+ * required by the page itself.
+ *
+ * MarketingHome is intentionally tested without application API/auth
+ * providers because the page uses static marketing content and local state.
+ */
 function renderHome() {
   return render(
     <MemoryRouter initialEntries={['/']}>
@@ -19,61 +30,125 @@ function renderHome() {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 
 describe('MarketingHome', () => {
-  it('renders without throwing and shows the real hero, CTAs, and footer', () => {
+  it('renders the real homepage hero, primary CTAs, and footer', () => {
     renderHome();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/one control plane for every aws and gcp account/i);
-    expect(screen.getAllByRole('link', { name: /start free/i }).length).toBeGreaterThan(0);
-    // "Book a demo" appears in both the hero and the footer -- assert at
-    // least one, not exactly one.
-    const demoLinks = screen.getAllByRole('link', { name: /book a demo/i });
+
+    expect(
+      screen.getByRole('heading', {
+        level: 1,
+        name: /one control plane for every aws and gcp account/i,
+      }),
+    ).toBeInTheDocument();
+
+    const startFreeLinks = screen.getAllByRole('link', {
+      name: /start free/i,
+    });
+
+    expect(startFreeLinks.length).toBeGreaterThan(0);
+
+    const demoLinks = screen.getAllByRole('link', {
+      name: /book a demo/i,
+    });
+
     expect(demoLinks.length).toBeGreaterThan(0);
-    for (const link of demoLinks) expect(link).toHaveAttribute('href', expect.stringContaining('mailto:'));
-    // Footer renders (confirms the page didn't error before reaching it).
+
+    for (const link of demoLinks) {
+      expect(link).toHaveAttribute(
+        'href',
+        expect.stringContaining('mailto:'),
+      );
+    }
+
     expect(screen.getByText(/privacy/i)).toBeInTheDocument();
   });
 
-  it('does not regress the real module count claim (verified 11 modules, not the old incorrect "twelve")', () => {
+  it('preserves the current eleven-module product claim', () => {
     renderHome();
-    expect(document.body.textContent ?? '').not.toMatch(/twelve modules/i);
-    expect(screen.getByRole('heading', { name: /eleven modules\. one data model\./i })).toBeInTheDocument();
+
+    const pageText = document.body.textContent ?? '';
+
+    expect(pageText).not.toMatch(/twelve modules/i);
+
+    expect(
+      screen.getByRole('heading', {
+        name: /eleven modules\. one data model\./i,
+      }),
+    ).toBeInTheDocument();
   });
 
-  it('the How it works stage selector is real and interactive -- switching tabs changes the visible description', () => {
+  it('provides an accessible and interactive How It Works tablist', () => {
     renderHome();
-    const tablist = screen.getByRole('tablist', { name: /how it works/i });
-    const connectTab = within(tablist).getByRole('tab', { name: /connect/i });
-    const auditTab = within(tablist).getByRole('tab', { name: /audit/i });
+
+    const tablist = screen.getByRole('tablist', {
+      name: /how it works/i,
+    });
+
+    const connectTab = within(tablist).getByRole('tab', {
+      name: /connect/i,
+    });
+
+    const auditTab = within(tablist).getByRole('tab', {
+      name: /audit/i,
+    });
 
     expect(connectTab).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tabpanel')).toHaveTextContent(/scoped access key/i);
+    expect(auditTab).toHaveAttribute('aria-selected', 'false');
+
+    const tabpanel = screen.getByRole('tabpanel');
+
+    expect(tabpanel).toBeInTheDocument();
+    expect(tabpanel).toHaveTextContent(/scoped access key/i);
 
     fireEvent.click(auditTab);
+
     expect(auditTab).toHaveAttribute('aria-selected', 'true');
     expect(connectTab).toHaveAttribute('aria-selected', 'false');
-    expect(screen.getByRole('tabpanel')).toHaveTextContent(/logged automatically/i);
+    expect(screen.getByRole('tabpanel')).toHaveTextContent(
+      /logged automatically/i,
+    );
   });
 
-  it('the role selector only surfaces real module names, and switching roles changes the shown links', () => {
+  it('keeps the role selector limited to real product roles and updates the role view', () => {
     renderHome();
-    expect(screen.getByRole('heading', { name: /same data, a different starting view for each role/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Security & Compliance' }));
-    // "Cloud Security" now appears twice: once in the always-visible
-    // Platform capabilities grid, once in the role panel just switched to.
-    expect(screen.getAllByText('Cloud Security').length).toBeGreaterThanOrEqual(2);
+    expect(
+      screen.getByRole('heading', {
+        name: /same data, a different starting view for each role/i,
+      }),
+    ).toBeInTheDocument();
+
+    const securityRoleButton = screen.getByRole('button', {
+      name: 'Security & Compliance',
+    });
+
+    expect(securityRoleButton).toBeInTheDocument();
+
+    fireEvent.click(securityRoleButton);
+
+    expect(
+      screen.getAllByText('Cloud Security').length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
-  it('preserves the #platform and #security anchor ids the header nav links to', () => {
+  it('preserves the public navigation anchor targets', () => {
     const { container } = renderHome();
+
     expect(container.querySelector('#platform')).toBeInTheDocument();
     expect(container.querySelector('#security')).toBeInTheDocument();
   });
 
-  it('docs preview links to the real /docs route, not an invented one', () => {
+  it('links the documentation preview to the real docs route', () => {
     renderHome();
-    expect(screen.getByRole('link', { name: /read the docs/i })).toHaveAttribute('href', '/docs');
+
+    const docsLink = screen.getByRole('link', {
+      name: /read the docs/i,
+    });
+
+    expect(docsLink).toHaveAttribute('href', '/docs');
   });
 });

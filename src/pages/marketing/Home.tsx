@@ -26,9 +26,9 @@ const PROVIDERS = [
 
 const BENEFITS = [
   { stat: 'One', label: 'login for every cloud account you manage, instead of N separate consoles.' },
-  { stat: 'Minutes', label: 'from connecting an account to seeing its full resource inventory.' },
+  { stat: 'Automated', label: 'resource discovery across connected accounts and regions.' },
   { stat: 'Automatic', label: 'cost anomaly detection and savings recommendations, surfaced without a query.' },
-  { stat: 'Every action', label: 'audit-logged — who ran what remediation, on which resource, and when.' },
+  { stat: 'Every write', label: 'audit-logged — who changed what in HorizonVigil and when.' },
 ];
 
 const AI_FEATURES = [
@@ -53,7 +53,7 @@ const COMPLIANCE_BENCHMARKS = [
 ];
 
 const SECURITY_FEATURES = [
-  { title: 'Credentials encrypted at rest', desc: 'AWS keys and GCP service-account keys are AES-GCM encrypted before they ever touch storage, with a fresh IV per record.' },
+  { title: 'Credentials encrypted at rest', desc: 'AWS keys and GCP service-account credentials are encrypted before storage, using authenticated encryption with a fresh IV per record.' },
   { title: 'Org-scoped RBAC', desc: 'Every role grant is scoped to an organization and, where it matters, to a single cloud account — not a blanket admin toggle.' },
   { title: 'Full audit log', desc: 'Every write — connecting an account, running a remediation, changing a role — is recorded with who, what, and when.' },
   { title: 'Rate-limited by design', desc: 'API abuse protection is enforced atomically at the database layer, consistent across every instance of every service.' },
@@ -85,7 +85,7 @@ const HOW_IT_WORKS = [
   { stage: 'Discover', desc: 'A live, searchable inventory builds automatically across every connected account — EC2, S3, RDS, Compute Engine, Cloud SQL, GKE, Artifact Registry, and more.' },
   { stage: 'Detect', desc: 'Cost anomalies, misconfigurations, and exposure are surfaced automatically and ranked by real impact — not a raw feed you sort through yourself.' },
   { stage: 'Hand off', desc: 'Take the exact commands to run yourself, or open an Auto-PR against a connected GitHub repo. HorizonVigil does not make the change for you.' },
-  { stage: 'Audit', desc: 'Every action — who ran it, on what resource, and when — is logged automatically, with no separate compliance tool to bolt on.' },
+  { stage: 'Audit', desc: 'Every HorizonVigil write — account connections, role changes, and other administrative actions — is logged automatically.' },
 ];
 
 // Each role links to real modules only -- no per-role marketing route exists
@@ -124,6 +124,18 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 
 export function MarketingHome() {
   const { hash } = useLocation();
+
+  useEffect(() => {
+    document.title = 'HorizonVigil — Cloud Operations, FinOps & Security';
+    const description = 'HorizonVigil gives teams one control plane for cloud inventory, cost, security, and guided remediation across connected cloud accounts.';
+    let meta = document.querySelector<HTMLMetaElement>('meta[name=description]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'description';
+      document.head.appendChild(meta);
+    }
+    meta.content = description;
+  }, []);
 
   // Covers loading /#security directly, and navigating in from a different
   // page (e.g. the footer's Security link while on /pricing) -- Home mounts
@@ -194,7 +206,7 @@ function Hero() {
             One control plane for every AWS and GCP account you run.
           </h1>
           <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl text-balance">
-            Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
+            Inventory, cost, security, and guided remediation — unified across every cloud account your team owns, without stitching together five different consoles.
           </p>
           <div className="flex items-center gap-3 mt-8 flex-wrap">
             <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
@@ -229,7 +241,7 @@ function TrustBar() {
   // anywhere in the product (see SECURITY_FEATURES and COMPLIANCE_BENCHMARKS
   // comments below for the full finding). Full audit log is real (writeAuditLog
   // is used pervasively, confirmed live in Overview's own Recent Activity feed).
-  const items = ['AWS', 'Google Cloud', 'EKS', 'GKE', 'AES-256 encryption', 'Full audit log'];
+  const items = ['AWS', 'Google Cloud', 'EKS', 'GKE', 'Encrypted credentials', 'Full audit log'];
   return (
     <div className="border-y border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
       <div className="max-w-6xl mx-auto px-5 py-6 flex items-center justify-center gap-x-8 gap-y-3 flex-wrap text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -289,6 +301,13 @@ function HowItWorks() {
               key={s.stage}
               role="tab"
               aria-selected={active === i}
+              aria-controls={`how-it-works-panel-${i}`}
+              id={`how-it-works-tab-${i}`}
+              tabIndex={active === i ? 0 : -1}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowRight') setActive((i + 1) % HOW_IT_WORKS.length);
+                if (e.key === 'ArrowLeft') setActive((i - 1 + HOW_IT_WORKS.length) % HOW_IT_WORKS.length);
+              }}
               onClick={() => setActive(i)}
               className={`text-sm font-semibold px-4 py-2 rounded-md transition-colors ${
                 active === i
@@ -300,7 +319,7 @@ function HowItWorks() {
             </button>
           ))}
         </div>
-        <div role="tabpanel" className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 max-w-3xl">
+        <div role="tabpanel" id={`how-it-works-panel-${active}`} aria-labelledby={`how-it-works-tab-${active}`} tabIndex={0} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 max-w-3xl">
           <p className="text-base text-slate-700 dark:text-slate-200 leading-relaxed">{HOW_IT_WORKS[active].desc}</p>
         </div>
       </div>
@@ -371,7 +390,9 @@ function RoleSelector() {
         <div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible">
           {ROLES.map((r, i) => (
             <button
+              type="button"
               key={r.role}
+              aria-pressed={active === i}
               onClick={() => setActive(i)}
               aria-current={active === i}
               className={`text-sm font-semibold text-left px-4 py-3 rounded-md whitespace-nowrap md:whitespace-normal shrink-0 ${
@@ -460,7 +481,7 @@ function AICapabilities() {
       <div className="text-center max-w-2xl mx-auto mb-14">
         <Eyebrow>AI capabilities</Eyebrow>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Automated intelligence, not just automation.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">A rules-and-signal engine runs continuously across your connected accounts, turning raw resource and cost data into specific, actionable findings.</p>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">A rules-and-signal engine runs automatically across your connected accounts, turning raw resource and cost data into specific, actionable findings.</p>
       </div>
       <div className="grid sm:grid-cols-2 gap-5">
         {AI_FEATURES.map(f => (
@@ -661,6 +682,7 @@ function FAQ() {
           return (
             <div key={f.q} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
               <button
+                type="button"
                 onClick={() => setOpenIdx(isOpen ? null : i)}
                 className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left"
                 aria-expanded={isOpen}
@@ -680,7 +702,7 @@ function FAQ() {
 function FinalCTA() {
   return (
     <Section className="text-center pb-24">
-      <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Connect your first account in the next five minutes.</h2>
+      <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Connect your first account and start exploring your cloud.</h2>
       <p className="text-slate-600 dark:text-slate-300 mt-4 max-w-lg mx-auto">Free plan, no credit card. Cancel anytime.</p>
       <div className="flex items-center justify-center gap-3 mt-8 flex-wrap">
         <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">Start free</Link>

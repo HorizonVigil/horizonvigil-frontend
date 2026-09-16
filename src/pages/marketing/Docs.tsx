@@ -6,58 +6,58 @@ import { CONTACT_SALES_HREF } from '../../lib/marketingContent';
 const STEPS = [
   {
     title: '1. Create your account and organization',
-    body: 'Sign up with an email and password. On first login you\'ll be asked to create an organization — that\'s the top-level container every cloud account, user, and role grant lives under.',
+    body: "Sign up with an email and password. On first login you'll create an organization — the top-level container for your cloud accounts, users, and role grants.",
   },
   {
     title: '2. Connect an AWS account',
-    body: 'From Cloud Accounts, choose "Connect AWS Account". AWS connections use a scoped access key today. Cross-account IAM role support is built but not yet certified, so the option is disabled until it is (no long-lived key stored is the goal for production). Either way, HorizonVigil only requests read access unless you separately enable automation.',
+    body: 'From Cloud Accounts, choose "Connect AWS Account". AWS connections currently use a scoped access key. Cross-account IAM role support is built but not yet certified, so it remains disabled until certification is complete. V1 discovery access is read-only.',
   },
   {
     title: '3. Or connect a GCP project',
-    body: 'Choose "Connect GCP Project" and either upload a service-account key JSON, or set up service-account impersonation so HorizonVigil never holds a long-lived credential at all. You\'ll pick which regions/services to scan.',
+    body: "Choose \"Connect GCP Project\" and either provide a service-account key JSON or configure service-account impersonation. Credential handling follows the platform's configured security controls. You'll select the regions and services available for discovery.",
   },
   {
     title: '4. Let discovery run',
-    body: 'The first sync builds your resource inventory — this typically completes within a few minutes depending on account size. You can watch progress live from the account\'s Sync Center.',
+    body: "The first sync builds your resource inventory. Completion time depends on account size, enabled regions/services, AWS or GCP API limits, and permissions. You can monitor the account's sync status while discovery runs.",
   },
   {
     title: '5. Explore your data',
-    body: 'Resources, Cost Management, Cloud Security, and Clusters all populate from the same sync — no separate setup per module. Invite teammates from Users & Organizations once you\'re ready to share access.',
+    body: 'Resources, Cost Management, Cloud Security, and Clusters use the connected-account data collected by the platform. Invite teammates from Users & Organizations when you are ready to share access.',
   },
 ];
 
 const MODULES = [
   {
     name: 'Resources',
-    desc: 'A live, searchable inventory across every connected account — EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, Artifact Registry, and more. Filter by account, region, service, or tag, and drill into any resource for its full configuration. EKS and GKE workloads and node health live under Clusters, one level deeper.',
+    desc: 'A searchable inventory across connected accounts — including EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, Artifact Registry, and other supported resources. Filter by account, region, service, or tag where that metadata is available. EKS and GKE workloads and node health are presented under Clusters.',
   },
   {
     name: 'Cloud Security',
-    desc: 'Posture, misconfigurations, exposure, and identity risk across every connected account, plus provider-native compliance evidence (AWS Config conformance packs) — not an independent CIS/SOC 2/ISO 27001 certification. Vulnerability scanning and CVEs are being redesigned for a future release.',
+    desc: 'Security posture, misconfigurations, exposure, identity risk, and provider-native compliance evidence from supported services. AWS Config conformance-pack evidence is presented as provider-native evidence, not as an independent CIS, SOC 2, or ISO 27001 certification. Vulnerability scanning and CVE capabilities are being redesigned for a future release.',
   },
   {
     name: 'Cost Management',
-    desc: 'Real spend data broken down by account and service, with anomaly detection that flags unusual spend — a sudden jump in a region or service — before it shows up as a surprise on the bill.',
+    desc: 'Cost and spend data broken down by supported account and service dimensions, with automated anomaly analysis where the required billing data is available. Data availability and freshness depend on the connected cloud provider and account configuration.',
   },
   {
     name: 'Cost Optimization',
-    desc: 'Specific savings recommendations for idle and oversized resources, with an exclusion workflow for spend that\'s intentional. HorizonVigil connects read-only and never applies a fix for you: you get the exact commands, or an Auto-PR against a connected GitHub repo for changes you want reviewed first.',
+    desc: 'Evidence-backed recommendations for supported idle, oversized, and otherwise inefficient resources, with an exclusion workflow for intentional spend. V1 does not directly mutate your cloud resources; recommendations can provide remediation guidance and supported hand-off workflows.',
   },
   {
     name: 'Automation',
-    desc: 'Scheduled jobs and policy rules with a full audit trail of who did what, on which resource, and when. HorizonVigil does not execute changes in your cloud — every fix is handed off to you as commands, a ticket, or a pull request. Requires editor role or above. Scheduled/automatic triggering isn\'t live yet; every action today starts from a real, explicit click.',
+    desc: 'Automation configuration and policy workflows are designed to keep operational decisions auditable. In the current release, cloud-resource mutations are not executed directly by HorizonVigil, and scheduled or automatic triggering is not yet live. Actions available today are initiated explicitly by an authorized user.',
   },
   {
     name: 'Reports',
-    desc: 'Custom dashboards and one-time report generation (CSV/PDF) built from the same live data your team already sees day to day. Scheduled, recurring delivery isn\'t live yet — every report today is generated on demand.',
+    desc: 'Custom dashboards and on-demand report generation, including CSV/PDF outputs where supported, using the same product data shown in the application. Scheduled recurring delivery is not currently live.',
   },
   {
     name: 'Monitoring',
-    desc: 'Resource-level metrics and alerting that already knows which account and organization a resource belongs to. Alert rules and notification routing live alongside it under Alerts.',
+    desc: 'Resource-level metrics and alerting for supported resources, with account and organization context. Available metrics, alert rules, and notification capabilities depend on the connected provider and configured services.',
   },
   {
     name: 'Issues',
-    desc: 'Cost, security, and alert items that need attention, unified into one list — the fastest way to see what\'s outstanding without checking three modules separately.',
+    desc: 'A unified view of supported cost, security, and alert items that need attention, helping teams review outstanding work without switching between separate module views.',
   },
 ];
 
@@ -65,58 +65,120 @@ export function Docs() {
   return (
     <div className="bg-white dark:bg-slate-950 min-h-screen flex flex-col">
       <MarketingNav />
-      <main className="flex-grow">
-        <div className="max-w-3xl mx-auto px-5 pt-16 pb-8 text-center">
-          <h1 className="text-4xl font-bold text-slate-900 dark:text-white text-balance">Documentation</h1>
+
+      <main className="flex-grow" id="main-content">
+        <header className="max-w-3xl mx-auto px-5 pt-16 pb-8 text-center">
+          <h1 className="text-4xl font-bold text-slate-900 dark:text-white text-balance">
+            Documentation
+          </h1>
           <p className="text-slate-600 dark:text-slate-300 mt-4 max-w-xl mx-auto">
-            Everything you need to go from signup to a connected, live account inventory — plus a tour of every module once you're in.
+            Everything you need to go from signup to a connected cloud account — plus a practical overview of the modules available in HorizonVigil.
           </p>
-        </div>
+        </header>
 
-        <div className="max-w-3xl mx-auto px-5 pb-16 w-full">
-          <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4">Getting started</div>
-          <div className="flex flex-col gap-4">
-            {STEPS.map(s => (
-              <div key={s.title} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{s.title}</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{s.body}</div>
-              </div>
-            ))}
+        <section
+          aria-labelledby="getting-started-heading"
+          className="max-w-3xl mx-auto px-5 pb-16 w-full"
+        >
+          <div
+            id="getting-started-heading"
+            className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4"
+          >
+            Getting started
           </div>
-        </div>
 
-        <div className="bg-slate-50 dark:bg-slate-900/30 py-16">
+          <ol className="flex flex-col gap-4 list-none p-0 m-0">
+            {STEPS.map((step) => (
+              <li
+                key={step.title}
+                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+              >
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">
+                  {step.title}
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                  {step.body}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section
+          aria-labelledby="modules-heading"
+          className="bg-slate-50 dark:bg-slate-900/30 py-16"
+        >
           <div className="max-w-6xl mx-auto px-5">
             <div className="text-center max-w-2xl mx-auto mb-10">
-              <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-3">Platform modules</div>
-              <h2 className="text-3xl font-bold text-slate-900 dark:text-white">What each module does.</h2>
+              <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-3">
+                Platform modules
+              </div>
+              <h2
+                id="modules-heading"
+                className="text-3xl font-bold text-slate-900 dark:text-white"
+              >
+                What each module does.
+              </h2>
               <p className="text-slate-600 dark:text-slate-300 mt-4">
-                Every module reads from the same connected accounts and org-scoped permissions — connect once, nothing needs separate setup per module.
+                Modules use the connected-account data and organization-scoped permissions available to your account. You do not need to create a separate cloud connection for each module.
               </p>
             </div>
+
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {MODULES.map(m => (
-                <div key={m.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{m.name}</div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{m.desc}</div>
-                </div>
+              {MODULES.map((module) => (
+                <article
+                  key={module.name}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+                >
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">
+                    {module.name}
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                    {module.desc}
+                  </p>
+                </article>
               ))}
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="max-w-3xl mx-auto px-5 py-16 w-full">
-          <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4 text-center">Get help</div>
+        <section
+          aria-labelledby="help-heading"
+          className="max-w-3xl mx-auto px-5 py-16 w-full"
+        >
+          <div
+            id="help-heading"
+            className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4 text-center"
+          >
+            Get help
+          </div>
+
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 p-6 text-center">
-            <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">Need help with a specific setup?</div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Cross-account roles, service-account impersonation, and SSO setup all have edge cases we're happy to walk through directly.</p>
-            <div className="flex items-center justify-center gap-3">
-              <a href={CONTACT_SALES_HREF} className="text-sm font-semibold px-4 py-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800">Contact us</a>
-              <Link to="/signup" className="text-sm font-semibold px-4 py-2 rounded-md bg-brand-600 hover:bg-brand-700 text-white">Start free</Link>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+              Need help with a specific setup?
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+              Our team can help with account connections, cross-account roles, service-account impersonation, and SSO configuration.
+            </p>
+
+            <div className="flex items-center justify-center gap-3 flex-wrap">
+              <a
+                href={CONTACT_SALES_HREF}
+                className="text-sm font-semibold px-4 py-2 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+              >
+                Contact us
+              </a>
+              <Link
+                to="/signup"
+                className="text-sm font-semibold px-4 py-2 rounded-md bg-brand-600 hover:bg-brand-700 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+              >
+                Start free
+              </Link>
             </div>
           </div>
-        </div>
+        </section>
       </main>
+
       <MarketingFooter />
     </div>
   );

@@ -772,6 +772,22 @@ class ApiClient {
   // endpoint backed by a six-column table with no evidence fields at all.
   // The security service hosts both; only the path prefix differs.
   getComplianceOverview() { return this.get<ComplianceOverview>('vulnerabilityManagement', '/api/cloud-compliance/overview'); }
+  /**
+   * Runs the declared frameworks against collected evidence and APPENDS the
+   * verdicts.
+   *
+   * A POST, not a GET, because it records evidence: each run is what was true
+   * at that moment, which is why `control_evaluations` carries `collected_at`
+   * and a retention column rather than one row per control.
+   *
+   * `score` is null whenever any control could not be assessed. A percentage
+   * over a partial set reads as an assessment of the whole framework, and a
+   * compliance score is something a customer may put in front of an auditor.
+   */
+  evaluateCompliance() {
+    return this.post<ComplianceEvaluationRun>('vulnerabilityManagement', '/api/cloud-compliance/evaluate', {});
+  }
+
   getComplianceFrameworks() { return this.get<{ items: ComplianceFramework[]; availability: SourceAvailability; limitations: string }>('vulnerabilityManagement', '/api/cloud-compliance/frameworks'); }
   getComplianceControls(params: { frameworkId?: string; page?: number; limit?: number } = {}) {
     return this.get<Paginated<ComplianceControl>>('vulnerabilityManagement', `/api/cloud-compliance/controls${qs(params)}`);
@@ -1653,6 +1669,31 @@ export interface ComplianceOverview {
   availability: SourceAvailability;
   limitations: string;
   setupGuidance: string | null;
+}
+
+export interface ComplianceControlVerdict {
+  controlKey: string;
+  /** Three of these produce no failure and only `passed` means compliant. */
+  result: 'passed' | 'failed' | 'not_evaluated' | 'not_applicable' | 'error' | 'permission_denied';
+  resultReason: string;
+  resourcesEvaluated: number;
+  resourcesFailing: number;
+}
+
+export interface ComplianceEvaluationRun {
+  frameworks: {
+    frameworkKey: string;
+    name: string;
+    version: string;
+    evidenceBasis: string;
+    limitations: string;
+    /** Null whenever any control could not be assessed. */
+    score: number | null;
+    verdicts: ComplianceControlVerdict[];
+    counts: Record<string, number>;
+  }[];
+  connectionsInScope: number;
+  evaluatedAt: string;
 }
 
 export interface ComplianceFramework {
