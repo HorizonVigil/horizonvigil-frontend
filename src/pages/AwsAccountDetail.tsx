@@ -357,7 +357,35 @@ export function AwsAccountDetail() {
        * recording where it stopped. Partial cost data is worse than none,
        * because it still renders as a number.
        */
-      setCurProgress('Queueing ingestion…');
+      /**
+       * Discover FIRST.
+       *
+       * The button's own tooltip promised "Discovers your AWS Cost & Usage
+       * Report... and ingests it", and the code only ingested. Nothing in the
+       * product ever called cur/discover, so `cur_s3_bucket` was never set and
+       * every run refused with 409 cur_not_configured -- the entire durable
+       * CUR pipeline was unreachable, and the button that claimed to reach it
+       * dead-ended.
+       *
+       * Discovery is idempotent (it re-reads the report definition and
+       * re-saves it), so running it every time keeps a moved or renamed report
+       * working without a separate "re-discover" action.
+       */
+      setCurProgress('Looking for your Cost & Usage Report…');
+      try {
+        const found = await api.discoverCur(id);
+        setCurProgress(`Found ${found.reportName} in ${found.bucket}. Queueing ingestion…`);
+      } catch (err) {
+        // A 404 here means AWS has no CUR defined for this account. That is a
+        // setup step in the AWS console, not a failure of this product, and
+        // saying so is more useful than "sync failed".
+        const message = err instanceof ApiError && err.status === 404
+          ? 'No Cost & Usage Report is defined in this AWS account. Create one in the AWS Billing console with "Include resource IDs" enabled, then run this again.'
+          : err instanceof ApiError ? err.message : 'Could not look up the Cost & Usage Report.';
+        toast(message, 'error');
+        return;
+      }
+
       const run = await api.startCurRun(id);
 
       for (;;) {

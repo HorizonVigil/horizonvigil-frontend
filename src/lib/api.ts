@@ -368,6 +368,21 @@ class ApiClient {
    * tab mid-ingest left the billing period partially ingested with nothing
    * recording where it stopped.
    */
+  /**
+   * Finds the account's own Cost & Usage Report via cur:DescribeReportDefinitions
+   * and saves it on the connection.
+   *
+   * This endpoint has existed since CUR ingestion was built and NOTHING called
+   * it, so `cur_s3_bucket` was never set and every CUR run refused with
+   * 409 cur_not_configured. The whole durable ingestion pipeline beneath it
+   * was unreachable.
+   */
+  discoverCur(id: string) {
+    return this.post<{ reportName: string; bucket: string; prefix: string; region: string }>(
+      'awsAccounts', `/api/aws-accounts/accounts/${id}/cur/discover`, {},
+    );
+  }
+
   startCurRun(id: string) {
     return this.post<{ id: string; status: string; created: boolean; progress: { totalSteps: number; completedSteps: number; percent: number } }>(
       'awsAccounts', `/api/aws-accounts/accounts/${id}/cur-runs`, {},

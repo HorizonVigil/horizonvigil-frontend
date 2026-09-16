@@ -124,12 +124,39 @@ describe('CUR ingestion is server-owned', () => {
     expect(detail).not.toMatch(/getCurManifest/);
   });
 
-  it('removed the browser CUR orchestration client entirely', () => {
+  it('removed the browser CUR ORCHESTRATION client', () => {
     // Plain substring rather than a hand-built RegExp: the escaping in a
     // template literal collapsed and silently produced an invalid pattern.
-    for (const m of ['discoverCur(', 'getCurManifest(', 'ingestCurStep(', 'finalizeCur(']) {
+    //
+    // `discoverCur` was originally on this list and has been removed from it
+    // deliberately. The defect this guard exists for is the BROWSER DRIVING
+    // INGESTION -- fetching a manifest, looping report files, carrying a row
+    // offset in a local variable, and finalizing -- so that closing the tab
+    // left a billing period half-ingested with nothing recording where it
+    // stopped.
+    //
+    // Discovery is none of that. It is one idempotent POST asking the SERVER
+    // to read the report definition and save it on the connection; the server
+    // still owns every step of the durable run. Bundling it with the three
+    // orchestration calls made it unreachable, and because nothing else ever
+    // called `cur/discover`, `cur_s3_bucket` was never set and every CUR run
+    // refused with 409 cur_not_configured. The guard was protecting the
+    // pipeline by keeping it switched off.
+    for (const m of ['getCurManifest(', 'ingestCurStep(', 'finalizeCur(']) {
       expect(apiSrc.includes(m), `${m} still present`).toBe(false);
     }
+  });
+
+  /**
+   * The property that actually matters, asserted directly: the browser may ask
+   * the server to discover, but it must never walk files or rows itself.
+   */
+  it('discovery is a single call, not a loop', () => {
+    expect(apiSrc).toMatch(/discoverCur/);
+    expect(detail).not.toMatch(/for \s*\([^)]*manifest/i);
+    expect(detail).not.toMatch(/while\s*\([^)]*(chunk|offset|skipRows)/i);
+    // Ingestion is still started as a durable job and polled, never driven.
+    expect(detail).toMatch(/api\.startCurRun\(id\)/);
   });
 
   it('starts a durable job and polls it instead', () => {
