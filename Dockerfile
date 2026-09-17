@@ -26,7 +26,17 @@ FROM node:22-slim
 WORKDIR /app
 # Pin the runtime server so the image is reproducible and never resolves a
 # package when Cloud Run starts it.
-RUN npm install --global --no-audit --no-fund serve@14.2.4
+#
+# npm is then removed from the final image. The base image's bundled npm
+# vendors its own `tar`, which is where Trivy found CVE-2026-59873 (CRITICAL,
+# gzip-bomb DoS) plus two HIGH advisories -- reported against "tar
+# (package.json)", i.e. npm's copy, not an application dependency. This
+# container only serves static files: once `serve` is installed there is
+# nothing left for a package manager to do at runtime, so deleting npm both
+# clears those advisories and removes an installer from a production image.
+RUN npm install --global --no-audit --no-fund serve@14.2.4 \
+  && npm uninstall --global npm \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
 COPY --from=build /app/dist ./dist
 # Run as an unprivileged user — the container only serves static files, so it
 # never needs root. This is a production hardening step, not cosmetic.
