@@ -138,12 +138,12 @@ export function CloudAccounts() {
   const { syncStates, startDiscovery } = useSync();
 
   /** Same "Discover Resources" (+ "Sync Cost" for AWS/Azure rows) the account detail page's buttons trigger, exposed here as a one-click row action. */
-  function syncNow(row: UnifiedAccountRow) {
+  const syncNow = useCallback((row: UnifiedAccountRow) => {
     startDiscovery(row.id, row.provider === 'gcp' ? 'gcpAccounts' : row.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
     if (row.provider === 'aws') void api.syncAccountCost(row.id).catch(() => {});
     else if (row.provider === 'azure') void api.syncAzureAccountCost(row.id).catch(() => {});
     toast('Sync started — resources will update as it completes.', 'success');
-  }
+  }, [startDiscovery, toast]);
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
   const canSeeNavTab = useSubmenuAccess('cloud');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
@@ -193,7 +193,7 @@ export function CloudAccounts() {
     return () => { cancelled = true; };
   }, [refreshToken, toast]);
 
-  async function toggleFavorite(connectionId: string, name: string, provider: 'aws' | 'gcp' | 'azure') {
+  const toggleFavorite = useCallback(async (connectionId: string, name: string, provider: 'aws' | 'gcp' | 'azure') => {
     const path = `/cloud-accounts/${connectionId}`;
     const existing = favorites.find(f => f.path === path);
 
@@ -210,7 +210,7 @@ export function CloudAccounts() {
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Failed to update Favorites.', 'error');
     }
-  }
+  }, [favorites, toast]);
 
 
   // Inventory search/filter/bulk/pagination state. When a specific provider
@@ -449,9 +449,13 @@ export function CloudAccounts() {
   // in "All" mode it's the bounded per-cloud snapshot described above.
   const allRows = useMemo(() => [...awsConnections.map(toUnifiedRow), ...gcpConnections.map(toUnifiedGcpRow), ...azureConnections.map(toUnifiedAzureRow)], [awsConnections, gcpConnections, azureConnections]);
 
-  function findRow(id: string): UnifiedAccountRow | undefined {
-    return allRows.find(r => r.id === id);
-  }
+  // Memoised because runValidation depends on it; as a plain function it was
+  // rebuilt every render and would have defeated that callback's memoisation.
+  const findRow = useCallback(
+    (id: string): UnifiedAccountRow | undefined =>
+      allRows.find(r => r.id === id),
+    [allRows],
+  );
 
   /** Three providers, three separate backends, identical Disconnect/Delete contract — one dispatch point instead of the same 3-way branch repeated at every call site. */
   function disconnectFor(row: UnifiedAccountRow) {
@@ -460,12 +464,12 @@ export function CloudAccounts() {
     return api.disconnectAccount(row.id);
   }
 
-  async function handleDisconnect(row: UnifiedAccountRow) {
+  const handleDisconnect = useCallback(async (row: UnifiedAccountRow) => {
     if (!(await confirm(`Disconnect "${row.name}"? It will be marked disconnected — discovered resources${row.provider === 'aws' ? ' and cost history are' : ' are'} kept.`))) return;
     await disconnectFor(row);
     toast(`Disconnected "${row.name}"`, 'success');
     await loadInventory();
-  }
+  }, [confirm, loadInventory, toast]);
 
   async function handleBulkDisconnect() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
@@ -550,7 +554,7 @@ export function CloudAccounts() {
     { key: 'last_used_at', header: 'Last Used', sortValue: r => r.last_used_at ?? '', render: r => r.last_used_at ? new Date(r.last_used_at).toLocaleDateString() : <span className="text-slate-400">Never</span> },
   ], []);
 
-  async function runValidation(id: string, knownName?: string) {
+  const runValidation = useCallback(async (id: string, knownName?: string) => {
     // knownName covers callers (like the Dashboard's Needing Attention list)
     // whose account may not be in the currently-loaded inventory set.
     const name = knownName ?? findRow(id)?.name ?? 'Account';
@@ -575,7 +579,7 @@ export function CloudAccounts() {
         void api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts));
       }
     }
-  }
+  }, [findRow, loadInventory, tab, toast]);
 
   const columns: Column<UnifiedAccountRow>[] = useMemo(() => [
     ...(bulkMode ? [{
@@ -620,26 +624,25 @@ export function CloudAccounts() {
       ),
     },
     /*
-     * WHAT THE SUPPRESSION BELOW HIDES, stated rather than left implicit:
-     * the rule wants handleDisconnect, runValidation, syncNow and
-     * toggleFavorite listed. All four are plain functions redeclared every
-     * render, so listing them would rebuild this column array on every render
-     * and the memo would stop memoising anything.
+     * The four row-action handlers are now listed honestly.
      *
-     * The dependency list is the state those handlers actually read, so the
-     * columns rebuild whenever that state moves. The residual risk is real
-     * but latent: a handler that starts closing over something NOT in this
-     * list would be captured stale, and the row button would act on an
-     * outdated value.
+     * They used to be plain functions redeclared every render, so naming
+     * them here would have rebuilt this array on every render -- which is
+     * why the rule was suppressed instead. Each is now a useCallback with
+     * the dependencies eslint computed, so the memo can depend on them and
+     * still memoise.
      *
-     * The correct fix is to wrap the four handlers in useCallback and depend
-     * on the callbacks. Deliberately not done here -- it changes when row
-     * actions rebind, and the only thing exercising those actions end to end
-     * is the Playwright suite, which cannot run without SMOKE_TEST
-     * credentials. Tracked as an open item rather than changed blind.
+     * The suppression was hiding a real staleness bug: runValidation closes
+     * over `tab` and `loadInventory`, and NEITHER was in the list below, so
+     * a validation triggered after a tab change refreshed against the tab
+     * that was active when the columns were last built.
      */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [bulkMode, selectedIds, validatingIds, allRows, syncStates, favorites]);
+  ], [
+    // allRows is reached transitively through findRow/runValidation, so
+    // naming it here as well would only rebuild the columns twice as often.
+    bulkMode, selectedIds, validatingIds, syncStates, favorites,
+    syncNow, toggleFavorite, handleDisconnect, runValidation,
+  ]);
 
   const anyErrors = allRows.map(r => syncStates[r.id]).filter(s => s?.status === 'error' && s.error);
 
