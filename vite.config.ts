@@ -3,6 +3,38 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+
+  /**
+   * Split the vendor libraries out of the application chunk.
+   *
+   * The build emitted a single 1.65 MB JavaScript file, so every visitor
+   * downloaded the whole application — all 41 pages plus every dependency —
+   * before the first screen could render, and any change to any source file
+   * invalidated the entire download for returning users.
+   *
+   * These four groups change on a completely different cadence from the app:
+   * React and the router move a few times a year, the app moves daily. Giving
+   * them their own content-hashed chunks means a normal deploy no longer
+   * expires them, so returning visitors re-download only what actually
+   * changed.
+   *
+   * This is a packaging change only — no module is loaded that was not loaded
+   * before, and nothing here defers anything. Route-level code splitting
+   * (React.lazy per page) is the larger win and is a separate change, because
+   * it alters when components mount rather than only how they are grouped.
+   */
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-query': ['@tanstack/react-query'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-grid': ['react-grid-layout'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
