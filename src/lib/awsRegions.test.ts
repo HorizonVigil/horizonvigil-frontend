@@ -16,6 +16,24 @@ const COMPONENTS_DIR = join(
   'components',
 );
 
+/**
+ * Two or more region codes written next to each other as literals -- i.e. a
+ * hard-coded region LIST.
+ *
+ * AWS-P1-01 is about components carrying their own copy of the region
+ * catalogue, not about the identifier it is stored under. The previous form
+ * of this guard matched on the NAME (`const *REGIONS* = [`), which flagged
+ * FilterBar's `const REGIONS = ['all', ...ALL_AWS_REGIONS]` -- a sentinel
+ * plus a spread OF the shared catalogue, which is exactly the compliant
+ * shape. It would equally have missed the same hard-coded array stored under
+ * any other name.
+ *
+ * A single region literal stays allowed: the wizard and the edit modal both
+ * use 'us-east-1' as a default value, which is one value, not a catalogue.
+ */
+const REGION_LIST_LITERAL =
+  /['"][a-z]{2}-[a-z]+-\d['"]\s*,\s*['"][a-z]{2}-[a-z]+-\d['"]/;
+
 function readComponent(filename: string): string {
   return readFileSync(
     join(COMPONENTS_DIR, filename),
@@ -210,7 +228,7 @@ describe('component region-list architecture — AWS-P1-01', () => {
         source,
         `${filename} declares a local hard-coded region list`,
       ).not.toMatch(
-        /(?:const|let)\s+[A-Z0-9_]*REGIONS[A-Z0-9_]*\s*=\s*\[/,
+        REGION_LIST_LITERAL,
       );
 
       expect(
@@ -239,9 +257,11 @@ describe('component region-list architecture — AWS-P1-01', () => {
     const source = readComponent('FilterBar.tsx');
 
     expect(source).toContain("from '../lib/awsRegions'");
-    expect(source).not.toMatch(
-      /(?:const|let)\s+[A-Z0-9_]*REGIONS[A-Z0-9_]*\s*=\s*\[/,
-    );
+    expect(source).not.toMatch(REGION_LIST_LITERAL);
+
+    // The selector's options must come FROM the shared catalogue, not merely
+    // sit in a file that happens to import it.
+    expect(source).toMatch(/\.\.\.ALL_AWS_REGIONS/);
   });
 });
 

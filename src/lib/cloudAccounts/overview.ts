@@ -432,14 +432,25 @@ export function normalizeHealth(
       )
       .map((account) => ({
         ...account,
+        /*
+         * A signal is kept only when it carries the two fields every caller
+         * reads: `key` and `status`. An "is it an object?" check alone let
+         * `{}` through, and a shapeless entry then rendered as a health
+         * signal with no key and an undefined status -- an unreadable row
+         * that still counted as a signal the account had been assessed on.
+         * Dropping it is the honest outcome: it was never a measurement.
+         */
         signals: arr<HealthSignal>(
           account.signals,
         ).filter(
-          (signal) =>
+          (signal): signal is HealthSignal =>
             Boolean(
               signal &&
-                typeof signal ===
-                  'object',
+                typeof signal === 'object' &&
+                typeof (signal as HealthSignal).key ===
+                  'string' &&
+                typeof (signal as HealthSignal).status ===
+                  'string',
             ),
         ),
       }));
@@ -1202,9 +1213,18 @@ export function syncBuckets(
     );
 
   /*
-   * Do not allow overlapping error counts to produce a negative "successful"
-   * bucket. The dashboard fields are treated as upper bounds against the total
-   * because the compose contract does not establish exclusivity.
+   * Only `successful` is clamped, and only against going negative.
+   *
+   * The previous version also clamped the two PROBLEM counts against the
+   * total, so a provider reporting 10 sync failures and 10 permission errors
+   * across 5 accounts was rendered as 5 failures and ZERO permission errors.
+   * Ten reported permission errors displayed as none is a reported failure
+   * presented as clean -- the exact thing these buckets exist to surface.
+   *
+   * The counts are not mutually exclusive and are not per-account (one
+   * account can fail repeatedly), so they legitimately exceed the account
+   * total. The buckets therefore do not sum to `total`, and that is correct:
+   * forcing that identity can only be done by discarding a real failure.
    */
   const countedProblems =
     Math.min(
@@ -1222,21 +1242,8 @@ export function syncBuckets(
 
   return {
     successful,
-    failed: Math.min(
-      failed,
-      total,
-    ),
-    permissionIssues:
-      Math.min(
-        permissionIssues,
-        Math.max(
-          0,
-          total - Math.min(
-            failed,
-            total,
-          ),
-        ),
-      ),
+    failed,
+    permissionIssues,
     total,
   };
 }

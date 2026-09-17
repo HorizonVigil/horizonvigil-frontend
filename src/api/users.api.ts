@@ -28,7 +28,12 @@ import type {
 
 type AuditLogParams = Parameters<typeof api.getUserAuditLog>[0];
 
-type MenuPermissionTarget =
+/**
+ * Exactly one subject. Exported so the hook layer shares this definition
+ * rather than declaring a weaker `{ userId?: string; groupId?: string }`,
+ * which permits both and neither and is not assignable to this.
+ */
+export type MenuPermissionTarget =
   | { userId: string; groupId?: never }
   | { groupId: string; userId?: never };
 
@@ -222,7 +227,12 @@ export const usersApi = {
       groupId,
     });
 
-    if ('userId' in target) {
+    /*
+     * A value check, not `in`. The other union member declares
+     * `userId?: never`, so the key can be PRESENT and undefined -- `in` does
+     * not discriminate, and target.userId stayed `string | undefined`.
+     */
+    if (target.userId !== undefined) {
       return api.setMenuPermission({
         userId: target.userId,
         menuKey,

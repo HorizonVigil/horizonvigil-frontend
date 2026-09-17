@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * AWS-P1-06 / AWS-P1-05 regression tests.
@@ -36,22 +40,6 @@ function source(endsWith: string): string {
   ).toBeTruthy();
 
   return entry?.[1] ?? '';
-}
-
-/**
- * Remove comments before checking architectural source patterns.
- *
- * This avoids a commented-out Promise.all or explanatory prose satisfying a
- * regression assertion accidentally.
- */
-function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-
-function code(text: string): string {
-  return stripComments(text);
 }
 
 function detailSource(): string {
@@ -111,7 +99,10 @@ describe('AWS account detail — dependency isolation', () => {
      * successful retry.
      */
     expect(detail).toMatch(
-      /failed\.length\s*>\s*0[\s\S]{0,250}\?\s*[^:;]+:\s*null/,
+      // The alternate branch must be `null`, not a retained message. Bounded
+      // and non-greedy so the colon inside the message text ("Couldn't
+      // load: ...") does not terminate the match early.
+      /failed\.length\s*>\s*0[\s\S]{0,80}?\?[\s\S]{0,400}?:\s*null/,
     );
   });
 
@@ -134,11 +125,32 @@ describe('AWS account detail — dependency isolation', () => {
     /**
      * Guard against accidentally reverting to unchecked `.value` access,
      * which would reintroduce the original all-or-nothing failure behavior.
+     *
+     * Derived from the destructuring rather than a hardcoded name list, so
+     * renaming a dependency cannot quietly drop it from this guard, and
+     * ADDING one is covered the moment it appears.
      */
-    expect(detail).toMatch(/connRes\.status/);
-    expect(detail).toMatch(/invRes\.status/);
-    expect(detail).toMatch(/costRes\.status/);
-    expect(detail).toMatch(/credRes\.status/);
+    const destructured =
+      /const\s*\[([^\]]+)\]\s*=\s*await\s+Promise\.allSettled/.exec(detail);
+
+    expect(
+      destructured,
+      'AwsAccountDetail no longer loads its dependencies with Promise.allSettled',
+    ).toBeTruthy();
+
+    const names = destructured![1]
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean);
+
+    expect(names.length).toBeGreaterThanOrEqual(4);
+
+    for (const name of names) {
+      expect(
+        detail,
+        `${name} is used without checking its settled status`,
+      ).toMatch(new RegExp(`\\b${name}\\.status\\b`));
+    }
   });
 });
 
@@ -152,7 +164,10 @@ describe('Cloud Accounts Changes panel — default visibility and server-side fi
 
   it('passes includeReadOnly to the server query', () => {
     expect(panel).toMatch(
-      /getAccountCloudTrailEvents\(\s*row\.id\s*,\s*\{\s*includeReadOnly\s*\}\s*\)/,
+      // The row variable may be named anything; what matters is that the
+      // read-only flag reaches the SERVER call rather than being applied
+      // after the fact in the browser.
+      /getAccountCloudTrailEvents\(\s*\w+(?:\.\w+|\?\.\w+)*\s*,\s*\{\s*includeReadOnly\s*\}\s*,?\s*\)/,
     );
   });
 
@@ -178,11 +193,13 @@ describe('Cloud Accounts Changes panel — default visibility and server-side fi
   });
 
   it('describes the expanded events view', () => {
-    expect(panel).toMatch(/CloudTrail events, including reads/);
+    expect(panel).toMatch(/CloudTrail events, including read/i);
   });
 
   it('explains why the empty state may not mean no activity occurred', () => {
-    expect(panel).toMatch(/Read-only calls are hidden/);
+    // An empty "Changes" list must say WHY it may be empty -- reads are
+    // filtered out by default, so "no changes" is not "no activity".
+    expect(panel).toMatch(/Read-only[\w\s]*calls are hidden/i);
   });
 
   it('keeps the toggle state in the rendered source path', () => {

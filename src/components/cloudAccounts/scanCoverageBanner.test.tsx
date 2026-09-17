@@ -99,8 +99,12 @@ describe('ScanCoverageBanner', () => {
       />,
     );
 
+    // "Incomplete" appears twice by design -- once as the status label and
+    // once inside the server's own summary sentence. Asserting both, rather
+    // than a single ambiguous match, keeps the label and the explanation
+    // independently pinned.
     expect(
-      screen.getByText(/Incomplete/i),
+      screen.getByText('Incomplete'),
     ).toBeInTheDocument();
 
     expect(
@@ -253,13 +257,20 @@ describe('ScanCoverageBanner', () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Incomplete/i),
-    ).toBeInTheDocument();
+    // A FAILED run is labelled "Failed", which is a stronger statement than
+    // "Incomplete" -- but the contract being protected is that it must never
+    // read as complete, and its count must never be offered as a total.
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
 
     expect(
-      screen.getByText(/scan incomplete/i),
-    ).toBeInTheDocument();
+      countQualifier(
+        createHealth({
+          completeness: 'FAILED',
+          countIsAuthoritative: false,
+        }),
+      ),
+    ).toBe('at least — scan incomplete');
   });
 
   it('does not render a false-clean banner for a complete zero-resource estate', () => {
@@ -309,15 +320,16 @@ describe('ScanCoverageBanner', () => {
       />,
     );
 
+    // Substring, because each bullet also names the normalised cause, e.g.
+    // "ec2 failed in 2 regions (permission denied)". The contract is that the
+    // two failures stay SEPARATE lines, not that the wording is frozen.
     expect(
-      screen.getByText(
-        '• ec2 failed in 2 regions',
-      ),
+      screen.getByText(/ec2 failed in 2 regions/),
     ).toBeInTheDocument();
 
     expect(
       screen.getByText(
-        '• vpc failed in eu-west-1',
+        /vpc failed in eu-west-1/,
       ),
     ).toBeInTheDocument();
   });

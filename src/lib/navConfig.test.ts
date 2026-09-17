@@ -99,6 +99,13 @@ describe('NAV_MODULES structure', () => {
           new URL(child.to, 'https://horizonvigil.invalid').searchParams.get(
             'tab',
           ) ?? '',
+          // `preset` is part of the destination, not decoration: "All
+          // Vulnerabilities" and "Critical Vulnerabilities" open the same tab
+          // filtered differently. Omitting it here reported those two as
+          // duplicates of each other.
+          new URL(child.to, 'https://horizonvigil.invalid').searchParams.get(
+            'preset',
+          ) ?? '',
         ].join('|');
 
         const previous = seen.get(key);
@@ -306,9 +313,13 @@ describe('findActiveModule', () => {
   });
 
   it('resolves security pillar routes to Vulnerability Management', () => {
+    // '/cloud-security' is deliberately NOT in this list. The Phase 10 split
+    // made Cloud Security (V1 posture) its own top-level module, so that
+    // route resolves to Cloud Security by design -- asserting otherwise here
+    // would contradict the "exactly one navigation module rooted at Cloud
+    // Security" guard in v2Isolation.test.ts.
     const securityRoutes = [
       '/security-scanning',
-      '/cloud-security',
       '/application-security',
       '/code-security',
       '/container-security',

@@ -12,6 +12,8 @@ import { describe, expect, it } from 'vitest';
  * API remains responsible for enforcing the same lifecycle rules server-side.
  */
 
+import { stripComments } from '../test/sourceCode';
+
 const sources = import.meta.glob(
   ['../pages/CloudAccounts.tsx'],
   {
@@ -36,12 +38,6 @@ function getCloudAccountsSource(): string {
  * Strip comments so a stale example/comment cannot satisfy an architectural
  * source assertion.
  */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-
 const page = stripComments(getCloudAccountsSource());
 
 describe('Cloud Accounts — disconnected row action safety', () => {
@@ -77,18 +73,41 @@ describe('Cloud Accounts — disconnected row action safety', () => {
   });
 
   it('does not expose Validate Permissions to disconnected connections', () => {
-    const validateIndex = page.search(
-      /onValidatePermissions|validateAccountPermissions|Validate Permissions/,
-    );
+    /*
+     * Check EVERY rendered control, not the first token that happens to
+     * mention validation.
+     *
+     * This previously anchored on the first match of an alternation that
+     * included the handler names, landing on a DataTable column definition
+     * hundreds of lines above the button -- so the window it inspected did
+     * not contain the guard, and the failure said the control was ungated
+     * when it was. Comments are stripped so the paragraph explaining the
+     * gate cannot stand in for the gate.
+     */
+    const rendered = stripComments(page);
+    const label = 'Validate Permissions';
 
-    expect(validateIndex).toBeGreaterThanOrEqual(0);
+    const offsets: number[] = [];
 
-    const surrounding = page.slice(
-      Math.max(0, validateIndex - 700),
-      Math.min(page.length, validateIndex + 700),
-    );
+    for (
+      let at = rendered.indexOf(label);
+      at !== -1;
+      at = rendered.indexOf(label, at + 1)
+    ) {
+      offsets.push(at);
+    }
 
-    expect(surrounding).toMatch(/!isDisconnected/);
+    expect(
+      offsets.length,
+      'the Validate Permissions control was not found at all',
+    ).toBeGreaterThan(0);
+
+    for (const at of offsets) {
+      expect(
+        rendered.slice(Math.max(0, at - 700), at),
+        `a Validate Permissions control at offset ${at} is not behind !isDisconnected`,
+      ).toMatch(/!isDisconnected/);
+    }
   });
 
   it('gates Disconnect on the connection being active', () => {

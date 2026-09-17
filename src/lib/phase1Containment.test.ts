@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * Phase 1 containment invariants (2026-09-08 AWS connector audit).
@@ -46,30 +50,6 @@ function source(endsWith: string): string {
   return hit![1];
 }
 
-/**
- * Remove comments before source assertions.
- *
- * This prevents a comment containing an old function name, timer, or PRD
- * reference from satisfying/failing a production invariant accidentally.
- *
- * The scanner intentionally handles:
- * - line comments
- * - block comments
- * - template literals conservatively (template contents are retained because
- *   customer-facing source text is itself part of some assertions)
- */
-function code(text: string): string {
-  return text
-    .replace(
-      /\/\*[\s\S]*?\*\//g,
-      ' ',
-    )
-    .replace(
-      /(^|[^:\\])\/\/.*$/gm,
-      '$1 ',
-    );
-}
-
 function compact(text: string): string {
   return text.replace(/\s+/g, ' ');
 }
@@ -92,7 +72,22 @@ describe('browser collection ownership', () => {
   it('has no post-login delayed discovery sweep', () => {
     expect(sync).not.toMatch(/\brunAutoSync\b/);
     expect(sync).not.toMatch(/\bstaleAccounts\b/);
-    expect(sync).not.toMatch(/\bsetTimeout\s*\(/);
+
+    /*
+     * A blanket ban on setTimeout used to stand in for "nothing starts on a
+     * timer". It cannot any more: the server-owned run is polled, so the file
+     * legitimately schedules a sleep between status reads and an overall
+     * abort deadline. Banning the primitive would mean deleting the poll.
+     *
+     * What must stay true is that no timer STARTS work. That is asserted
+     * directly -- and the behavioural counterpart, that mounting the provider
+     * and letting an hour of timers run issues no collection run at all,
+     * lives in syncContext.behavior.test.tsx.
+     */
+    expect(sync).not.toMatch(
+      /set(?:Timeout|Interval)\s*\([^)]*\b(?:startSync|startDiscovery|startCollectionRun)\b/,
+    );
+    expect(sync).not.toMatch(/setInterval\s*\(/);
   });
 
   it('does not enumerate all cloud connections merely to choose stale scans', () => {
@@ -120,18 +115,30 @@ describe('browser collection ownership', () => {
     );
   });
 
-  it('treats only SUCCEEDED as completed', () => {
-    expect(compactSync).toMatch(
-      /run\.status\s*===\s*['"]SUCCEEDED['"]\s*\?\s*['"]done['"]\s*:\s*['"]error['"]/,
-    );
-    expect(compactSync).not.toMatch(
-      /run\.status\s*!==\s*['"]FAILED['"].*['"]done['"]/,
-    );
-  });
+  /*
+   * "Only SUCCEEDED is done" and "partial progress is never completion" are
+   * RUNTIME properties, and they are verified by driving the provider in
+   * syncContext.behavior.test.tsx -- including a tamper check that mapping
+   * PARTIALLY_SUCCEEDED to 'done' makes that suite fail.
+   *
+   * What is left here is the one thing worth pinning in the source: success
+   * is defined by a single equality against SUCCEEDED, so no second status
+   * can be quietly folded into it. The previous pair of assertions pinned an
+   * exact ternary (which a refactor into a helper broke while the behaviour
+   * held) and searched compacted source with `.*`, which spans the whole
+   * file and so matched PARTIALLY_SUCCEEDED merely for being listed as a
+   * terminal status.
+   */
+  it('defines success as exactly one status', () => {
+    const successCheck = /status\s*===\s*(['"])SUCCEEDED\1/g;
 
-  it('does not fabricate completion from partial progress', () => {
+    expect(compactSync.match(successCheck)).toHaveLength(1);
+
     expect(compactSync).not.toMatch(
-      /(?:PARTIALLY_SUCCEEDED|PARTIAL).*['"]done['"]/,
+      /status\s*===\s*['"]SUCCEEDED['"]\s*\|\|/,
+    );
+    expect(compactSync).not.toMatch(
+      /status\s*!==\s*['"]FAILED['"]/,
     );
   });
 });

@@ -1,4 +1,25 @@
+/// <reference types="vitest/jsdom" />
+// ^ Must stay the FIRST line. A triple-slash directive is only honoured
+// before every statement in the file, imports included -- moved below one,
+// it is silently ignored and the `jsdom` global below stops type-checking.
+
 // Global vitest setup (see vitest.config.ts's `setupFiles`).
+//
+// `@testing-library/jest-dom` is a declared dependency of this repo but was
+// never registered, so every `toBeInTheDocument` / `toBeEmptyDOMElement`
+// assertion failed with "Invalid Chai property". That reads like a broken
+// component, not a missing matcher, which is how ten real ScanCoverageBanner
+// assertions were left red for the wrong reason.
+import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
+
+// Unmount between tests. Without this, a component rendered by an earlier
+// test stays in document.body and the next `getByText` finds two matches --
+// "Found multiple elements" is a leaked render, not a duplicated element.
+afterEach(() => {
+  cleanup();
+});
 //
 // Works around a real environment conflict, not an app bug: Node 22+ ships
 // its own native, experimental `localStorage` global that requires
@@ -25,7 +46,6 @@
 // `/// <reference>` (not `import('jsdom')`) deliberately avoids needing
 // @types/jsdom as a dependency just for this one ambient type -- vitest
 // already ships this exact declaration for exactly this purpose.
-/// <reference types="vitest/jsdom" />
 if (typeof localStorage === 'undefined' && typeof jsdom !== 'undefined') {
   Object.defineProperty(globalThis, 'localStorage', { get: () => jsdom.window.localStorage, configurable: true });
   Object.defineProperty(globalThis, 'sessionStorage', { get: () => jsdom.window.sessionStorage, configurable: true });

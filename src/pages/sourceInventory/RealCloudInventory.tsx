@@ -154,7 +154,7 @@ export function RealCloudInventory() {
 
       {tab === 'Asset List' && (
         <div>
-          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={config.subTypes.map(s => s.label)} scanners={REAL_CLOUD_SCANNER_NAMES} />
+          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={config.subTypes.map(s => s.label)} scanners={[...REAL_CLOUD_SCANNER_NAMES]} />
           {snapshotNotice && (
             <div className="mb-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
               {snapshotNotice}

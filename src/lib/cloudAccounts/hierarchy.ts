@@ -21,9 +21,11 @@ import type {
   GcpConnection,
   HierarchyFolder,
   HierarchyNode,
-  UnifiedAccountRow as ApiUnifiedAccountRow,
 } from '../api';
+// Single canonical home. The refactor also aliased it from '../api',
+// which never exported it.
 import type { UnifiedAccountRow } from '../unifiedAccounts';
+type ApiUnifiedAccountRow = UnifiedAccountRow;
 
 export type HierNodeType =
   | 'org'
@@ -286,6 +288,19 @@ function foldFolder(
               return null;
             }
 
+            /*
+             * First folder to claim a project id wins.
+             *
+             * The same project appearing under two folders used to emit a
+             * node in BOTH, and each node pulled the same accounts out of
+             * byProject -- so one account was rendered twice and counted
+             * twice in accountTotal. A duplicated id is a data anomaly; the
+             * response to it must not be to inflate the estate.
+             */
+            if (consumed.has(id)) {
+              return null;
+            }
+
             consumed.add(id);
 
             return createProjectNode(
@@ -373,6 +388,12 @@ function createRootProjects(
         normalizeId(project.id);
 
       if (!id) {
+        return null;
+      }
+
+      // Same rule as the folder path: a project id already placed in the
+      // tree is not emitted again, so its accounts cannot be counted twice.
+      if (consumed.has(id)) {
         return null;
       }
 

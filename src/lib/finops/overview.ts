@@ -316,11 +316,17 @@ export function summarizeBudgets(
     if (item.status === 'exceeded') exceededCount += 1;
     if (item.status === 'warning') warningCount += 1;
 
+    /*
+     * `in` proves membership at runtime but does not narrow the index type,
+     * so indexing STATUS_RANK with the wider status was an implicit any. The
+     * narrowing is made explicit rather than suppressed.
+     */
+    const rank = (STATUS_RANK as Record<string, number | undefined>)[item.status];
     if (
-      item.status in STATUS_RANK &&
-      (worst === null || STATUS_RANK[item.status] > STATUS_RANK[worst])
+      rank !== undefined &&
+      (worst === null || rank > STATUS_RANK[worst])
     ) {
-      worst = item.status;
+      worst = item.status as typeof worst;
     }
   }
 

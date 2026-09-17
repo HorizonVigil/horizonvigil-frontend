@@ -236,8 +236,7 @@ export const LEAST_PRIVILEGE_POLICY = `{
         "cloudtrail:LookupEvents",
         "ssm:Describe*",
         "ssm:List*",
-        "ssm:GetParameter",
-        "ssm:GetParameters",
+        "ssm:GetInventory",
         "health:Describe*"
       ],
       "Resource": "*"

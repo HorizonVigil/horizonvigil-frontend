@@ -241,7 +241,12 @@ export const NAV_MODULES: NavModule[] = [
       // RBAC-configurable, since nothing in this app renders
       // NavChild.group as an actual visible sidebar today (only
       // CommandPalette/MenuAccessTree/useCanSeeSubmenu consume it).
-      { label: 'Cloud Scans', to: tabLink(CLOUD_SEC, 'Overview'), real: true, group: 'Scan Categories' },
+      // NO 'Cloud Scans' entry here. Cloud Security became its own top-level
+      // module in the Phase 10 split, so it already owns /cloud-security. A
+      // relabel entry pointing at the same route puts TWO nav entries on one
+      // destination, which is precisely the defect that split fixed -- both
+      // marked themselves aria-current. The other Scan Categories entries
+      // below stay, because the routes they relabel are owned by this module.
       { label: 'Repository Scans', to: tabLink(CODE_SEC, 'Overview'), real: true, group: 'Scan Categories' },
       { label: 'URL & API Scans', to: tabLink(APP_SEC, 'Overview'), real: true, group: 'Scan Categories' },
       { label: 'Container Image Scans', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Scan Categories' },
@@ -333,21 +338,18 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Cloud Security Scanning', to: tabLink(SCANNING, 'Cloud Posture'), real: true, group: 'Security Scanning' },
 
       // ── Cloud Security ────────────────────────────────────────────────
-      // Multi-cloud security posture pillar -- distinct from Cloud Accounts
-      // (connection management/ops) and from the AWS-native tool tabs
-      // above, which this pillar re-presents through a posture/risk lens.
-      { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
-      // AWS's own posture lives in Misconfigurations/Exposed Resources below
-      // (real, AWS Config + IAM Access Analyzer); Azure/GCP are real too as
-      // of the gcp-scc/defender source routes -- all three now point at the
-      // real Multi-Cloud Coverage tab's per-provider breakdown rather than
-      // being separate unbuilt tabs. OCI has no connector at all yet.
-      { label: 'AWS', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'Azure', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'GCP', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
-      { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
-      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
+      // MOVED to the Cloud Security module (see its `children` below).
+      //
+      // These seven entries pointed at /cloud-security* routes while
+      // declared under Vulnerability Management, so every one of them lit up
+      // a different module than the one it belonged to. Three of them --
+      // 'AWS', 'Azure' and 'GCP' -- were additionally the SAME destination
+      // (?tab=Source Coverage) under three labels, so a search for any
+      // provider offered three results that opened one identical page.
+      //
+      // They now live on the module that owns the route, which also gives
+      // them `cloud-security:*` RBAC keys instead of borrowing
+      // Vulnerability Management's `security:*` namespace.
 
       // ── Application Security ─────────────────────────────────────────
       { label: 'Application Security Overview', to: APP_SEC, real: true, group: 'Application Security' },
@@ -363,7 +365,13 @@ export const NAV_MODULES: NavModule[] = [
       // Real -- api.getGitInstallations()/getInstallationRepos() already
       // back Settings > Git Integration's Auto-PR feature with real,
       // persisted repo rows.
-      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
+      // Labelled 'Code Repositories', not 'Repositories'. The submenu key
+      // that drives RBAC is derived from the LABEL alone, so this entry and
+      // Source Inventory's 'Repositories' above both collapsed to
+      // `security:repositories` -- one stored permission silently governed
+      // two different destinations, and navConfig's own integrity check was
+      // already reporting the collision at import time.
+      { label: 'Code Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
       // Real -- each backed by its own scanner's persisted GET /v1/scans
       // history (Semgrep / Dependency-Check+Grype / Gitleaks+TruffleHog).
       // FIXED 2026-09-08 (user-reported nav duplication): "Code
@@ -442,7 +450,11 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: 'Resource Inventory', to: RESOURCES, real: true },
       { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
-      { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
+      // NO 'Dependency Graph' entry. There is no Dependency Graph tab on this
+      // page (see Resources.tsx's TABS) -- the graph opens from an individual
+      // resource's drawer. The entry pointed at `/resources/all`, so it
+      // promised a dependency graph and delivered the default resource list.
+      // 'Resource Relationships' below is the real, reachable equivalent.
       { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
       { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
       { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
@@ -556,7 +568,17 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'cloud-security',
     section: 'Cloud Operations',
     to: CLOUD_SEC,
-    children: [],
+    children: [
+      { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
+      // One entry, not one per provider. This tab IS the per-provider
+      // breakdown, so 'AWS', 'Azure' and 'GCP' were three labels resolving to
+      // this single URL -- three search results that opened the same page and
+      // three RBAC keys that could not actually be set independently.
+      { label: 'Source Coverage', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
+      { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
+      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
+    ],
   },
   {
     // Same reasoning and same fix as Cloud Security immediately above.
@@ -980,15 +1002,6 @@ export function findActiveModule(pathname: string): NavModule {
       ),
     ) ?? NAV_MODULES[0]
   );
-}
-
-/** path + tab + hash identity a child's `to` resolves to. */
-function childIdentity(child: NavChild): string | null {
-  if (!child.to) return null;
-  const [beforeHash, hash = ''] = child.to.split('#', 2);
-  const [path, query] = beforeHash.split('?', 2);
-  const tab = query ? new URLSearchParams(query).get('tab') : null;
-  return `${normalizePathname(path)}|${tab ?? ''}|${hash}`;
 }
 
 /** path + tab + hash identity a child's `to` resolves to — the unit isChildActive dedupes/compares on, not the raw `to` string (two children can carry different `to` values that land on the exact same page+tab, e.g. Resources' Dependency Graph and Bulk Operations both resolving to /resources/all with no distinguishing tab). */

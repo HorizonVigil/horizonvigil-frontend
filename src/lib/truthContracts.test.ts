@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { describeAvailability, type Availability } from './api';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * Phase 2 truth-contract regression tests.
@@ -40,91 +44,6 @@ function source(endsWith: string): string {
   expect(hit, `source not found for ${endsWith}`).toBeTruthy();
 
   return hit![1];
-}
-
-/**
- * Remove JavaScript/TypeScript comments while preserving string literals.
- *
- * A plain regex for // comments can corrupt source containing URLs such as
- * https://..., so this small scanner deliberately tracks quoted strings and
- * template literals. It is not intended to be a full JavaScript parser; it
- * only needs to prevent comments from satisfying source-contract assertions.
- */
-function code(text: string): string {
-  let output = '';
-  let index = 0;
-  let state: 'code' | 'single' | 'double' | 'template' = 'code';
-
-  while (index < text.length) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (state === 'code') {
-      if (char === '/' && next === '*') {
-        const end = text.indexOf('*/', index + 2);
-        if (end === -1) break;
-        output += ' ';
-        index = end + 2;
-        continue;
-      }
-
-      if (char === '/' && next === '/') {
-        const newline = text.indexOf('\n', index + 2);
-        if (newline === -1) break;
-        output += '\n';
-        index = newline + 1;
-        continue;
-      }
-
-      if (char === "'") {
-        state = 'single';
-        output += char;
-        index += 1;
-        continue;
-      }
-
-      if (char === '"') {
-        state = 'double';
-        output += char;
-        index += 1;
-        continue;
-      }
-
-      if (char === '`') {
-        state = 'template';
-        output += char;
-        index += 1;
-        continue;
-      }
-
-      output += char;
-      index += 1;
-      continue;
-    }
-
-    output += char;
-
-    if (char === '\\') {
-      const escaped = text[index + 1];
-      if (escaped !== undefined) {
-        output += escaped;
-        index += 2;
-        continue;
-      }
-    }
-
-    if (
-      (state === 'single' && char === "'") ||
-      (state === 'double' && char === '"') ||
-      (state === 'template' && char === '`')
-    ) {
-      state = 'code';
-    }
-
-    index += 1;
-  }
-
-  return output;
 }
 
 describe('cost never renders a false zero', () => {

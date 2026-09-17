@@ -253,7 +253,7 @@ export function StackedBar({
                         <button
                           {...commonProps}
                           type="button"
-                          onClick={() => onSegmentClick(segment.label)}
+                          onClick={() => onSegmentClick?.(segment.label)}
                           aria-describedby={rowLabel ? rowId : undefined}
                         />
                       );

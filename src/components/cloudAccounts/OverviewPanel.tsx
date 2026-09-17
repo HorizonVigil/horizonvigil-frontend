@@ -104,14 +104,28 @@ function isRecord(
   );
 }
 
+/**
+ * Validates the shape the consumer actually needs.
+ *
+ * This returned `unknown[]` after filtering to records, which no amount of
+ * downstream typing could turn into EnvironmentDistribution[]. Filtering by a
+ * predicate that CHECKS the fields is both honest and assignable: a malformed
+ * entry is dropped rather than cast over.
+ */
 function normalizeEnvironments(
   value: unknown,
-): unknown[] | null {
+): { environment: string; count: number }[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
 
-  return value.filter(isRecord);
+  return value.filter(
+    (entry): entry is { environment: string; count: number } =>
+      isRecord(entry) &&
+      typeof entry.environment === 'string' &&
+      typeof entry.count === 'number' &&
+      Number.isFinite(entry.count),
+  );
 }
 
 function getSafeDateLabel(
@@ -599,7 +613,9 @@ export function OverviewPanel({
 
   const handleProviderSelect =
     useCallback(
-      (provider: Provider) => {
+      // Nullable: the chip clears the filter by passing null, and a handler
+      // that only accepts Provider cannot express deselection.
+      (provider: Provider | null) => {
         setFilters(
           (current) => ({
             ...current,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { NAV_MODULES } from './navConfig';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * Phase 11 (§15.4): scheduled reports remain unavailable until a real delivery
@@ -37,16 +41,6 @@ function source(endsWith: string): string {
   ).toBeTruthy();
 
   return hit![1];
-}
-
-/**
- * Strip source comments before assertions so historical audit notes do not
- * accidentally satisfy/fail the behavioral checks.
- */
-function code(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:\\])\/\/.*$/gm, '$1 ');
 }
 
 function compact(text: string): string {
@@ -199,7 +193,12 @@ describe('scheduled reports are not offered without a delivery engine', () => {
      * path where the submit button remains enabled.
      */
     expect(compactReports).not.toMatch(
-      /(?:!preview|preview\s*==\s*null|null\s*===\s*preview)[^;]{0,300}(?:canGenerate|Generate|generate)/i,
+      // `!preview` must mean the preview itself is absent -- NOT the prefix of
+      // a field test such as `!preview.completeness.complete`, which is a
+      // legitimate read of a preview that loaded fine. Without the boundary
+      // this matched that field test and reported a fail-open that was not
+      // there.
+      /(?:!preview(?![\w.?])|preview\s*==\s*null|null\s*===\s*preview)[^;]{0,300}(?:canGenerate|Generate|generate)/i,
     );
   });
 

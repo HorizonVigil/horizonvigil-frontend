@@ -99,10 +99,19 @@ function budget(
   };
 }
 
+/**
+ * `Object.assign`, not an inline `...overrides` spread.
+ *
+ * `Partial<T>` types every property as `T[K] | undefined`, so spreading it
+ * into an object literal lets a required field become undefined and the
+ * result stops being a CostRecommendation. Object.assign produces
+ * `CostRecommendation & Partial<CostRecommendation>`, which is assignable --
+ * and it keeps the base fully type-checked rather than casting the result.
+ */
 function recommendation(
   overrides: Partial<CostRecommendation> = {},
 ): CostRecommendation {
-  return {
+  const base: CostRecommendation = {
     id: 'r1',
     connection_id: 'c1',
     resource_id: null,
@@ -144,9 +153,15 @@ function recommendation(
     savings_state: null,
     observed_monthly_savings: null,
     verified_at: null,
+    // These two were absent from the fixture entirely. The old
+    // `...overrides` spread hid it, because Partial<T> could notionally
+    // supply them -- so an incomplete fixture type-checked.
+    commitment_term: null,
+    payment_option: null,
     ownership: null,
-    ...overrides,
   };
+
+  return Object.assign(base, overrides);
 }
 
 function anomaly(

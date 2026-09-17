@@ -1,183 +1,41 @@
-import type {
-  AzureConnection,
-  CloudConnection,
-  GcpConnection,
-} from './api';
-
-export type CloudProvider = 'aws' | 'gcp' | 'azure';
-
-export type UnifiedAccountConnection =
-  | CloudConnection
-  | GcpConnection
-  | AzureConnection;
+import { useOrg } from './orgContext';
+import { canSeeChild, findNavChild, submenuKey, type Role } from './navConfig';
 
 /**
- * Canonical UI-facing representation of a cloud connection.
+ * Submenu-level access check for use INSIDE a tabbed page (Cost Management,
+ * Vulnerability Management, ...) whose "children" in navConfig.ts are tabs
+ * on one route rather than separate URLs — the sidebar already hides
+ * restricted tabs from the nav, but a route-level guard can't stop someone
+ * clicking a tab button that's still rendered in the page itself, so each
+ * such page needs its own check too.
  *
- * Search, filtering, sorting, selectors, and common account-row rendering
- * should consume this shape rather than branching on provider-specific fields.
- *
- * `raw` deliberately retains the original API object for operations that
- * genuinely require provider-specific fields. Treat it as read-only in UI
- * code; the normalizer does not mutate the source object.
+ * `childLabel` must match the child's `label` in navConfig.ts exactly (same
+ * string that's hashed into the submenu key there). Looks up the real
+ * NavChild (via findNavChild) so a tab's own minRole/roles is enforced here
+ * too, not just an explicit admin override -- a label-only synthetic child
+ * has no minRole of its own, so a role-restricted tab (e.g. Cost
+ * Management's Budgets, editor+) would otherwise be reachable by anyone via
+ * a direct `?tab=Budgets` URL even though the sidebar correctly hides it.
+ * Tabs with no matching navConfig entry (e.g. Cost Optimization's default
+ * "Overview" tab, which isn't in its own sidebar list) fall back to a
+ * role-less child, i.e. visible to all -- same as an unrestricted sidebar
+ * item would be.
  */
-export interface UnifiedAccountRow {
-  readonly id: string;
-  readonly provider: CloudProvider;
-  readonly name: string;
-  readonly identifier: string;
-  readonly environment: string;
-  readonly status: string;
-  readonly errorMessage: string | null;
-  readonly connectionMethod: string;
-  readonly connectionMethodLabel: string;
-  readonly region: string;
-  readonly resources: number | null;
-  readonly lastSync: string | null;
-  readonly raw: UnifiedAccountConnection;
+export function useCanSeeSubmenu(parentIcon: string, childLabel: string): boolean {
+  const { currentOrg, menuPermissions } = useOrg();
+  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  const child = findNavChild(parentIcon, childLabel) ?? { label: childLabel, real: true };
+  return canSeeChild(child, role, parentIcon, menuPermissions);
 }
 
-const UNKNOWN_NAME = 'Unknown';
-const UNKNOWN_IDENTIFIER = 'Unknown identifier';
-const UNKNOWN_ENVIRONMENT = 'unknown';
-const UNKNOWN_STATUS = 'unknown';
-const UNKNOWN_METHOD = 'unknown';
-const UNKNOWN_METHOD_LABEL = 'Unknown';
-const GLOBAL_REGION = 'global';
-
-function normalizeText(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function displayValue(value: unknown, fallback: string): string {
-  const normalized = normalizeText(value);
-  return normalized || fallback;
-}
-
-function normalizeOptionalText(value: unknown): string | null {
-  const normalized = normalizeText(value);
-  return normalized || null;
-}
-
-function normalizeResourceCount(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    return null;
-  }
-
-  return Math.floor(value);
-}
-
-function normalizeId(value: unknown): string {
-  return normalizeText(value);
-}
-
-function normalizeEnvironment(value: unknown): string {
-  return displayValue(value, UNKNOWN_ENVIRONMENT);
-}
-
-function normalizeStatus(value: unknown): string {
-  return displayValue(value, UNKNOWN_STATUS);
-}
-
-function normalizeConnectionMethod(value: unknown): string {
-  return displayValue(value, UNKNOWN_METHOD);
-}
-
-function normalizeRegion(value: unknown): string {
-  return displayValue(value, GLOBAL_REGION);
-}
-
-/**
- * Important: this returns the real provider identifier when available.
- * It does NOT manufacture a fake identifier such as "Unknown AWS account".
- *
- * Common actions should refuse to execute when `identifier` is empty rather
- * than accidentally sending a synthetic identifier to a backend.
- */
-function normalizeIdentifier(value: unknown): string {
-  return normalizeText(value);
-}
-
-function normalizeCommonFields(
-  c: UnifiedAccountConnection,
-  identifier: string,
-): Pick<
-  UnifiedAccountRow,
-  | 'id'
-  | 'name'
-  | 'identifier'
-  | 'environment'
-  | 'status'
-  | 'errorMessage'
-  | 'connectionMethod'
-  | 'region'
-  | 'resources'
-  | 'lastSync'
-> {
-  return {
-    id: normalizeId(c.id),
-    name: displayValue(c.connection_name, identifier || UNKNOWN_NAME),
-    identifier,
-    environment: normalizeEnvironment(c.environment),
-    status: normalizeStatus(c.status),
-    errorMessage: normalizeOptionalText(c.error_message),
-    connectionMethod: normalizeConnectionMethod(c.connection_method),
-    region: normalizeRegion(c.default_region),
-    resources: normalizeResourceCount(c.resource_summary?.totalResources),
-    lastSync: normalizeOptionalText(c.last_sync_at),
+/** Batch form — call once per page instead of once per tab, avoids re-deriving `role` on every check. */
+export function useSubmenuAccess(parentIcon: string): (childLabel: string) => boolean {
+  const { currentOrg, menuPermissions } = useOrg();
+  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  return (childLabel: string) => {
+    const child = findNavChild(parentIcon, childLabel) ?? { label: childLabel, real: true };
+    return canSeeChild(child, role, parentIcon, menuPermissions);
   };
 }
 
-export function toUnifiedRow(c: CloudConnection): UnifiedAccountRow {
-  const identifier = normalizeIdentifier(c.aws_account_id);
-  const common = normalizeCommonFields(c, identifier);
-
-  return {
-    ...common,
-    provider: 'aws',
-    connectionMethodLabel:
-      c.connection_method === 'cross_account_role'
-        ? 'Cross-account role'
-        : c.connection_method === 'access_key'
-          ? 'Access key'
-          : UNKNOWN_METHOD_LABEL,
-    raw: c,
-  };
-}
-
-export function toUnifiedGcpRow(c: GcpConnection): UnifiedAccountRow {
-  const identifier = normalizeIdentifier(c.gcp_project_id);
-  const common = normalizeCommonFields(c, identifier);
-
-  return {
-    ...common,
-    provider: 'gcp',
-    connectionMethodLabel:
-      c.connection_method === 'service_account_impersonation'
-        ? 'Impersonation'
-        : c.connection_method === 'service_account_key'
-          ? 'Service account key'
-          : UNKNOWN_METHOD_LABEL,
-    raw: c,
-  };
-}
-
-export function toUnifiedAzureRow(c: AzureConnection): UnifiedAccountRow {
-  const identifier = normalizeIdentifier(c.azure_subscription_id);
-  const common = normalizeCommonFields(c, identifier);
-
-  return {
-    ...common,
-    provider: 'azure',
-    connectionMethodLabel:
-      c.azure_auth_type === 'client_certificate'
-        ? 'Service principal (certificate)'
-        : c.azure_auth_type === 'client_secret'
-          ? 'Service principal (secret)'
-          : 'Service principal',
-    // Azure discovery is subscription-wide in the current connector contract;
-    // there is no per-connection default region equivalent to AWS/GCP.
-    region: GLOBAL_REGION,
-    raw: c,
-  };
-}
+export { submenuKey };

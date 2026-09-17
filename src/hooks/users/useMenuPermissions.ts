@@ -27,6 +27,8 @@ import {
   usersApi,
 } from '../../api/users.api';
 
+import type { MenuPermissionTarget } from '../../api/users.api';
+
 import type {
   SetMenuPermissionPayload,
 } from '../../types/user';
@@ -42,6 +44,7 @@ const MENU_PERMISSIONS_STALE_TIME_MS =
 const MENU_PERMISSIONS_GC_TIME_MS =
   5 * 60_000;
 
+/** What a CALLER may pass: either field, validated below. */
 type PermissionTarget = {
   userId?: string;
   groupId?: string;
@@ -76,9 +79,17 @@ function normalizeEffectiveUserId(
   return normalized || undefined;
 }
 
+/**
+ * Returns the DISCRIMINATED union, not the loose input shape.
+ *
+ * This already threw unless exactly one subject was present, but returned
+ * `PermissionTarget` -- which permits both and neither -- so every caller
+ * passing the result to the API layer failed to compile. The type now states
+ * the guarantee the function has always enforced.
+ */
 function normalizePermissionTarget(
   target: PermissionTarget,
-): PermissionTarget {
+): MenuPermissionTarget {
   if (!target || typeof target !== 'object') {
     throw new Error(
       'A permission target is required.',
@@ -176,11 +187,15 @@ export function useMenuPermissionOverrides(
     normalizedTarget !== null;
 
   return useQuery({
-    queryKey:
-      userKeys.menuPermissions(
-        normalizedTarget ??
-          {},
-      ),
+    /*
+     * `{}` as the fallback widened this to `MenuPermissionTarget | {}`, which
+     * the key builder cannot accept. The query is disabled when there is no
+     * target, so this value is never fetched with -- it only has to be a
+     * STABLE, well-typed placeholder so the cache key does not churn.
+     */
+    queryKey: userKeys.menuPermissions(
+      normalizedTarget ?? { userId: '' },
+    ),
 
     queryFn: () => {
       if (!normalizedTarget) {

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isVulnerabilityDataEnabled } from './featureFlags';
 import { NAV_MODULES } from './navConfig';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * P0-A regression tests for the 2026-09-08 production-readiness audit:
@@ -49,77 +53,6 @@ function source(endsWith: string): string {
   ).toBeTruthy();
 
   return hit![1];
-}
-
-/**
- * Removes comments for call-site assertions without treating URL text
- * (`https://...`) as a line comment.
- *
- * This is deliberately not a JavaScript parser. It only preserves quoted
- * strings/template literals while skipping block and line comments, which is
- * sufficient for these source-level contracts.
- */
-function code(text: string): string {
-  let result = '';
-  let index = 0;
-  let state: 'code' | 'single' | 'double' | 'template' = 'code';
-
-  while (index < text.length) {
-    const char = text[index];
-    const next = text[index + 1];
-
-    if (state === 'code') {
-      if (char === '/' && next === '*') {
-        const end = text.indexOf('*/', index + 2);
-        if (end === -1) break;
-        result += ' ';
-        index = end + 2;
-        continue;
-      }
-
-      if (char === '/' && next === '/') {
-        const end = text.indexOf('\n', index + 2);
-        if (end === -1) break;
-        result += '\n';
-        index = end + 1;
-        continue;
-      }
-
-      if (char === "'") {
-        state = 'single';
-      } else if (char === '"') {
-        state = 'double';
-      } else if (char === '`') {
-        state = 'template';
-      }
-
-      result += char;
-      index += 1;
-      continue;
-    }
-
-    result += char;
-
-    if (char === '\\') {
-      if (text[index + 1] !== undefined) {
-        result += text[index + 1];
-        index += 2;
-        continue;
-      }
-    }
-
-    if (
-      (state === 'single' && char === "'") ||
-      (state === 'double' && char === '"') ||
-      (state === 'template' && char === '`')
-    ) {
-      state = 'code';
-    }
-
-    index += 1;
-  }
-
-  return result;
 }
 
 function sectionAfter(sourceText: string, marker: string): string {
@@ -266,11 +199,26 @@ describe('V1 surfaces do not read V2 vulnerability data ungated', () => {
   it('gates the Cloud Accounts Overview security dashboard and section', () => {
     const src = code(source('cloudAccounts/OverviewPanel.tsx'));
 
-    expect(src).toMatch(
-      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*canSecurity\s*\?\s*api\.getVulnerabilityDashboard\s*\(\s*\)/,
+    // The flag is read once per render and that one value gates BOTH the
+    // fetch and the render, so the two cannot disagree. Asserted as three
+    // facts rather than one expression shape: hoisting the flag into a
+    // variable is a legitimate refactor; dropping either gate is not.
+    const flag = /(\w+)\s*=\s*isVulnerabilityDataEnabled\s*\(\s*\)/.exec(src);
+
+    expect(flag, 'OverviewPanel no longer evaluates the V2 gate').toBeTruthy();
+
+    const gate = flag![1];
+
+    expect(src, 'the V2 dashboard fetch is no longer gated').toMatch(
+      new RegExp(
+        gate + String.raw`\s*&&\s*canSecurity\s*\?\s*api\.getVulnerabilityDashboard\s*\(`,
+      ),
     );
-    expect(src).toMatch(
-      /isVulnerabilityDataEnabled\s*\(\s*\)\s*&&\s*\(\s*<SectionBoundary\s+name=["']security["']>/,
+
+    expect(src, 'the security section renders without the V2 gate').toMatch(
+      new RegExp(
+        gate + String.raw`\s*\?\s*\(\s*<SectionBoundary\s+name=["']security["']>`,
+      ),
     );
   });
 

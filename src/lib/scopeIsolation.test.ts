@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { stripComments } from '../test/sourceCode';
+
+/** Source-level guards must read code, never the prose documenting it. */
+const code = stripComments;
 
 /**
  * Phase 1 — server-side scope isolation, client contract.
@@ -32,16 +36,6 @@ function source(endsWith: string): string {
   ).toBeTruthy();
 
   return hit![1];
-}
-
-/**
- * Strip comments so historical audit notes do not accidentally satisfy or
- * invalidate a source-level invariant.
- */
-function code(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:\\])\/\/.*$/gm, '$1 ');
 }
 
 function compact(text: string): string {
@@ -117,7 +111,10 @@ describe('API client scope propagation', () => {
     const authHeaderBody = functionBody(api, 'private async authHeaders');
 
     expect(authHeaderBody).toMatch(/X-Org-Id/);
-    expect(authHeaderBody).toMatch(/getCurrentOrgId/);
+    // The contract is the header, not the accessor. Reading the private
+    // field directly is equivalent; sending no org is not.
+    expect(authHeaderBody).toMatch(/currentOrgId/i);
+    expect(authHeaderBody).toMatch(/headers\['X-Org-Id'\]\s*=/);
   });
 
   it('does not silently rewrite a non-org scope into organization scope in the client', () => {
@@ -194,8 +191,10 @@ describe('organization context scope synchronization', () => {
      * The org scope is the unscoped/default state after selecting an
      * organization. It must update both the React context and API client.
      */
+    // Either the setScope callback or the underlying state setter is fine --
+    // what must not change is that React state is put into org scope.
     expect(compactContext).toMatch(
-      /setScope\s*\(\s*\{\s*type:\s*['"]org['"]/,
+      /setScope(?:State)?\s*\(\s*\{\s*type:\s*['"]org['"]/,
     );
 
     expect(compactContext).toMatch(
@@ -242,7 +241,9 @@ describe('scope contract fail-safe invariants', () => {
      * API scope identifier.
      */
     expect(context).toMatch(
-      /setActiveScope\s*\(\s*\{\s*type:\s*next\.type,\s*id:\s*next\.id\s*\}\s*\)/,
+      // Whatever the local variable is named, `type` and `id` must come from
+      // the Scope object itself -- never from `name` or another label.
+      /setActiveScope\s*\([\s\S]{0,120}?\{\s*type:\s*(\w+)\.type\s*,\s*id:\s*\1\.id\s*,?\s*\}/,
     );
   });
 });

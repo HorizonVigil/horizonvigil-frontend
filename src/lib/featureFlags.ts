@@ -15,10 +15,26 @@
 
 type ViteEnv = Record<string, unknown>;
 
-const env = (import.meta as ImportMeta & { env?: ViteEnv }).env ?? {};
-
+/**
+ * The expression `import.meta.env` must appear here verbatim.
+ *
+ * Vite resolves `import.meta.env` by recognising that exact member
+ * expression and substituting the environment object. Writing it as
+ * `(import.meta as SomeType).env` breaks the match: the assertion stops it
+ * being recognised, so nothing is substituted and every flag below reads
+ * `undefined` and returns false.
+ *
+ * Production happened to survive that (Vite still injects the object for a
+ * bare `import.meta.env` elsewhere in the chunk), but Vitest did not -- and
+ * the cost was silent. `vi.stubEnv` could no longer reach these flags, so
+ * the guard asserting that cloud-only mode disables V2 vulnerability data
+ * was evaluating an unstubbed `false` and passing for the wrong reason.
+ *
+ * So: cast the RESULT of `import.meta.env`, never `import.meta` itself.
+ */
 function readStringEnv(name: string): string {
-  const value = env[name];
+  const env = import.meta.env as unknown as ViteEnv | undefined;
+  const value = env?.[name];
   return typeof value === 'string' ? value.trim() : '';
 }
 

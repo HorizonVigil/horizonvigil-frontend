@@ -158,11 +158,13 @@ describe('RunEvaluation', () => {
      * Do not use getByText(/%/) here because a provider/framework label could
      * legitimately contain a percent character in unrelated copy. Inspect all
      * rendered text instead and assert that no percentage-style score exists.
+     *
+     * Read from document.body: this component is rendered on its own here and
+     * does not own the `main` landmark (the app shell does). getByRole THROWS
+     * when there is no match, so the `?? document.body` fallback that used to
+     * follow it could never run.
      */
-    const bodyText =
-      screen.getByRole('main').textContent ??
-      document.body.textContent ??
-      '';
+    const bodyText = document.body.textContent ?? '';
 
     expect(bodyText).not.toMatch(
       /\b\d+(?:\.\d+)?%\b/,

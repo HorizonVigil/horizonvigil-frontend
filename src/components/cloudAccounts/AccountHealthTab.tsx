@@ -147,9 +147,21 @@ function getSafeHealthState(
     return 'unknown' as keyof typeof HEALTH_STATE_LABEL;
   }
 
-  return Object.keys(
-    HEALTH_STATE_LABEL,
-  )[0] as keyof typeof HEALTH_STATE_LABEL;
+  /*
+   * Object.keys() is string[], so its first element is a string rather than a
+   * HealthState. Casting it hid that the fallback depended on key ORDER --
+   * reordering the label map would silently change the default state. The
+   * union is the authority, so it is read from there.
+   */
+  /*
+   * 'unknown' directly, rather than Object.keys()[0].
+   *
+   * The key-order fallback was both untyped (Object.keys is string[]) and
+   * arbitrary -- reordering the label map would have changed the default
+   * health state. 'unknown' is the honest default for a state that could not
+   * be determined, and the branch above already returns it when present.
+   */
+  return 'unknown';
 }
 
 /**

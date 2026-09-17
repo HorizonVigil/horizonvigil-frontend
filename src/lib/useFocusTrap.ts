@@ -47,8 +47,16 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 export function useFocusTrap(
   open: boolean,
   onClose: () => void,
-): React.RefObject<HTMLDivElement | null> {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+): React.RefObject<HTMLDivElement> {
+  /**
+   * `useRef<HTMLDivElement>(null)`, not `useRef<HTMLDivElement | null>(null)`.
+   *
+   * Both give a nullable `.current`, but only the first produces a
+   * `RefObject<HTMLDivElement>` that React's `ref` prop accepts. The explicit
+   * `| null` in the generic widens the object itself, and every consumer --
+   * Drawer and Modal -- then failed to compile on `ref={containerRef}`.
+   */
+  const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef(onClose);
 

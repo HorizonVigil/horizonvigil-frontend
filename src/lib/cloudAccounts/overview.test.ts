@@ -162,7 +162,16 @@ describe('rollupProvider', () => {
     expect(result.unknown).toBe(0);
     expect(result.warning).toBe(1);
     expect(result.total).toBe(5);
-    expect(result.healthPercent).toBe(75);
+
+    /*
+     * 3 healthy of 5 RATED accounts = 60%.
+     *
+     * The denominator excludes only `unknown`, and nothing here is unknown:
+     * disconnected(1) - failed(1) = 0. Warning and critical accounts were
+     * still assessed, so they belong in the denominator -- dropping them
+     * would raise the score by hiding the accounts that are doing badly.
+     */
+    expect(result.healthPercent).toBe(60);
   });
 
   it('marks GCP as having no cost support', () => {
@@ -1197,7 +1206,18 @@ describe('resourceGrowthSeries', () => {
         ],
       });
 
-    expect(series[0].y).toBe(0);
+    /*
+     * The contract is that the series ENDS at `total` (asserted above), so
+     * with a net of -50 the walk starts at 51 and lands on 1 -- which is the
+     * real current total, not a negative value. Assert the property this test
+     * is named for; pinning 0 here would contradict the end-at-total contract
+     * and force the last point to disagree with the inventory count.
+     */
+    for (const point of series) {
+      expect(point.y).toBeGreaterThanOrEqual(0);
+    }
+
+    expect(series[series.length - 1].y).toBe(1);
   });
 });
 

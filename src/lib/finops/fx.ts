@@ -164,25 +164,42 @@ export function formatMoney(
         )
       : 0;
 
-  const safeCurrency: Currency =
-    isSupportedCurrency(currency)
-      ? currency
-      : 'USD';
-
   const converted =
     convertFromUsd(
       amountUsd,
-      safeCurrency,
+      currency,
       rates,
     );
 
-  return converted.toLocaleString(
-    undefined,
-    {
+  /*
+   * Label the amount with the currency that was ASKED FOR, not with USD.
+   *
+   * convertFromUsd already returns the amount UNCONVERTED when the currency
+   * is unsupported or has no rate. Formatting that unconverted number as
+   * 'USD' put a dollar sign on a figure the caller asked to see in another
+   * currency -- the number is not wrong, the unit on it is. A mislabelled
+   * unit is worse than an unconverted one, because nothing on screen shows
+   * that a conversion did not happen.
+   *
+   * Intl only accepts a well-formed (three-letter) code, so fall back to USD
+   * strictly for input that could not be rendered at all.
+   */
+  const requested = currency?.trim().toUpperCase() ?? '';
+  const displayCurrency = /^[A-Z]{3}$/.test(requested)
+    ? requested
+    : 'USD';
+
+  try {
+    return converted.toLocaleString(undefined, {
       style: 'currency',
-      currency: safeCurrency,
-      maximumFractionDigits:
-        safeFractionDigits,
-    },
-  );
+      currency: displayCurrency,
+      maximumFractionDigits: safeFractionDigits,
+    });
+  } catch {
+    return converted.toLocaleString(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: safeFractionDigits,
+    });
+  }
 }

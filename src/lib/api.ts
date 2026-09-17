@@ -253,7 +253,70 @@ async function fetchWithTimeout(
   }
 }
 
+/** Completeness of the last collection run — see ApiClient.getScanHealth. */
+export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'RUNNING' | 'NEVER_RUN';
+
+export interface ScannerFailure {
+  scanner: string;
+  scopes: string[];
+  normalizedCode: string | null;
+  detail: string | null;
+}
+
+export interface ScanHealth {
+  completeness: ScanCompleteness;
+  /** False for anything but COMPLETE: a partial scan's count is a floor, not a total. */
+  countIsAuthoritative: boolean;
+  summary: string;
+  totalSteps: number;
+  succeededSteps: number;
+  failedSteps: number;
+  failures: ScannerFailure[];
+  /** Types the run could not fully read. A non-empty list makes the count a floor. */
+  degradedResourceTypes: string[];
+  runId: string | null;
+  finishedAt: string | null;
+}
+
 class ApiClient {
+  /**
+   * The organisation every request is made against.
+   *
+   * Restored after a refactor dropped the declarations while `authHeaders`
+   * below still read them: `this.currentOrgId` and `this.activeScope` were
+   * referenced by a class that no longer had either, and `orgContext.tsx`
+   * called four methods that no longer existed. That is 18 of the build
+   * errors, and the reason the org switcher could not compile.
+   */
+  private currentOrgId: string | null = getStoredOrgId();
+
+  setCurrentOrgId(orgId: string | null): void {
+    this.currentOrgId = orgId;
+    persistOrgId(orgId);
+  }
+
+  getCurrentOrgId(): string | null {
+    return this.currentOrgId;
+  }
+
+  /**
+   * The node selected in the scope picker, sent so scope is resolved
+   * SERVER-side rather than filtered in the browser.
+   *
+   * Org scope deliberately sends NO header. That is exactly the request an
+   * older client makes, so the server's default stays correct and a client
+   * that has not adopted scoping is not silently narrowed.
+   */
+  private activeScope: { type: 'org' | 'folder' | 'project'; id: string } | null = null;
+
+  setActiveScope(scope: { type: 'org' | 'folder' | 'project'; id: string } | null): void {
+    this.activeScope = scope && scope.type !== 'org' ? scope : null;
+  }
+
+  getActiveScope(): { type: 'org' | 'folder' | 'project'; id: string } | null {
+    return this.activeScope;
+  }
+
   private async authHeaders(): Promise<Record<string, string>> {
     const { data: { session } } = await supabase.auth.getSession();
 

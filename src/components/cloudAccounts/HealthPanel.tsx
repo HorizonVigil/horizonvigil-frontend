@@ -19,7 +19,10 @@ import {
   friendlyErrorMessage,
   type HealthSignalStatus,
 } from '../../lib/api';
-import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
+// Health rows, not inventory rows. A refactor imported CloudAccountHealthRow
+// here, which has no connectionId, state or score -- 30 of the build
+// errors were that single wrong import.
+import type { CloudAccountHealthRow, CloudAccountsHealthResponse } from '../../lib/api';
 import {
   summarizeHealthRows,
   HEALTH_STATE_TONE,
@@ -55,9 +58,17 @@ interface HealthPanelProps {
   refreshToken: number;
 }
 
-interface ProviderHealthResponse {
-  accounts?: unknown[];
-}
+/**
+ * The API's own response type, not a local approximation.
+ *
+ * A narrower `{ accounts?: unknown[] }` was declared here, so the type
+ * predicate below claimed a settled result was
+ * PromiseFulfilledResult<ProviderHealthResponse> when the promise actually
+ * resolves CloudAccountsHealthResponse -- which carries `provider` and
+ * `summary` too. Narrowing to a local shape does not make the runtime value
+ * narrower; it just stops the compiler agreeing with itself.
+ */
+type ProviderHealthResponse = CloudAccountsHealthResponse;
 
 function isProvider(
   value: unknown,
@@ -136,7 +147,7 @@ function normalizeNonNegativeInteger(
 
 function normalizeHealthRows(
   rows: unknown[],
-): UnifiedAccountRow[] {
+): CloudAccountHealthRow[] {
   /*
    * The connector/API should already return the typed domain model.
    *
@@ -144,19 +155,19 @@ function normalizeHealthRows(
    * entire Health tab to crash if a connector response is partially corrupt.
    */
   return rows.filter(
-    (row): row is UnifiedAccountRow =>
+    (row): row is CloudAccountHealthRow =>
       Boolean(
         row &&
           typeof row === 'object' &&
-          typeof (row as UnifiedAccountRow).connectionId ===
+          typeof (row as CloudAccountHealthRow).connectionId ===
             'string' &&
-          typeof (row as UnifiedAccountRow).provider ===
+          typeof (row as CloudAccountHealthRow).provider ===
             'string' &&
           isProvider(
-            (row as UnifiedAccountRow).provider,
+            (row as CloudAccountHealthRow).provider,
           ) &&
           isHealthState(
-            (row as UnifiedAccountRow).state,
+            (row as CloudAccountHealthRow).state,
           ),
       ),
   );
@@ -209,7 +220,7 @@ function normalizeSignalDetail(
 }
 
 function getRowIdentity(
-  row: UnifiedAccountRow,
+  row: CloudAccountHealthRow,
   index: number,
 ): string {
   /*

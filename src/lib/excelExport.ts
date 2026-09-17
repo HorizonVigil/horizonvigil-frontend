@@ -29,11 +29,13 @@ const INVALID_FILENAME_CHARS_RE = /[<>:"/\\|?*\u0000-\u001F]/g;
 
 type ExcelCell = string | number | null | undefined;
 
-interface DownloadAnchor {
-  href: string;
-  download: string;
-  click(): void;
-}
+/**
+ * `document.createElement('a')` returns an HTMLAnchorElement, and the download
+ * path below uses `.style`, `appendChild` and `.remove` on it. A hand-written
+ * three-property interface described a narrower thing than the code actually
+ * needs, so those three calls did not compile.
+ */
+type DownloadAnchor = HTMLAnchorElement;
 
 function escapeXml(value: unknown): string {
   return String(value ?? '')
