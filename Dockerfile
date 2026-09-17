@@ -34,7 +34,18 @@ WORKDIR /app
 # container only serves static files: once `serve` is installed there is
 # nothing left for a package manager to do at runtime, so deleting npm both
 # clears those advisories and removes an installer from a production image.
-RUN npm install --global --no-audit --no-fund serve@14.2.4 \
+# serve is pinned at 14.2.6, not 14.2.4: 14.2.4 pulls serve-handler 6.1.6,
+# which pins minimatch 3.1.2 -- CVE-2026-26996 / -27903 / -27904 (three HIGH
+# ReDoS/DoS advisories). 14.2.6 pulls serve-handler 6.1.7 with minimatch 3.1.5,
+# past the fixed versions for all three.
+#
+# The OS upgrade clears libpcre2-8-0 CVE-2026-86145 / -89161 (out-of-bounds
+# write and memory corruption), fixed in the Debian package but not yet in the
+# base image tag.
+RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global --no-audit --no-fund serve@14.2.6 \
   && npm uninstall --global npm \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
 COPY --from=build /app/dist ./dist
