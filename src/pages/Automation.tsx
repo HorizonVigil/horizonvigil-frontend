@@ -11,7 +11,6 @@ import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type Runbook, type Workflow, type ScheduledJob, type Webhook, type Integration, type AutomationExecution, type RemediationRequest } from '../lib/api';
 
-type JiraConfigState = { siteUrl: string; email: string; defaultProjectKey: string | null; defaultIssueType: string; autoFileEvents: string[] };
 const DISPATCH_EVENTS = ['cost.recommendation.high_priority', 'cost.anomaly.detected', 'remediation.completed', 'remediation.failed'] as const;
 
 type Tab = 'runbooks' | 'workflows' | 'scheduled' | 'remediation' | 'webhooks' | 'integrations' | 'history';
@@ -83,7 +82,6 @@ export function Automation() {
   const [editing, setEditing] = useState<Editable | null>(null);
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [jiraConnected, setJiraConnected] = useState(false);
-  const [jiraConfig, setJiraConfig] = useState<JiraConfigState | null>(null);
   const [jiraForm, setJiraForm] = useState({ siteUrl: '', email: '', apiToken: '', defaultProjectKey: '', defaultIssueType: 'Task', autoFileEvents: [] as string[] });
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraError, setJiraError] = useState<string | null>(null);
@@ -102,7 +100,6 @@ export function Automation() {
   const loadJira = useCallback(async () => {
     const res = await api.getJiraIntegration();
     setJiraConnected(res.connected);
-    setJiraConfig(res.config ?? null);
     if (res.config) {
       setJiraForm(f => ({ ...f, siteUrl: res.config!.siteUrl, email: res.config!.email, defaultProjectKey: res.config!.defaultProjectKey ?? '', defaultIssueType: res.config!.defaultIssueType, autoFileEvents: res.config!.autoFileEvents, apiToken: '' }));
     }

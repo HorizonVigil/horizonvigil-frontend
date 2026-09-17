@@ -708,11 +708,6 @@ export function Resources() {
 
   // Provider-filtered connections — used to pass the right connection IDs
   // to the API when a provider filter is active.
-  const providerConnectionIds = useMemo(() => {
-    if (providerFilter === 'all') return null;
-    return connections.filter(c => c.provider === providerFilter).map(c => c.id);
-  }, [connections, providerFilter]);
-
   // Provider-filtered dashboard data — when a provider filter is active,
   // derive all dashboard aggregates from providerFilteredResources instead
   // of the org-wide dashboard. This ensures charts, KPIs, and donuts only
@@ -818,11 +813,6 @@ export function Resources() {
     for (const r of resources) if (r.region) counts[r.region] = (counts[r.region] ?? 0) + 1;
     return counts;
   }, [resources]);
-  const workspaceRecentEvents = useMemo(() => {
-    if (!isWorkspaceView) return recentEvents;
-    return recentEvents.filter(e => catalogByKey.get(e.resource_type_key)?.service === presetService).slice(0, 20);
-  }, [recentEvents, isWorkspaceView, catalogByKey, presetService]);
-
   const trend = dashboard?.trend30d ?? [];
   const trendAdded = trend.reduce((s, p) => s + p.created, 0);
   const trendDeleted = trend.reduce((s, p) => s + p.deleted, 0);

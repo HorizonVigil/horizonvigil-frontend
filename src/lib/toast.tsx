@@ -123,12 +123,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    /*
+     * Captured at effect time, not read at cleanup time.
+     *
+     * A cleanup closure that reaches through `timers.current` reads the ref as
+     * it stands on unmount, which is not guaranteed to be the object the
+     * effect saw. Holding the Map itself makes the cleanup clear exactly the
+     * timers this effect is responsible for.
+     */
+    const pending = timers.current;
+
     return () => {
-      for (const timer of timers.current.values()) {
+      for (const timer of pending.values()) {
         clearTimeout(timer);
       }
 
-      timers.current.clear();
+      pending.clear();
     };
   }, []);
 

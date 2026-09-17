@@ -17,7 +17,7 @@ function aws(over: Partial<UnifiedAccountRow> & { method?: string; externalId?: 
     region: 'us-east-1',
     resources: 0,
     lastSync: over.lastSync ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     raw: { connection_method: method, external_id: externalId ?? null } as any,
     ...rest,
   };
@@ -29,7 +29,7 @@ function azure(tenant: string, over: Partial<UnifiedAccountRow> = {}): UnifiedAc
     environment: 'production', status: over.status ?? 'connected', errorMessage: null,
     connectionMethod: 'service_principal', connectionMethodLabel: 'SP', region: 'global',
     resources: 0, lastSync: null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     raw: { azure_tenant_id: tenant } as any,
     ...over,
   };

@@ -106,7 +106,6 @@ export function AwsAccountDetail() {
   const [favorite, setFavorite] = useState<Favorite | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
-  const [validationBusy, setValidationBusy] = useState(false);
   // from overwriting state after navigation or a retry.
   const loadRequestRef = useRef(0);
   const tabRequestRef = useRef(0);

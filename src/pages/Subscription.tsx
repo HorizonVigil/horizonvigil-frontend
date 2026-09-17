@@ -35,11 +35,6 @@ function formatDate(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
 }
 
-function formatReferralCents(cents: number): string {
-  const amount = Number.isFinite(cents) ? cents / 100 : 0;
-  return amount.toFixed(0);
-}
-
 const METRIC_LABELS: Record<string, string> = {
   cloud_accounts: 'Cloud Accounts', users: 'Users', api_requests: 'API Requests',
   ai_requests: 'AI Requests', storage_gb: 'Storage (GB)', automations: 'Automations / mo',

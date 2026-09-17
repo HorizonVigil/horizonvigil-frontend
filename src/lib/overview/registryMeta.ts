@@ -13,7 +13,7 @@
  * Adding a capability to HorizonVigil later (issue §18: "AI Operations") is a
  * push to this array + a component — no dashboard rewrite.
  */
-import type { ContextSignals, WidgetMeta } from './types';
+import type { WidgetMeta } from './types';
 
 const MAX_CONTEXT_BOOST = 10_000;
 

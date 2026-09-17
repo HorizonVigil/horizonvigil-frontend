@@ -13,8 +13,6 @@ import type { Provider } from '../../lib/finops/overview';
 import {
   costByAccountBars,
   recordToBars,
-  summarizeBudgets,
-  optimizationByCategory,
   anomalySeverity,
   sortAnomalies,
   type BudgetRollup,

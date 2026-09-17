@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from 'react';
-import { useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 
 import { useTheme } from '../../lib/theme';
 import { categoricalColor, CHROME, pick } from './palette';
@@ -172,29 +172,43 @@ export function LineChart({
     [normalizedSeries],
   );
 
-  const xScale = (index: number): number => {
-    if (allXLabels.length <= 1) {
-      return PADDING.left + plotW / 2;
-    }
+  /*
+   * Memoised so the chartSeries memo below can name them as dependencies.
+   *
+   * Declared as plain functions they were rebuilt every render, so the memo
+   * had to list their closure inputs (plotW, plotH, allXLabels.length, maxY)
+   * instead -- correct only for as long as nobody changed what the scales
+   * read. Depending on the functions themselves makes that checkable.
+   */
+  const xScale = useCallback(
+    (index: number): number => {
+      if (allXLabels.length <= 1) {
+        return PADDING.left + plotW / 2;
+      }
 
-    return (
-      PADDING.left +
-      (index / (allXLabels.length - 1)) * plotW
-    );
-  };
+      return (
+        PADDING.left +
+        (index / (allXLabels.length - 1)) * plotW
+      );
+    },
+    [allXLabels.length, plotW],
+  );
 
-  const yScale = (value: number): number => {
-    const safeValue = Math.min(
-      maxY,
-      Math.max(0, normalizeValue(value)),
-    );
+  const yScale = useCallback(
+    (value: number): number => {
+      const safeValue = Math.min(
+        maxY,
+        Math.max(0, normalizeValue(value)),
+      );
 
-    return (
-      PADDING.top +
-      plotH -
-      (safeValue / maxY) * plotH
-    );
-  };
+      return (
+        PADDING.top +
+        plotH -
+        (safeValue / maxY) * plotH
+      );
+    },
+    [maxY, plotH],
+  );
 
   const chartSeries = useMemo<ChartSeries[]>(
     () =>
@@ -218,9 +232,8 @@ export function LineChart({
       normalizedSeries,
       area,
       plotH,
-      plotW,
-      allXLabels.length,
-      maxY,
+      xScale,
+      yScale,
     ],
   );
 

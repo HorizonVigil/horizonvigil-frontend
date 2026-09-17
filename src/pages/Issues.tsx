@@ -152,11 +152,16 @@ export function Issues() {
         setRefreshing(false);
       }
     }
-  }, [account, refreshToken, costItems.length, findings.length, alerts.length]);
+    // `refreshToken` is deliberately NOT here: nothing in this function reads
+    // it. It belongs on the effect below, which is what should re-run when the
+    // user presses refresh.
+  }, [account, costItems.length, findings.length, alerts.length]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // refreshToken is the trigger: pressing refresh in the filter bar bumps it
+    // and re-runs this effect, without pretending it is an input of load().
+  }, [load, refreshToken]);
 
   const allIssues = useMemo<UnifiedIssue[]>(() => {
     const merged = [...costItems.map(fromCostRecommendation), ...findings.map(fromFinding), ...alerts.map(fromAlert)];

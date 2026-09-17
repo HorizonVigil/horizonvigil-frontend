@@ -377,6 +377,78 @@ export function OverviewPanel({
   const isInitialLoading =
     query.isLoading &&
     !query.data;
+  /*
+   * DECLARED BEFORE THE EARLY RETURNS BELOW, AND IT MUST STAY THERE.
+   *
+   * These four callbacks used to sit after the loading, error and empty-
+   * estate guards, so they ran on a loaded render and were skipped on every
+   * other one. React compares hook counts between renders of the same
+   * mounted component, so the first transition out of the loading state
+   * threw "Rendered more hooks than during the previous render". The same
+   * defect in SecurityPanel is reproduced in securityPanelHooks.test.tsx.
+   *
+   * They depend only on navigate, query and setFilters, all of which are
+   * already available at this point.
+   */
+  /*
+   * The chart components can emit either a provider identifier or a health
+   * state. Keep the branching explicit so arbitrary strings cannot accidentally
+   * be treated as valid providers.
+   */
+  const drillHealth =
+    useCallback(
+      (state: string) => {
+        const provider =
+          PROVIDERS.find(
+            (candidate) =>
+              candidate === state,
+          );
+
+        if (provider) {
+          setFilters(
+            (current) => ({
+              ...current,
+              provider:
+                provider as Provider,
+            }),
+          );
+          return;
+        }
+
+        navigate(
+          '/cloud-accounts?tab=Health',
+        );
+      },
+      [navigate],
+    );
+
+  const handleRefresh =
+    useCallback(() => {
+      void query.refetch();
+    }, [query]);
+
+  const handleProviderSelect =
+    useCallback(
+      // Nullable: the chip clears the filter by passing null, and a handler
+      // that only accepts Provider cannot express deselection.
+      (provider: Provider | null) => {
+        setFilters(
+          (current) => ({
+            ...current,
+            provider,
+          }),
+        );
+      },
+      [],
+    );
+
+  const handleSyncDrill =
+    useCallback(() => {
+      navigate(
+        '/cloud-accounts?tab=Sync+Center',
+      );
+    }, [navigate]);
+
 
   if (isInitialLoading) {
     return (
@@ -574,64 +646,6 @@ export function OverviewPanel({
       data.resources,
     );
 
-  /*
-   * The chart components can emit either a provider identifier or a health
-   * state. Keep the branching explicit so arbitrary strings cannot accidentally
-   * be treated as valid providers.
-   */
-  const drillHealth =
-    useCallback(
-      (state: string) => {
-        const provider =
-          PROVIDERS.find(
-            (candidate) =>
-              candidate === state,
-          );
-
-        if (provider) {
-          setFilters(
-            (current) => ({
-              ...current,
-              provider:
-                provider as Provider,
-            }),
-          );
-          return;
-        }
-
-        navigate(
-          '/cloud-accounts?tab=Health',
-        );
-      },
-      [navigate],
-    );
-
-  const handleRefresh =
-    useCallback(() => {
-      void query.refetch();
-    }, [query]);
-
-  const handleProviderSelect =
-    useCallback(
-      // Nullable: the chip clears the filter by passing null, and a handler
-      // that only accepts Provider cannot express deselection.
-      (provider: Provider | null) => {
-        setFilters(
-          (current) => ({
-            ...current,
-            provider,
-          }),
-        );
-      },
-      [],
-    );
-
-  const handleSyncDrill =
-    useCallback(() => {
-      navigate(
-        '/cloud-accounts?tab=Sync+Center',
-      );
-    }, [navigate]);
 
   return (
     <div

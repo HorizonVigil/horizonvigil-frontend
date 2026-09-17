@@ -9,12 +9,12 @@ import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
-import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
 import { money as formatMoney } from '../lib/format';
 import { isActionable, isUnevaluated, validityLabel, validityTone, validityExplanation, evidenceSummary, ownershipSummary } from '../lib/recommendationDisplay';
 import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
+import { safeExternalUrl } from '../lib/safeUrl';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -71,7 +71,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   // filter only applies when Account is "all".
   const groupIds = account === 'all' ? groupFilter.connectionIds : undefined;
   const groupFilterActive = Boolean(groupFilter.provider || groupFilter.environment !== 'all');
-  const { confirm, dialog: confirmDialog } = useConfirm();
   const canSeeNavTab = useSubmenuAccess('cost');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t] ?? t), [canSeeNavTab]);
   const visibleTabs = TABS.filter(canSeeTab);
@@ -818,7 +817,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
           </div>
         )}
       </Modal>
-      {confirmDialog}
     </div>
   );
 }
@@ -1069,7 +1067,9 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
               <button type="button" onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
             )}
             {autoPrResult && 'prUrl' in autoPrResult && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: <a href={autoPrResult.prUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline">{autoPrResult.prUrl}</a></p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: {safeExternalUrl(autoPrResult.prUrl)
+                ? <a href={safeExternalUrl(autoPrResult.prUrl) ?? undefined} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline">{autoPrResult.prUrl}</a>
+                : <span className="font-mono">{autoPrResult.prUrl}</span>}</p>
             )}
             {autoPrResult && 'error' in autoPrResult && (
               <p className="text-xs text-red-500">{autoPrResult.error}</p>

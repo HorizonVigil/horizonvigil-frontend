@@ -132,6 +132,73 @@ export function SecurityPanel({
   const navigate = useNavigate();
 
   /*
+   * EVERY HOOK MUST BE CALLED BEFORE THE `!security` EARLY RETURN BELOW.
+   *
+   * `security` is null while the dashboard loads and an object once it
+   * arrives, so this component re-renders across that boundary on every page
+   * load. `segments` and `handleSeverityClick` used to be declared AFTER the
+   * early return, which meant they ran on the loaded render and not the
+   * loading one. React compares hook counts between renders of the same
+   * mounted component, so the moment security data arrived this threw
+   * "Rendered more hooks than during the previous render" and took the panel
+   * down. Reproduced in securityPanelHooks.test.tsx before this was moved.
+   *
+   * Both therefore tolerate a null `security` and are simply unused by the
+   * early-return branch.
+   */
+  /*
+   * Memoised so the null case keeps a STABLE identity. Written inline as
+   * `security?.bySeverity ?? {}` it allocated a fresh object on every render,
+   * which made the memo below recompute every time.
+   */
+  const bySeverityForSegments = useMemo(
+    () => security?.bySeverity ?? {},
+    [security],
+  );
+
+  const segments = useMemo(
+    () =>
+      SEV_ORDER
+        .map((severity) => ({
+          label: severity.label,
+          value: getSeverityValue(
+            bySeverityForSegments,
+            severity.key,
+          ),
+          tone: severity.tone,
+          key: severity.key,
+        }))
+        .filter((segment) => segment.value > 0),
+    [bySeverityForSegments],
+  );
+
+  const handleSeverityClick = useCallback(
+    (severity: string) => {
+      const normalizedSeverity = String(
+        severity ?? '',
+      )
+        .trim()
+        .toLowerCase();
+
+      if (!normalizedSeverity) {
+        return;
+      }
+
+      /*
+       * StackedBar currently supplies the display label
+       * ("Critical", "High", ...), so convert it into the existing
+       * route/query contract here.
+       */
+      navigate(
+        `/cloud-security?tab=Misconfigurations&severity=${getSeverityQueryValue(
+          normalizedSeverity,
+        )}`,
+      );
+    },
+    [navigate],
+  );
+
+  /*
    * Null is intentionally handled before any "zero findings" logic.
    *
    * A missing dashboard is not equivalent to:
@@ -181,48 +248,6 @@ export function SecurityPanel({
    */
   const hasSeverityData = SEV_ORDER.some(
     ({ key }) => getSeverityValue(bySeverity, key) > 0,
-  );
-
-  const segments = useMemo(
-    () =>
-      SEV_ORDER
-        .map((severity) => ({
-          label: severity.label,
-          value: getSeverityValue(
-            bySeverity,
-            severity.key,
-          ),
-          tone: severity.tone,
-          key: severity.key,
-        }))
-        .filter((segment) => segment.value > 0),
-    [bySeverity],
-  );
-
-  const handleSeverityClick = useCallback(
-    (severity: string) => {
-      const normalizedSeverity = String(
-        severity ?? '',
-      )
-        .trim()
-        .toLowerCase();
-
-      if (!normalizedSeverity) {
-        return;
-      }
-
-      /*
-       * StackedBar currently supplies the display label
-       * ("Critical", "High", ...), so convert it into the existing
-       * route/query contract here.
-       */
-      navigate(
-        `/cloud-security?tab=Misconfigurations&severity=${getSeverityQueryValue(
-          normalizedSeverity,
-        )}`,
-      );
-    },
-    [navigate],
   );
 
   const riskTone = getRiskTone(riskScore);

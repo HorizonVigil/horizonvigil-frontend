@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { EmptyState } from '../components/EmptyState';
@@ -33,7 +33,13 @@ export function AiCopilot() {
   const [renameValue, setRenameValue] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  async function loadConversations() {
+  /*
+   * Memoised so the effect below can depend on it honestly. As a plain
+   * function it was redeclared on every render, so the only way to make the
+   * effect run once was an empty dependency array that misstated what the
+   * effect actually uses.
+   */
+  const loadConversations = useCallback(async () => {
     try {
       const res = await api.getConversations();
       setConversations(res.items);
@@ -42,9 +48,9 @@ export function AiCopilot() {
       setError(message);
       toast(message, 'error');
     }
-  }
+  }, [toast]);
 
-  useEffect(() => { void loadConversations(); }, []);
+  useEffect(() => { void loadConversations(); }, [loadConversations]);
 
   useEffect(() => {
     if (!activeId) { setMessages([]); return; }

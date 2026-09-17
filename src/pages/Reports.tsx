@@ -77,7 +77,21 @@ export function Reports() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+
+  /*
+   * Two representations of "we have loaded at least once", deliberately.
+   *
+   * The ref is read inside `load()` to decide between the full skeleton and a
+   * quiet refresh. It has to be a ref: two loads dispatched in the same tick
+   * must both see the up-to-date value, which setState would not give them.
+   *
+   * The state is what RENDER reads. Reading `hasLoadedOnce.current` during
+   * render was the bug -- refs are not render-safe inputs, so a discarded or
+   * replayed render could show the wrong branch. Anything that decides what
+   * appears on screen has to be state.
+   */
   const hasLoadedOnce = useRef(false);
+  const [hasLoadedOnceState, setHasLoadedOnceState] = useState(false);
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -118,6 +132,7 @@ export function Reports() {
       }
 
       hasLoadedOnce.current = true;
+      setHasLoadedOnceState(true);
 
       if (errors.length > 0) {
         setLoadError(
@@ -419,7 +434,7 @@ export function Reports() {
         </div>
       )}
 
-      {loading && !hasLoadedOnce.current ? (
+      {loading && !hasLoadedOnceState ? (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-400">
           Loading reports…
         </div>

@@ -526,10 +526,25 @@ export function useSyncCompletion(
     onComplete,
   });
 
-  latest.current = {
-    connectionIds,
-    onComplete,
-  };
+  /*
+   * Written in an effect, not during render.
+   *
+   * This assignment used to sit in the render body. React may render a
+   * component and then throw that render away (concurrent rendering, Strict
+   * Mode's double invoke, a suspended tree), and a ref mutated during such a
+   * render keeps the discarded values -- so the effect below could fire
+   * `onComplete` from a render that was never committed. Committing the
+   * update in its own effect ties it to a render that actually happened.
+   *
+   * Declared BEFORE the effect that reads it, so on any given commit the ref
+   * is refreshed first.
+   */
+  useEffect(() => {
+    latest.current = {
+      connectionIds,
+      onComplete,
+    };
+  }, [connectionIds, onComplete]);
 
   useEffect(() => {
     let transitioned = false;

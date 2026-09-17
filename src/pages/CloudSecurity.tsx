@@ -10,7 +10,7 @@ import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
-import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type IdentityRisk, type PostureCheckReport } from '../lib/api';
+import { api, type VulnerabilityFinding, type IdentitySummary, type IdentityRisk, type PostureCheckReport } from '../lib/api';
 import { CredentialRiskCell, RiskFactorList } from '../components/cloudSecurity/CredentialRiskCell';
 import { DerivedPostureChecks } from '../components/cloudSecurity/DerivedPostureChecks';
 

@@ -60,7 +60,7 @@ function row(
     region: 'us-east-1',
     resources: 0,
     lastSync: null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     raw: { project_id: projectId } as any,
   };
 }

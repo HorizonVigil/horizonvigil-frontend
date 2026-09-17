@@ -24,7 +24,6 @@ import {
   useState,
 } from 'react';
 import {
-  DEFAULT_PREFERENCES,
   type OverviewPreferences,
   type WidgetLayoutRect,
 } from './types';

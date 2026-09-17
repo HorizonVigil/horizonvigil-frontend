@@ -26,8 +26,51 @@ interface WidgetData {
   alarms: MonitoringAlarm[];
 }
 
-function WidgetPreview({ widget, data }: { widget: { key: string; config: unknown }; data: WidgetData | null }) {
-  if (!data) return <div className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />;
+function WidgetPreview({
+  widget,
+  data,
+  loading,
+  error,
+}: {
+  widget: { key: string; config: unknown };
+  data: WidgetData | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  /*
+   * Loading, failed and empty are three different things, and this rendered
+   * all of them as the same pulsing skeleton.
+   *
+   * The page already captured the failure -- `setWidgetDataError(...)` runs in
+   * the catch -- but nothing consumed it, so a widget whose data request had
+   * failed animated as if it were still loading, forever. A permanent
+   * skeleton reads as "still working", which is the one thing it is not.
+   */
+  if (error) {
+    return (
+      <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        {error}
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div
+        className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800"
+        aria-busy="true"
+        aria-label="Loading widget data"
+      />
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+        No data for this widget yet.
+      </div>
+    );
+  }
 
   switch (widget.key) {
     case 'kpi_cost_mtd':
@@ -447,7 +490,7 @@ export function CustomDashboards() {
                           </button>
                         )}
                       </div>
-                      <WidgetPreview widget={w} data={widgetData} />
+                      <WidgetPreview widget={w} data={widgetData} loading={widgetDataLoading} error={widgetDataError} />
                     </div>
                   );
                 })}

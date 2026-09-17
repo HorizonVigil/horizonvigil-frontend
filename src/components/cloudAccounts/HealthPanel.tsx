@@ -42,8 +42,9 @@ const SIGNAL_DOT: Record<
   unknown: 'bg-slate-400',
 };
 
-const PROVIDERS = ['aws', 'azure', 'gcp'] as const;
-type Provider = (typeof PROVIDERS)[number];
+// Declared as a union rather than `typeof [...] as const`: nothing in this
+// module iterates the providers, so the array only existed to derive the type.
+type Provider = 'aws' | 'azure' | 'gcp';
 
 const HEALTH_STATES = [
   'healthy',

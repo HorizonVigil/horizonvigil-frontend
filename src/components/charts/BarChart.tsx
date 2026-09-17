@@ -20,8 +20,6 @@ const DEFAULT_VALUE_FORMATTER = (value: number): string =>
 const MIN_BAR_PERCENTAGE = 0;
 const MAX_BAR_PERCENTAGE = 100;
 const MIN_MAX_VALUE = 1;
-const ROW_LABEL_WIDTH = 'minmax(0, 7rem)';
-const VALUE_WIDTH = '4rem';
 
 /**
  * Returns a safe numeric value for chart calculations.

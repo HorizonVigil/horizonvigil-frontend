@@ -51,7 +51,6 @@ describe('scheduled reports are not offered without a delivery engine', () => {
   const reports = code(source('/Reports.tsx'));
   const client = code(source('/api.ts'));
   const compactReports = compact(reports);
-  const compactClient = compact(client);
 
   it('loads the expected source files', () => {
     expect(Object.keys(sources).some((path) => path.endsWith('/Reports.tsx'))).toBe(

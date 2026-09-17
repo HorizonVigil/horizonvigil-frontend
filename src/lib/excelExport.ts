@@ -23,9 +23,21 @@ const MAX_SHEET_NAME_LENGTH = 31;
 const DEFAULT_SHEET_NAME = 'Sheet1';
 const DEFAULT_FILENAME = 'export.xls';
 
-const INVALID_SHEET_NAME_RE = /[:\\/?*\[\]]/g;
+const INVALID_SHEET_NAME_RE = /[:\\/?*[\]]/g;
+
+/*
+ * Control characters are matched ON PURPOSE.
+ *
+ * SpreadsheetML (and XML generally) forbids these codepoints outright, so a
+ * cell carrying one produces a file Excel refuses to open. `no-control-regex`
+ * exists to catch control characters that reached a pattern by accident; here
+ * they are the entire point, so the rule is disabled for exactly these two
+ * lines rather than repository-wide.
+ */
+/* eslint-disable no-control-regex -- stripping characters XML cannot encode */
 const CONTROL_CHAR_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 const INVALID_FILENAME_CHARS_RE = /[<>:"/\\|?*\u0000-\u001F]/g;
+/* eslint-enable no-control-regex */
 
 type ExcelCell = string | number | null | undefined;
 

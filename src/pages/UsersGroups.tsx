@@ -167,7 +167,6 @@ export function UsersGroups() {
   const [savingAttributes, setSavingAttributes] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
 
   const loadRequestId = useRef(0);
@@ -277,7 +276,6 @@ export function UsersGroups() {
   // to any Azure subscription was previously impossible from this picker.
   useEffect(() => {
     const requestId = ++connectionsRequestId.current;
-    setConnectionsLoading(true);
     setConnectionsError(null);
 
     void Promise.allSettled([
@@ -315,7 +313,6 @@ export function UsersGroups() {
         toast(message, 'error');
       }
 
-      setConnectionsLoading(false);
     });
   }, [toast]);
 

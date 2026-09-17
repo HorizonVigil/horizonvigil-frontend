@@ -36,7 +36,6 @@ export interface MarketingPlan {
 }
 
 const UNLIMITED_SENTINEL = -1;
-const CURRENCY = 'USD';
 
 function formatLimit(value: number): string {
   return value === UNLIMITED_SENTINEL

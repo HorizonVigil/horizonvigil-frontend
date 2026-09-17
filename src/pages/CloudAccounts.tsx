@@ -16,7 +16,6 @@ import { HierarchyPanel } from '../components/cloudAccounts/HierarchyPanel';
 import { HealthPanel } from '../components/cloudAccounts/HealthPanel';
 import { ChangesPanel } from '../components/cloudAccounts/ChangesPanel';
 import { ActivityPanel } from '../components/cloudAccounts/ActivityPanel';
-import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { BulkOnboardingModal } from '../components/cloudAccounts/BulkOnboardingModal';
 import { ProviderChips } from '../components/cloudAccounts/ProviderChips';
 import { Modal } from '../components/Modal';
@@ -28,7 +27,6 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
-import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
@@ -95,10 +93,6 @@ const STATUS_CHIPS = ['connected', 'pending', 'error', 'disconnected', 'expired'
 const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: 'GCP' }, { value: 'azure', label: 'Azure' }] as const;
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 const PAGE_SIZES = [25, 50, 100];
-
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
 
 /**
  * Each cloud models "permissions" differently, so this reads the exact

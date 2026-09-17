@@ -25,7 +25,6 @@ import type {
 // Single canonical home. The refactor also aliased it from '../api',
 // which never exported it.
 import type { UnifiedAccountRow } from '../unifiedAccounts';
-type ApiUnifiedAccountRow = UnifiedAccountRow;
 
 export type HierNodeType =
   | 'org'
