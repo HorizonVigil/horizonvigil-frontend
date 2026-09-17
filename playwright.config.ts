@@ -61,7 +61,7 @@ export default defineConfig({
      */
     {
       name: 'public',
-      testMatch: /public\.spec\.ts/,
+      testMatch: /(public|responsive)\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: process.env.SMOKE_TEST_BASE_URL || 'http://localhost:4173',
