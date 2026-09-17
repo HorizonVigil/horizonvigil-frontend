@@ -9,7 +9,14 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
+      # Full history. gitleaks scans a COMMIT RANGE (`<base>^..<head>`), and
+      # actions/checkout defaults to a depth-1 clone, so the base commit is
+      # not in the local history and git answers "unknown revision" -- which
+      # gitleaks reports as "failed to scan Git repository" and exits 1. The
+      # step looked like a secret-scan failure while having scanned nothing.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
