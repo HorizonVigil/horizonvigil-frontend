@@ -170,6 +170,11 @@ export function CloudAccounts() {
       next.delete('action');
       setSearchParams(next, { replace: true });
     }
+    /*
+     * Mount only. Consumes the one-shot `?action=connect` deep link and
+     * strips it from the URL. Depending on searchParams/setSearchParams
+     * would re-open the chooser every time any query parameter changed.
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -614,6 +619,25 @@ export function CloudAccounts() {
         />
       ),
     },
+    /*
+     * WHAT THE SUPPRESSION BELOW HIDES, stated rather than left implicit:
+     * the rule wants handleDisconnect, runValidation, syncNow and
+     * toggleFavorite listed. All four are plain functions redeclared every
+     * render, so listing them would rebuild this column array on every render
+     * and the memo would stop memoising anything.
+     *
+     * The dependency list is the state those handlers actually read, so the
+     * columns rebuild whenever that state moves. The residual risk is real
+     * but latent: a handler that starts closing over something NOT in this
+     * list would be captured stale, and the row button would act on an
+     * outdated value.
+     *
+     * The correct fix is to wrap the four handlers in useCallback and depend
+     * on the callbacks. Deliberately not done here -- it changes when row
+     * actions rebind, and the only thing exercising those actions end to end
+     * is the Playwright suite, which cannot run without SMOKE_TEST
+     * credentials. Tracked as an open item rather than changed blind.
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [bulkMode, selectedIds, validatingIds, allRows, syncStates, favorites]);
 

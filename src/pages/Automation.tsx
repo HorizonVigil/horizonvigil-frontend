@@ -100,8 +100,13 @@ export function Automation() {
   const loadJira = useCallback(async () => {
     const res = await api.getJiraIntegration();
     setJiraConnected(res.connected);
-    if (res.config) {
-      setJiraForm(f => ({ ...f, siteUrl: res.config!.siteUrl, email: res.config!.email, defaultProjectKey: res.config!.defaultProjectKey ?? '', defaultIssueType: res.config!.defaultIssueType, autoFileEvents: res.config!.autoFileEvents, apiToken: '' }));
+    // Bound to a local so the narrowing survives into the updater closure.
+    // `res.config!` repeated six times asserted what the `if` had already
+    // proven, and an assertion keeps compiling if the guard is ever removed.
+    const config = res.config;
+
+    if (config) {
+      setJiraForm(f => ({ ...f, siteUrl: config.siteUrl, email: config.email, defaultProjectKey: config.defaultProjectKey ?? '', defaultIssueType: config.defaultIssueType, autoFileEvents: config.autoFileEvents, apiToken: '' }));
     }
   }, []);
   const loadRemediation = useCallback(async () => {
