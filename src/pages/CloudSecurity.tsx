@@ -222,7 +222,16 @@ export function CloudSecurity() {
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Connected Accounts" value={String(connections.length)} icon="cloud" />
-            <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'good'} />
+            {/*
+              Neutral at zero, for the same reason as Exposed Resources below
+              -- the reasoning in that comment applies identically here and
+              this card was simply missed. A green "0 Misconfigurations" is an
+              all-clear, and it renders whether posture was evaluated and found
+              clean, never evaluated, or fetched and FAILED (a rejected
+              misconfiguration read leaves this array empty; the banner names
+              it, but the card beside it still went green).
+            */}
+            <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'neutral'} />
             {/*
               A zero here used to render in the "good" tone -- a green all-clear.
               Verified 2026-09-09: there are ZERO V1 posture findings of ANY
@@ -239,7 +248,9 @@ export function CloudSecurity() {
                 100/100 as "good" on this page while the Posture tab called
                 the same 100 "High risk". Removed with that tab; a V1 score
                 needs a V1 population and one agreed direction first. */}
-            <StatCard label="Identities at Risk" value={identitySummary ? String(identitySummary.adminEquivalent + identitySummary.broad) : '—'} icon="key" iconTone={identitySummary && identitySummary.adminEquivalent > 0 ? 'critical' : 'good'} />
+            {/* Tone follows the value: an em dash means the summary could not
+                be read, and "unknown" must not be painted green. */}
+            <StatCard label="Identities at Risk" value={identitySummary ? String(identitySummary.adminEquivalent + identitySummary.broad) : '—'} icon="key" iconTone={!identitySummary ? 'neutral' : identitySummary.adminEquivalent > 0 ? 'critical' : 'good'} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">

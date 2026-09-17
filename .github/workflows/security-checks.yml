@@ -32,6 +32,12 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gitleaks-action v2 requires a licence for ORGANISATION repos and
+          # reads it from this env var. The GITLEAKS_LICENSE secret has existed
+          # since 2026-09-11, but the step never passed it through, so every
+          # run failed with "missing gitleaks license" and the secret scan has
+          # never actually executed on this repo.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
       # Container scan only applies to services with a Dockerfile.
       - name: Check for a Dockerfile
