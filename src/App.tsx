@@ -20,60 +20,60 @@ import { SyncProvider } from './lib/syncContext';
 import { ToastProvider } from './lib/toast';
 import { DemoDataProvider } from './lib/demoData/context';
 
+import { Suspense } from 'react';
+
+import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
+import { Login } from './pages/auth/Login';
+import { MarketingHome } from './pages/marketing/Home';
+import { NotFound } from './pages/marketing/NotFound';
+
+// Route components are code-split; see routes/lazyRoutes.ts.
+import {
+  AcceptInvite,
+  AiCopilot,
+  AksConsole,
+  Alerts,
+  Automation,
+  BillingCanceled,
+  BillingSuccess,
+  CloudAccountDetail,
+  CloudAccounts,
+  CloudCompliance,
+  CloudSecurity,
+  CustomDashboards,
+  Docs,
+  EksConsole,
+  FinOps,
+  ForgotPassword,
+  GkeConsole,
+  IncidentDetail,
+  Incidents,
+  Issues,
+  MfaChallenge,
+  MockCheckout,
+  Monitoring,
+  OrganizationManagement,
+  Overview,
+  Pricing,
+  PrivacyPolicy,
+  Reports,
+  ResetPassword,
+  Resources,
+  ResourcesCategory,
+  ResourcesOverview,
+  Settings,
+  Signup,
+  Subscription,
+  TermsOfService,
+  UsersGroups,
+} from './routes/lazyRoutes';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { RequireAuth, RequireOrg } from './pages/auth/RequireAuth';
-
-import { Login } from './pages/auth/Login';
-import { Signup } from './pages/auth/Signup';
-import { ForgotPassword } from './pages/auth/ForgotPassword';
-import { ResetPassword } from './pages/auth/ResetPassword';
-import { MfaChallenge } from './pages/auth/MfaChallenge';
-import { AcceptInvite } from './pages/auth/AcceptInvite';
-
-import { Overview } from './pages/Overview';
-import { CloudAccounts } from './pages/CloudAccounts';
-import { CloudAccountDetail } from './pages/CloudAccountDetail';
-import { Resources } from './pages/Resources';
-import { ResourcesOverview } from './pages/resources/ResourcesOverview';
-import { ResourcesCategory } from './pages/resources/ResourcesCategory';
-import { FinOps } from './pages/FinOps';
-import { CloudSecurity } from './pages/CloudSecurity';
-import CloudCompliance from './pages/CloudCompliance';
-
-import { EksConsole } from './pages/EksConsole';
-import { GkeConsole } from './pages/GkeConsole';
-import { AksConsole } from './pages/AksConsole';
-
-import { Monitoring } from './pages/Monitoring';
-import { Alerts } from './pages/Alerts';
-import { Issues } from './pages/Issues';
-import { Incidents } from './pages/Incidents';
-import { IncidentDetail } from './pages/IncidentDetail';
-import { Reports } from './pages/Reports';
-import { UsersGroups } from './pages/UsersGroups';
-import { OrganizationManagement } from './pages/OrganizationManagement';
-import { Settings } from './pages/Settings';
-import { CustomDashboards } from './pages/CustomDashboards';
-import { AiCopilot } from './pages/AiCopilot';
-import { Automation } from './pages/Automation';
-
-import { Subscription } from './pages/Subscription';
-import { BillingSuccess } from './pages/BillingSuccess';
-import { BillingCanceled } from './pages/BillingCanceled';
-import { MockCheckout } from './pages/MockCheckout';
 
 import {
   isBillingEnabled,
   isMockCheckoutEnabled,
 } from './lib/featureFlags';
-
-import { MarketingHome } from './pages/marketing/Home';
-import { Pricing } from './pages/marketing/Pricing';
-import { PrivacyPolicy } from './pages/marketing/PrivacyPolicy';
-import { TermsOfService } from './pages/marketing/TermsOfService';
-import { Docs } from './pages/marketing/Docs';
-import { NotFound } from './pages/marketing/NotFound';
 
 /**
  * "/" is the public marketing homepage for logged-out visitors and redirects
@@ -151,6 +151,29 @@ export default function App() {
                 <DemoDataProvider>
                   <SyncProvider>
                     <ToastProvider>
+                      {/*
+                        * Every route component below except Login, the
+                        * marketing home and NotFound is code-split, so React
+                        * suspends while its chunk downloads. Without this
+                        * boundary the first visit to any of them throws.
+                        *
+                        * The fallback is deliberately quiet and centred
+                        * rather than a full skeleton: it is visible only for
+                        * the length of one chunk fetch, and a heavy
+                        * placeholder would flash on every navigation.
+                        */}
+                      <Suspense
+                        fallback={
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            aria-label="Loading page"
+                            className="flex min-h-[60vh] items-center justify-center text-sm text-slate-400 dark:text-slate-500"
+                          >
+                            Loading…
+                          </div>
+                        }
+                      >
                       <Routes>
                         {/* Public routes */}
                         <Route path="/" element={<RootRoute />} />
@@ -655,6 +678,7 @@ export default function App() {
 
                         <Route path="*" element={<NotFound />} />
                       </Routes>
+                      </Suspense>
                     </ToastProvider>
                   </SyncProvider>
                 </DemoDataProvider>

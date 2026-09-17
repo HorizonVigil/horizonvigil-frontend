@@ -35,10 +35,43 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
+  /**
+   * Builds the app and serves `dist` for the `public` project below, so the
+   * unauthenticated suite needs no deployed environment and no credentials.
+   *
+   * Skipped when SMOKE_TEST_BASE_URL is set, because then the caller is
+   * deliberately pointing the run at a real deployment instead.
+   */
+  webServer: process.env.SMOKE_TEST_BASE_URL
+    ? undefined
+    : {
+        command: 'npm run build && npm run preview -- --port 4173 --strictPort',
+        url: 'http://localhost:4173',
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+      },
+
   projects: [
+    /*
+     * Runs with NO credentials against a locally served build, so it can run
+     * on every push. The authenticated project below still cannot run until
+     * SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD exist; this covers what can be
+     * proven without a tenant rather than leaving the browser untested
+     * entirely.
+     */
+    {
+      name: 'public',
+      testMatch: /public\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: process.env.SMOKE_TEST_BASE_URL || 'http://localhost:4173',
+      },
+    },
+
     { name: 'setup', testMatch: /auth\.setup\.ts/ },
     {
       name: 'smoke',
+      testMatch: /smoke\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/session.json' },
       dependencies: ['setup'],
     },
