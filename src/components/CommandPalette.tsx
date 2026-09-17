@@ -109,7 +109,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           ) : (
             results.map((cmd, i) => (
               <li key={cmd.id} role="option" aria-selected={i === activeIndex}>
-                <button
+                <button type="button"
                   onClick={() => go(cmd)}
                   onMouseEnter={() => setActiveIndex(i)}
                   className={`w-full flex items-center gap-3 px-4 py-2 text-left text-sm ${

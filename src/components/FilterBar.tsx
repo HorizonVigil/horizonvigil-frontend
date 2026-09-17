@@ -70,7 +70,7 @@ export function FilterBar({ title, subtitle, breadcrumb, showAccountFilter = tru
             </select>
           </label>
         )}
-        <button onClick={refresh} title="Refresh" className="flex items-center gap-1.5 text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+        <button type="button" onClick={refresh} title="Refresh" className="flex items-center gap-1.5 text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
           <Icon name="refresh-cw" size={14} />
           Refresh
         </button>

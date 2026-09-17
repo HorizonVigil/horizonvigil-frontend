@@ -56,7 +56,7 @@ export function MarketingNav() {
         </nav>
 
         <div className="hidden md:flex items-center gap-2">
-          <button
+          <button type="button"
             onClick={toggleTheme}
             aria-label="Toggle theme"
             className="h-9 w-9 rounded-md flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -71,7 +71,7 @@ export function MarketingNav() {
           </Link>
         </div>
 
-        <button
+        <button type="button"
           onClick={() => setOpen(o => !o)}
           aria-label="Toggle menu"
           className="md:hidden h-9 w-9 flex flex-col items-center justify-center gap-1"

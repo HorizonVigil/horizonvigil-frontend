@@ -152,7 +152,7 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
       <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-6 text-center">
         <Icon name="alert-triangle" size={20} className="mx-auto text-red-500 mb-2" />
         <p className="text-sm text-red-700 dark:text-red-300">Couldn't load the FinOps overview.</p>
-        <button onClick={() => query.refetch()} className="mt-3 text-xs font-medium text-red-700 dark:text-red-300 underline">Retry</button>
+        <button type="button" onClick={() => query.refetch()} className="mt-3 text-xs font-medium text-red-700 dark:text-red-300 underline">Retry</button>
       </div>
     );
   }
@@ -180,7 +180,30 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
   const costAvailability = d.analytics?.availability ?? null;
   const totalCost = d.analytics?.totalCost ?? null;
   const hasAnyBilling = (totalCost ?? 0) > 0 || d.budgets.length > 0 || (d.cost?.monthToDate ?? 0) > 0;
-  const dailyLast = d.daily.at(-1)?.cost ?? 0;
+
+  /*
+   * Total Spend and Budget Used were made honest for AWS-P0-06; the other
+   * three KPIs in the same strip were not, and kept coercing a missing figure
+   * to 0 before formatting it. On this estate that rendered "$0.00" for the
+   * most recent day, a "$0.00 month-end estimate", and "$0.00 per month" in
+   * potential savings -- three confident financial claims derived from the
+   * absence of data.
+   *
+   * Each is null when there is nothing to state, and the caption says why.
+   */
+  const dailyLast = d.daily.at(-1)?.cost ?? null;
+  const forecastTotal = d.forecast?.projectedTotal ?? null;
+
+  /*
+   * Savings mirrors the Overview widget's rule (§9): a zero is only a real
+   * zero once every open recommendation has been judged. While any row is
+   * unevaluated, "$0.00" would claim there is nothing to save when the truth
+   * is that nothing has been checked.
+   */
+  const unevaluatedRecommendations = d.optDash?.recommendationBreakdown?.unevaluated ?? 0;
+  const savings = d.optDash?.totalPotentialMonthlySavings ?? null;
+  const savingsProven =
+    savings !== null && (savings > 0 || unevaluatedRecommendations === 0);
   const anomalyCount = d.anomalies.filter((a) => a.status === 'open').length;
   // A change percentage between two untrustworthy totals is itself
   // untrustworthy, so it is only computed when BOTH periods are real numbers.
@@ -223,15 +246,36 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
           }
           delta={spendChange === null ? undefined : { value: `${spendChange > 0 ? '+' : ''}${spendChange}%`, direction: spendChange > 0 ? 'up' : spendChange < 0 ? 'down' : 'flat', goodDirection: 'down' }}
         />
-        <StatCard label="Daily Spend" value={formatMoney(dailyLast, currency, fxRates)} icon="chart-line" caption="most recent day" />
-        <StatCard label="Forecast" value={formatMoney(d.forecast?.projectedTotal ?? 0, currency, fxRates)} icon="trending-up" caption="month-end estimate" />
+        <StatCard
+          label="Daily Spend"
+          value={dailyLast === null ? '—' : formatMoney(dailyLast, currency, fxRates)}
+          icon="chart-line"
+          caption={dailyLast === null ? 'no daily cost recorded' : 'most recent day'}
+        />
+        <StatCard
+          label="Forecast"
+          value={forecastTotal === null ? '—' : formatMoney(forecastTotal, currency, fxRates)}
+          icon="trending-up"
+          caption={forecastTotal === null ? 'not enough cost history to forecast' : 'month-end estimate'}
+        />
         <StatCard
           label="Budget Used"
           value={budgetRollup.usedPercent === null ? '—' : `${budgetRollup.usedPercent}%`}
           icon="target"
           iconTone={budgetRollup.worst === 'exceeded' ? 'critical' : budgetRollup.worst === 'warning' ? 'warning' : budgetRollup.worst === 'ok' ? 'good' : 'neutral'}
         />
-        <StatCard label="Potential Savings" value={formatMoney(d.optDash?.totalPotentialMonthlySavings ?? 0, currency, fxRates)} icon="optimization" caption="per month" />
+        <StatCard
+          label="Potential Savings"
+          value={savingsProven && savings !== null ? formatMoney(savings, currency, fxRates) : '—'}
+          icon="optimization"
+          caption={
+            savings === null
+              ? 'optimization data unavailable'
+              : unevaluatedRecommendations > 0
+                ? `${unevaluatedRecommendations} not checked yet`
+                : 'per month'
+          }
+        />
         <StatCard label="Cost Anomalies" value={anomalyCount.toLocaleString()} icon="alert-triangle" iconTone={anomalyCount > 0 ? 'warning' : 'neutral'} caption="active" />
       </div>
 
@@ -273,7 +317,7 @@ export function FinOpsOverviewTab({ groupFilter, onProviderChange, currency, fxR
       </div>
 
       <SectionBoundary name="optimization opportunities">
-        <OptimizationPanel potentialMonthly={d.optDash?.totalPotentialMonthlySavings ?? 0} categoryBars={optCategoryBars} topOpportunities={d.savings} />
+        <OptimizationPanel potentialMonthly={savingsProven ? savings : null} categoryBars={optCategoryBars} topOpportunities={d.savings} />
       </SectionBoundary>
 
       <p className="text-[11px] text-slate-400 dark:text-slate-500 text-right">

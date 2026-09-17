@@ -23,7 +23,7 @@ import { canSeeChild, findNavChild, submenuKey, type Role } from './navConfig';
  */
 export function useCanSeeSubmenu(parentIcon: string, childLabel: string): boolean {
   const { currentOrg, menuPermissions } = useOrg();
-  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  const role = (currentOrg?.myRole as Role | undefined) ?? 'viewer';
   const child = findNavChild(parentIcon, childLabel) ?? { label: childLabel, real: true };
   return canSeeChild(child, role, parentIcon, menuPermissions);
 }
@@ -31,7 +31,7 @@ export function useCanSeeSubmenu(parentIcon: string, childLabel: string): boolea
 /** Batch form — call once per page instead of once per tab, avoids re-deriving `role` on every check. */
 export function useSubmenuAccess(parentIcon: string): (childLabel: string) => boolean {
   const { currentOrg, menuPermissions } = useOrg();
-  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  const role = (currentOrg?.myRole as Role | undefined) ?? 'viewer';
   return (childLabel: string) => {
     const child = findNavChild(parentIcon, childLabel) ?? { label: childLabel, real: true };
     return canSeeChild(child, role, parentIcon, menuPermissions);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, type OwnershipCoverage, type OwnershipRule, type OwnershipRuleRun, type OwnershipRelation } from '../../lib/api';
+import { useMenuPermission } from '../../lib/useMenuPermission';
 
 /**
  * AWS-20 — resource ownership.
@@ -41,6 +42,15 @@ export function OwnershipPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<{ relation: OwnershipRelation; tagKey: string }>({ relation: 'owner', tagKey: '' });
+
+  /*
+   * Every mutation below goes to a route guarded by
+   * requireMenuPermission(db, user, org, 'resources', 'write'). Without this
+   * check a viewer saw "Add rule" and "Apply rules" as ordinary enabled
+   * controls, clicked one, and got a permission error -- the product offering
+   * an action the server was always going to refuse.
+   */
+  const canWrite = useMenuPermission('resources', 'write');
 
   const load = useCallback(async () => {
     // Settled, not all: a failing rules list must not blank the coverage
@@ -132,12 +142,20 @@ export function OwnershipPanel() {
       )}
 
       <div className="mt-4 border-t border-slate-200 dark:border-slate-800 pt-3">
+        {!canWrite && (
+          <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+            You have read-only access to resources, so ownership rules can be
+            viewed but not changed.
+          </p>
+        )}
+
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs text-slate-600 dark:text-slate-400">
             <span className="block mb-1">Relation</span>
             <select
               value={newRule.relation}
               onChange={(e) => setNewRule((r) => ({ ...r, relation: e.target.value as OwnershipRelation }))}
+              disabled={!canWrite}
               className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm"
             >
               {RELATIONS.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -148,15 +166,16 @@ export function OwnershipPanel() {
             <input
               value={newRule.tagKey}
               onChange={(e) => setNewRule((r) => ({ ...r, tagKey: e.target.value }))}
+              disabled={!canWrite}
               placeholder="e.g. Owner"
               className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm"
             />
           </label>
-          <button type="button" onClick={addRule} disabled={busy || !newRule.tagKey.trim()}
+          <button type="button" onClick={addRule} disabled={!canWrite || busy || !newRule.tagKey.trim()}
             className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm disabled:opacity-50">
             Add rule
           </button>
-          <button type="button" onClick={applyRules} disabled={busy || rules.length === 0}
+          <button type="button" onClick={applyRules} disabled={!canWrite || busy || rules.length === 0}
             className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
             {busy ? 'Working…' : 'Apply rules'}
           </button>
@@ -169,7 +188,7 @@ export function OwnershipPanel() {
                 <span className="text-slate-700 dark:text-slate-300">
                   <span className="capitalize">{r.relation}</span> from tag <span className="font-mono">{r.tag_key}</span>
                 </span>
-                <button type="button" onClick={() => removeRule(r.id)} disabled={busy}
+                <button type="button" onClick={() => removeRule(r.id)} disabled={!canWrite || busy}
                   className="text-slate-500 hover:text-rose-600 disabled:opacity-50">Remove</button>
               </li>
             ))}

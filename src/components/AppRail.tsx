@@ -28,7 +28,16 @@ function groupBySection(modules: ReturnType<typeof getVisibleModules>) {
 export function AppRail() {
   const [expanded, setExpanded] = useState<boolean>(false);
   const { currentOrg, menuPermissions } = useOrg();
-  const role = (currentOrg?.myRole as Role) ?? 'owner';
+  /*
+   * Least privilege when the organisation is unknown, not most.
+   *
+   * This defaulted to 'owner', so a failed or in-flight org bootstrap
+   * rendered the FULL sidebar — every admin and billing entry — to whoever
+   * was looking. The nav is not an authorisation boundary, but advertising
+   * routes the server will refuse is its own kind of dishonesty, and it was
+   * the same fail-open default the route guard carried.
+   */
+  const role = (currentOrg?.myRole as Role | undefined) ?? 'viewer';
   const visibleModules = getVisibleModules(role, menuPermissions);
   const sections = groupBySection(visibleModules);
 

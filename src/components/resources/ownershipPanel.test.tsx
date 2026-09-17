@@ -2,8 +2,26 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { OwnershipPanel } from './OwnershipPanel';
 import { api, ApiError, type OwnershipCoverage } from '../../lib/api';
+import { useMenuPermission } from '../../lib/useMenuPermission';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+/**
+ * The panel's write controls are gated on `resources: write`, which the real
+ * hook reads from OrgProvider. These tests render the panel on its own, so the
+ * permission under test is stated explicitly here rather than standing up the
+ * whole organisation bootstrap -- and the read-only case gets its own test
+ * below instead of being an accident of the harness.
+ */
+vi.mock('../../lib/useMenuPermission', () => ({
+  useMenuPermission: vi.fn(() => true),
+}));
+
+const mockedUseMenuPermission = vi.mocked(useMenuPermission);
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  mockedUseMenuPermission.mockReturnValue(true);
+});
 
 /** Shaped from production 2026-09-16: 515 real assets, zero owners. */
 const PROD_COVERAGE: OwnershipCoverage = {
@@ -92,6 +110,28 @@ describe('OwnershipPanel', () => {
     render(<OwnershipPanel />);
     await waitFor(() => expect(screen.getByRole('button', { name: /apply rules/i })).toBeTruthy());
     expect(screen.getByRole('button', { name: /apply rules/i })).toHaveProperty('disabled', true);
+  });
+
+  /**
+   * The ownership mutations are guarded server-side by
+   * requireMenuPermission('resources', 'write'). A viewer used to be offered
+   * the controls and told no only after clicking.
+   */
+  it('offers no write controls to a read-only user, and says why', async () => {
+    mockedUseMenuPermission.mockReturnValue(false);
+    stub();
+    vi.spyOn(api, 'getOwnershipRules').mockResolvedValue({
+      items: [{ id: 'r1', relation: 'owner', tag_key: 'Owner', priority: 100, created_at: '2026-09-16T00:00:00Z' }],
+    });
+
+    render(<OwnershipPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/read-only access to resources/i)).toBeTruthy());
+
+    expect(screen.getByRole('button', { name: /add rule/i })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /apply rules/i })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /remove/i })).toHaveProperty('disabled', true);
   });
 
   it('shows a real percentage when coverage exists', async () => {

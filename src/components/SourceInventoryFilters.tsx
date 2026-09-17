@@ -2,7 +2,37 @@ import type { Severity, SourceAsset, SourceInventoryFilters as Filters } from '.
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'informational'];
 const SCAN_STATUSES: SourceAsset['scanRollup'][] = ['completed', 'partial', 'failed', 'stale'];
-const OWNERS = ['Platform Team', 'AppSec Team', 'Cloud Infra Team', 'DevSecOps', 'Unassigned'];
+
+/**
+ * Placeholder used by the real source-inventory adapters for an asset whose
+ * owner was never collected. Such a value is not a selectable owner.
+ */
+const OWNER_NOT_COLLECTED = '—';
+
+/**
+ * Owner options come from the loaded assets, like every other option list on
+ * this row.
+ *
+ * They used to be a hard-coded array of invented team names ('Platform Team',
+ * 'AppSec Team', ...). The real adapters set `owner: '—'` on every asset
+ * because ownership is not collected for these sources, and the filter
+ * compares `asset.owner === filters.owner` -- so picking any offered owner
+ * matched nothing, every time, and the page reported an empty inventory. That
+ * is a NOT_COLLECTED field rendered as a genuine zero result.
+ */
+function selectableOwners(assets: readonly SourceAsset[]): string[] {
+  const owners = new Set<string>();
+
+  for (const asset of assets) {
+    const owner = asset?.owner?.trim();
+
+    if (owner && owner !== OWNER_NOT_COLLECTED) {
+      owners.add(owner);
+    }
+  }
+
+  return [...owners].sort((a, b) => a.localeCompare(b));
+}
 
 /**
  * The 9-dimension filter row the Source Inventory spec asks for, applied
@@ -13,16 +43,21 @@ const OWNERS = ['Platform Team', 'AppSec Team', 'Cloud Infra Team', 'DevSecOps',
  * category with just a different `subTypes`/`scanners` option list.
  */
 export function SourceInventoryFilters({
-  filters, onChange, subTypes, scanners,
+  filters, onChange, subTypes, scanners, assets,
 }: {
   filters: Filters;
   onChange: (next: Filters) => void;
   subTypes: string[];
   scanners: string[];
+  /** Loaded assets for this page — the source of the owner options. */
+  assets: readonly SourceAsset[];
 }) {
   function set<K extends keyof Filters>(key: K, value: Filters[K]) {
     onChange({ ...filters, [key]: value || undefined });
   }
+
+  const owners = selectableOwners(assets);
+  const ownerFilterAvailable = owners.length > 0;
 
   return (
     <div className="flex flex-wrap gap-2 text-xs mb-3">
@@ -48,9 +83,19 @@ export function SourceInventoryFilters({
         <option value="">Any scanner</option>
         {scanners.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
-      <select value={filters.owner ?? ''} onChange={e => set('owner', e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200">
-        <option value="">All owners</option>
-        {OWNERS.map(o => <option key={o} value={o}>{o}</option>)}
+      {/* Disabled, and labelled with the reason, when ownership was not
+          collected for these assets. Offering owners that match nothing would
+          turn "we never collected this" into "you own nothing here". */}
+      <select
+        value={filters.owner ?? ''}
+        onChange={e => set('owner', e.target.value)}
+        disabled={!ownerFilterAvailable}
+        title={ownerFilterAvailable ? undefined : 'Ownership is not collected for these assets'}
+        aria-label={ownerFilterAvailable ? 'Filter by owner' : 'Filter by owner — ownership is not collected for these assets'}
+        className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <option value="">{ownerFilterAvailable ? 'All owners' : 'Owner not collected'}</option>
+        {owners.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
       <label className="flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-slate-700 dark:text-slate-200 cursor-pointer">
         <input type="checkbox" checked={filters.internetExposed ?? false} onChange={e => set('internetExposed', e.target.checked || undefined)} />

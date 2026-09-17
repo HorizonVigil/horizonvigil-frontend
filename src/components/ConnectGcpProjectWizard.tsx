@@ -88,11 +88,11 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
   return (
     <Modal open={open} onClose={onClose} title="Add GCP Project" wide>
       <div className="flex gap-2 mb-4">
-        <button onClick={() => setMethod('service_account_key')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'service_account_key' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
+        <button type="button" onClick={() => setMethod('service_account_key')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'service_account_key' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
           <div className="text-sm font-medium text-slate-800 dark:text-slate-100">Service Account Key</div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Quickest path — a downloaded JSON key, stored encrypted</div>
         </button>
-        <button onClick={() => setMethod('service_account_impersonation')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'service_account_impersonation' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
+        <button type="button" onClick={() => setMethod('service_account_impersonation')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'service_account_impersonation' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
           <div className="text-sm font-medium text-slate-800 dark:text-slate-100">Service Account Impersonation <span className="text-emerald-600 dark:text-emerald-400 text-xs font-normal">Recommended</span></div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">No key ever stored — grant our platform account permission to impersonate yours</div>
         </button>
@@ -111,7 +111,7 @@ export function ConnectGcpProjectWizard({ open, onClose, onConnected, projects }
           <label className="flex flex-col gap-1 text-sm col-span-2">
             <span className="text-slate-600 dark:text-slate-300">Service Account Key (JSON)</span>
             <textarea
-              required value={form.serviceAccountKeyJson} onChange={e => setForm(f => ({ ...f, serviceAccountKeyJson: e.target.value }))}
+              required autoComplete="off" spellCheck={false} value={form.serviceAccountKeyJson} onChange={e => setForm(f => ({ ...f, serviceAccountKeyJson: e.target.value }))}
               rows={5} placeholder='{"type": "service_account", "project_id": "...", ...}'
               className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs placeholder:text-slate-400"
             />
@@ -158,7 +158,7 @@ function Field({ label, onChange, ...props }: { label: string; onChange: (v: str
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-slate-600 dark:text-slate-300">{label}</span>
-      <input {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
+      <input autoComplete="off" spellCheck={false} {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
     </label>
   );
 }

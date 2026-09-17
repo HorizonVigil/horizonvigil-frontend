@@ -120,7 +120,7 @@ export function RealRepositoryInventory() {
 
       {tab === 'Asset List' && (
         <div>
-          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={config.subTypes.map(s => s.label)} scanners={REAL_REPO_SCANNER_NAMES} />
+          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={config.subTypes.map(s => s.label)} scanners={REAL_REPO_SCANNER_NAMES} assets={assets} />
           <DataTable
             columns={columns}
             rows={assets}

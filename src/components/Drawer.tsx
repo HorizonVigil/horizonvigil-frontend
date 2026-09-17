@@ -19,7 +19,7 @@ export function Drawer({ open, onClose, title, children, wide = false }: { open:
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900">
           <h2 id={titleId} className="font-semibold text-slate-900 dark:text-white truncate">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none">×</button>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none">×</button>
         </div>
         <div className="p-4">{children}</div>
       </div>

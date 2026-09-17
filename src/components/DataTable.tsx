@@ -275,8 +275,8 @@ export function DataTable<T>({
           )}
         </div>
         <div className="flex items-center gap-2 relative">
-          <button onClick={() => setShowColumnMenu(v => !v)} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Columns</button>
-          <button onClick={exportCsv} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" title={server ? 'Exports only the currently loaded page' : undefined}>Export CSV</button>
+          <button type="button" onClick={() => setShowColumnMenu(v => !v)} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Columns</button>
+          <button type="button" onClick={exportCsv} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" title={server ? 'Exports only the currently loaded page' : undefined}>Export CSV</button>
           {showColumnMenu && (
             <div className="absolute right-0 top-8 z-10 w-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-2 flex flex-col gap-1">
               {columns.map(c => (
@@ -318,7 +318,7 @@ export function DataTable<T>({
                         make the non-interactive state visible without a
                         hover, matching this file's own doc comment's intent
                         ("no dead click that silently no-ops"). */}
-                    <button
+                    <button type="button"
                       className="flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-100 disabled:hover:text-slate-500 dark:disabled:hover:text-slate-400 disabled:cursor-default disabled:opacity-60"
                       onClick={() => c.sortValue && toggleSort(c.key)}
                       disabled={sortDisabled}
@@ -387,12 +387,12 @@ export function DataTable<T>({
           </div>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
-              <button disabled={safePage === 0} onClick={() => goToPage(safePage - 1)} aria-label="Previous page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
+              <button type="button" disabled={safePage === 0} onClick={() => goToPage(safePage - 1)} aria-label="Previous page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Prev</button>
               {pageWindow(safePage, totalPages).map((p, i) =>
                 p === 'ellipsis'
                   ? <span key={`e${i}`} className="px-1.5">…</span>
                   : (
-                    <button
+                    <button type="button"
                       key={p}
                       onClick={() => goToPage(p)}
                       aria-current={p === safePage ? 'page' : undefined}
@@ -403,7 +403,7 @@ export function DataTable<T>({
                     </button>
                   )
               )}
-              <button disabled={safePage >= totalPages - 1} onClick={() => goToPage(safePage + 1)} aria-label="Next page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
+              <button type="button" disabled={safePage >= totalPages - 1} onClick={() => goToPage(safePage + 1)} aria-label="Next page" className="min-h-[36px] px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 disabled:opacity-40">Next</button>
             </div>
           )}
         </div>

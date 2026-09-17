@@ -81,7 +81,7 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
           <label className="flex flex-col gap-1 text-sm col-span-2">
             <span className="text-slate-600 dark:text-slate-300">Client Secret</span>
             <input
-              required type="password" value={form.azureClientSecret} onChange={e => setForm(f => ({ ...f, azureClientSecret: e.target.value }))}
+              required type="password" autoComplete="off" spellCheck={false} value={form.azureClientSecret} onChange={e => setForm(f => ({ ...f, azureClientSecret: e.target.value }))}
               placeholder="The secret VALUE, not the secret ID"
               className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs placeholder:text-slate-400"
             />
@@ -91,7 +91,7 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
             <label className="flex flex-col gap-1 text-sm col-span-2">
               <span className="text-slate-600 dark:text-slate-300">Certificate (PEM)</span>
               <textarea
-                required value={form.azureCertificatePem} onChange={e => setForm(f => ({ ...f, azureCertificatePem: e.target.value }))}
+                required autoComplete="off" spellCheck={false} value={form.azureCertificatePem} onChange={e => setForm(f => ({ ...f, azureCertificatePem: e.target.value }))}
                 rows={4} placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs placeholder:text-slate-400"
               />
@@ -100,7 +100,7 @@ export function ConnectAzureSubscriptionWizard({ open, onClose, onConnected, pro
             <label className="flex flex-col gap-1 text-sm col-span-2">
               <span className="text-slate-600 dark:text-slate-300">Private Key (PEM)</span>
               <textarea
-                required value={form.azurePrivateKeyPem} onChange={e => setForm(f => ({ ...f, azurePrivateKeyPem: e.target.value }))}
+                required autoComplete="off" spellCheck={false} value={form.azurePrivateKeyPem} onChange={e => setForm(f => ({ ...f, azurePrivateKeyPem: e.target.value }))}
                 rows={4} placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white font-mono text-xs placeholder:text-slate-400"
               />
@@ -136,7 +136,7 @@ function Field({ label, onChange, ...props }: { label: string; onChange: (v: str
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-slate-600 dark:text-slate-300">{label}</span>
-      <input {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
+      <input autoComplete="off" spellCheck={false} {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
     </label>
   );
 }

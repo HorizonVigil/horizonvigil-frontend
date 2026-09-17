@@ -115,21 +115,59 @@ export const LeadTimeWidget: WidgetComponent = () => (
 
 // ── KPIs ──────────────────────────────────────────────────────────────────
 
+/**
+ * Counts from the server's `pagination.total`, not from the returned rows.
+ *
+ * This asked for 50 rows and rendered `items.length`, so any window with more
+ * than 50 deployments reported exactly "50" -- a page size presented as a
+ * total, and indistinguishable from an estate that really did deploy 50
+ * times. One row is enough to read the count off, which is the same shape
+ * CostAnomaliesKpi already uses.
+ */
 export const DeploymentsKpi: WidgetComponent = ({ ctx }) => {
-  const query = useDeployments('kpi-deployments', ctx);
-  return <KpiValue label="Deployments" value={query.data ? String(query.data.items.length) : '—'} icon="automation"
+  const query = useDeployments('kpi-deployments', ctx, 1);
+  const total = query.data?.pagination.total;
+
+  return <KpiValue label="Deployments" value={total === undefined ? '—' : total.toLocaleString()} icon="automation"
     caption="in window" onClick={() => ctx.navigate('/monitoring?tab=Health')} />;
 };
 
+/**
+ * Counts repositories across every connected installation, and says so when
+ * that count is only part of the picture.
+ *
+ * A rejected installation used to contribute 0 to the sum, so the widget
+ * printed a confident total that silently omitted whole installations. An
+ * unreadable installation is not an installation with no repositories, so the
+ * failure count is carried out of the query and stated in the caption.
+ */
 export const RepositoriesKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-repositories', ctx, async () => {
     const { items } = await api.getGitInstallations();
-    if (items.length === 0) return 0;
+    if (items.length === 0) return { total: 0, unreadable: 0 };
+
     const repoLists = await Promise.allSettled(items.map((i) => api.getInstallationRepos(i.id)));
-    return repoLists.reduce((s, r) => s + (r.status === 'fulfilled' ? r.value.items.length : 0), 0);
+
+    return repoLists.reduce(
+      (acc, r) =>
+        r.status === 'fulfilled'
+          ? { ...acc, total: acc.total + r.value.items.length }
+          : { ...acc, unreadable: acc.unreadable + 1 },
+      { total: 0, unreadable: 0 },
+    );
   }, { retry: false });
-  return <KpiValue label="Repositories" value={query.data === undefined ? '—' : String(query.data)} icon="git-branch"
-    caption="connected" onClick={() => ctx.navigate('/code-security?tab=Repositories')} />;
+
+  const data = query.data;
+
+  return <KpiValue label="Repositories" value={data === undefined ? '—' : data.total.toLocaleString()} icon="git-branch"
+    caption={
+      data === undefined
+        ? 'connected'
+        : data.unreadable > 0
+          ? `at least — ${data.unreadable} installation(s) unreadable`
+          : 'connected'
+    }
+    onClick={() => ctx.navigate('/code-security?tab=Repositories')} />;
 };
 
 export const PipelineSuccessKpi: WidgetComponent = ({ ctx }) => (

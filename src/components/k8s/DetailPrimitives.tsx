@@ -41,7 +41,7 @@ export function RelatedList({ title, items, empty, render }: { title: string; it
 export function RelatedRow({ resource, onClick, right }: { resource: CloudResource; onClick: () => void; right?: React.ReactNode }) {
   return (
     <li>
-      <button onClick={onClick} className="w-full flex items-center justify-between gap-2 text-left text-xs rounded-md px-2 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+      <button type="button" onClick={onClick} className="w-full flex items-center justify-between gap-2 text-left text-xs rounded-md px-2 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
         <span className="truncate">{resource.resource_name ?? resource.resource_id}</span>
         {right && <span className="shrink-0">{right}</span>}
       </button>

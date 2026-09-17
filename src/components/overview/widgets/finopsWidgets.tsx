@@ -219,7 +219,7 @@ export const PotentialSavingsKpi: WidgetComponent = ({ ctx }) => {
   const unevaluated = data?.recommendationBreakdown?.unevaluated ?? 0;
   const proven = data !== undefined && (data.totalPotentialMonthlySavings > 0 || unevaluated === 0);
 
-  return <KpiValue label="Potential Savings" value={proven ? money(data!.totalPotentialMonthlySavings) : '—'} icon="optimization"
+  return <KpiValue label="Potential Savings" value={proven && data ? money(data.totalPotentialMonthlySavings) : '—'} icon="optimization"
     tone="good"
     caption={data === undefined ? 'per month' : unevaluated > 0 ? `${unevaluated} not checked yet` : 'per month'}
     onClick={() => ctx.navigate('/finops?section=Cost+Optimization')} />;
