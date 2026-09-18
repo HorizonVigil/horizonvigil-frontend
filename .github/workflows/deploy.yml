@@ -133,6 +133,67 @@ jobs:
       - name: Show service URL
         run: gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --format='value(status.url)'
 
+  # ── POST-DEPLOY AUTHENTICATED GATE ──────────────────────────────────────
+  #
+  # Runs AFTER the revision is live and drives the REAL logged-in product
+  # against it. A deploy does not stand on its own: if the authenticated
+  # suite fails here, this workflow fails, the revision is marked bad, and
+  # the failure is attributable to the exact commit that shipped it.
+  #
+  # It runs post-deploy rather than pre-deploy on purpose. Running it before
+  # would test the PREVIOUS revision and prove nothing about the one being
+  # shipped.
+  #
+  # Missing credentials FAIL this job. They never downgrade it to a skip:
+  # a green deploy whose authenticated gate quietly did not run is the exact
+  # condition that left this suite at zero executions for months.
+  post-deploy-smoke:
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Verify smoke-test credentials are configured
+        env:
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "${SMOKE_TEST_EMAIL:-}" ] || [ -z "${SMOKE_TEST_PASSWORD:-}" ]; then
+            echo "::error::AUTHENTICATED E2E CONFIGURATION ERROR - smoke-test credentials are not configured"
+            exit 1
+          fi
+          echo "Smoke-test credentials are present."
+
+      - name: Authenticated smoke tests against the deployed revision
+        env:
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          npx playwright test --project=smoke --list > discovered.txt 2>&1
+          count="$(grep -c '› ' discovered.txt || true)"
+          echo "AUTHENTICATED TESTS DISCOVERED: ${count}"
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "::error::Zero authenticated tests discovered - the suite has become empty"
+            exit 1
+          fi
+          npx playwright test --project=smoke
+
+      # Safe to publish: the setup project (the only place a password is
+      # typed) records no trace, screenshot or video. See playwright.config.ts.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: post-deploy-playwright-report
+          path: playwright-report/
+          retention-days: 14
+
   # Genuinely separate test environment: its own GCP project
   # (cloudops360-test, own CPU quota) and its own Supabase project
   # (staging) for auth and every backend it talks to, not just billing.
