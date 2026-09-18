@@ -61,8 +61,10 @@ test.describe('go-live smoke test', () => {
      * Inventory is the tab that actually lists connections with a row-level
      * click through to the detail page, which is the behaviour being asserted.
      */
-    await page.goto('/cloud-accounts?tab=Inventory');
-    await expectPageRendersCleanly(page, '/cloud-accounts');
+    // The tab is part of the path handed to the helper, because the helper
+    // performs the navigation itself -- doing a goto() here first and calling
+    // it afterwards simply navigated twice and dropped the query string.
+    await expectPageRendersCleanly(page, '/cloud-accounts?tab=Inventory');
 
     // Wait for the list itself, not a timeout: the rows arrive with the
     // inventory request.
