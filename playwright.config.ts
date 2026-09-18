@@ -68,7 +68,26 @@ export default defineConfig({
       },
     },
 
-    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      /*
+       * Diagnostics are OFF for this project, and that is a security control
+       * rather than a preference.
+       *
+       * This is the only place a password is typed. A Playwright trace stores
+       * serialised DOM snapshots and a video records the screen, so a failed
+       * login would otherwise persist the smoke-test password into
+       * `playwright-report/`, which CI then uploads as an artifact. The
+       * failure that most needs diagnosing is exactly the one that would leak
+       * the credential.
+       *
+       * The `smoke` project below keeps full tracing: by then the password has
+       * been exchanged for a session and is never re-entered, so traces there
+       * carry no credential.
+       */
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
+      use: { trace: 'off', screenshot: 'off', video: 'off' },
+    },
     {
       name: 'smoke',
       testMatch: /smoke\.spec\.ts/,
