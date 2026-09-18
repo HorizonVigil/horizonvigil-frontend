@@ -1039,7 +1039,7 @@ export function Resources() {
             </p>
           )}
 
-          <DataTable tableId="resources.inventory" columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
+          <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
         </>
       )}
 

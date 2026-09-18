@@ -1,26 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  useTablePreferences,
-  TABLE_DENSITIES,
-  type TableDensity,
-} from '../lib/tablePreferences';
-
-/**
- * Row padding per density. Compact fits roughly a third more rows on a
- * screen, which is the difference between scanning 12 accounts and 18 without
- * scrolling -- the reason operators ask for it.
- */
-const DENSITY_CELL: Record<TableDensity, string> = {
-  comfortable: 'px-3 py-2',
-  compact: 'px-2 py-1',
-};
-
-const DENSITY_LABEL: Record<TableDensity, string> = {
-  comfortable: 'Comfortable',
-  compact: 'Compact',
-};
-
 export interface Column<T> {
   key: string;
   header: string;
@@ -77,15 +56,6 @@ interface DataTableProps<T> {
   onSelectionChange?: (keys: Set<string>) => void;
   /** See ServerMode's doc comment. Omit entirely for the original all-client behavior — every existing caller keeps working unchanged. */
   server?: ServerMode;
-  /**
-   * Stable id enabling persisted density, column visibility and saved views.
-   *
-   * OPTIONAL on purpose: every existing call site keeps its current behaviour
-   * (session-only column visibility, comfortable density, no saved views)
-   * until it opts in. Changing an id orphans that table's saved views, so
-   * treat it as part of the table's public contract.
-   */
-  tableId?: string;
 }
 
 /**
@@ -129,41 +99,8 @@ function pageWindow(current: number, total: number): (number | 'ellipsis')[] {
 export function DataTable<T>({
   columns, rows, rowKey, pageSize: initialPageSize = 20, pageSizeOptions = [10, 20, 50, 100],
   onRowClick, emptyMessage = 'No results.', selectable = false, selectedKeys, onSelectionChange, server,
-  tableId,
 }: DataTableProps<T>) {
-  /*
-   * Persisted preferences when the table declares an id, session-only state
-   * when it does not. Both hooks always run -- choosing which one to CALL
-   * would violate the rules of hooks the moment `tableId` changed.
-   */
-  const prefs = useTablePreferences(
-    tableId ?? '__unpersisted__',
-    columns.filter(c => c.defaultHidden).map(c => c.key),
-  );
-
-  const [sessionHiddenCols, setSessionHiddenCols] = useState<Set<string>>(
-    () => new Set(columns.filter(c => c.defaultHidden).map(c => c.key)),
-  );
-
-  const persisted = Boolean(tableId);
-  const hiddenCols: ReadonlySet<string> = persisted ? prefs.hiddenColumns : sessionHiddenCols;
-  const density: TableDensity = persisted ? prefs.density : 'comfortable';
-  const cellPadding = DENSITY_CELL[density];
-
-  const toggleColumn = (key: string) => {
-    if (persisted) {
-      prefs.toggleColumn(key);
-      return;
-    }
-
-    setSessionHiddenCols(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
-  const [viewName, setViewName] = useState('');
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set(columns.filter(c => c.defaultHidden).map(c => c.key)));
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
@@ -341,92 +278,17 @@ export function DataTable<T>({
           <button type="button" onClick={() => setShowColumnMenu(v => !v)} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Columns</button>
           <button type="button" onClick={exportCsv} className="text-xs px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" title={server ? 'Exports only the currently loaded page' : undefined}>Export CSV</button>
           {showColumnMenu && (
-            <div className="absolute right-0 top-8 z-10 w-60 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-2 flex flex-col gap-1">
-              <p className="px-1 pt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">Columns</p>
+            <div className="absolute right-0 top-8 z-10 w-48 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-2 flex flex-col gap-1">
               {columns.map(c => (
                 <label key={c.key} className="flex items-center gap-2 text-xs px-1 py-0.5 text-slate-600 dark:text-slate-300">
-                  <input type="checkbox" checked={!hiddenCols.has(c.key)} onChange={() => toggleColumn(c.key)} />
+                  <input type="checkbox" checked={!hiddenCols.has(c.key)} onChange={() => setHiddenCols(prev => {
+                    const next = new Set(prev);
+                    if (next.has(c.key)) next.delete(c.key); else next.add(c.key);
+                    return next;
+                  })} />
                   {c.header}
                 </label>
               ))}
-
-              {/* Density and saved views only appear when the table declares a
-                  tableId -- without one there is nowhere to persist them, and
-                  a control that silently forgets is worse than no control. */}
-              {persisted && (
-                <>
-                  <div className="mt-1 border-t border-slate-200 dark:border-slate-700 pt-1.5">
-                    <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Density</p>
-                    <div className="flex gap-1 px-1 pt-1" role="group" aria-label="Row density">
-                      {TABLE_DENSITIES.map(d => (
-                        <button
-                          key={d}
-                          type="button"
-                          aria-pressed={density === d}
-                          onClick={() => prefs.setDensity(d)}
-                          className={`flex-1 rounded-md border px-2 py-1 text-xs ${
-                            density === d
-                              ? 'border-brand-400 dark:border-brand-500 bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
-                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-                          }`}
-                        >
-                          {DENSITY_LABEL[d]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-1 border-t border-slate-200 dark:border-slate-700 pt-1.5">
-                    <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">Saved views</p>
-
-                    {prefs.views.length === 0 ? (
-                      <p className="px-1 py-1 text-[11px] text-slate-400">
-                        None yet — set up the columns and density you want, then save them.
-                      </p>
-                    ) : (
-                      <ul className="flex flex-col">
-                        {prefs.views.map(v => (
-                          <li key={v.id} className="flex items-center justify-between gap-1 px-1 py-0.5">
-                            <button
-                              type="button"
-                              onClick={() => prefs.applyView(v.id)}
-                              className="flex-1 truncate text-left text-xs text-slate-600 dark:text-slate-300 hover:underline"
-                            >
-                              {v.name}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => prefs.deleteView(v.id)}
-                              aria-label={`Delete saved view ${v.name}`}
-                              className="text-[11px] text-slate-400 hover:text-rose-600"
-                            >
-                              Remove
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <div className="flex gap-1 px-1 pt-1">
-                      <input
-                        value={viewName}
-                        onChange={e => setViewName(e.target.value)}
-                        placeholder="Name this view"
-                        aria-label="Name for the saved view"
-                        className="min-w-0 flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-xs text-slate-700 dark:text-slate-200"
-                      />
-                      <button
-                        type="button"
-                        disabled={!viewName.trim()}
-                        onClick={() => { prefs.saveView(viewName); setViewName(''); }}
-                        className="rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs text-slate-600 dark:text-slate-300 disabled:opacity-40"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
           )}
         </div>
@@ -436,14 +298,14 @@ export function DataTable<T>({
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800">
               {selectable && (
-                <th className={`w-8 ${cellPadding}`}>
+                <th className="w-8 px-3 py-2">
                   <input type="checkbox" checked={allOnPageSelected} onChange={togglePageSelection} aria-label="Select all rows on this page" />
                 </th>
               )}
               {visibleColumns.map(c => {
                 const sortDisabled = !c.sortValue || (!!server && !server.onSortChange);
                 return (
-                  <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 ${cellPadding} whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
+                  <th key={c.key} className={`text-left font-medium text-slate-500 dark:text-slate-400 px-3 py-2 whitespace-nowrap select-none ${c.sticky ? 'sticky left-0 z-10 bg-white dark:bg-slate-900' : ''}`}>
                     {/* Real bug fixed here: a disabled sort button (server
                         mode with no onSortChange -- most tables in this app,
                         since few backend list endpoints accept a sort param
@@ -492,12 +354,12 @@ export function DataTable<T>({
                   }) : undefined}
                 >
                   {selectable && (
-                    <td className={`w-8 ${cellPadding}`} onClick={e => e.stopPropagation()}>
+                    <td className="w-8 px-3 py-2" onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={selectedKeys?.has(key) ?? false} onChange={() => toggleRowSelection(key)} aria-label="Select row" />
                     </td>
                   )}
                   {visibleColumns.map(c => (
-                    <td key={c.key} className={`${cellPadding} whitespace-nowrap text-slate-700 dark:text-slate-200 ${c.sticky ? 'sticky left-0 z-[1] bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50' : ''}`}>{c.render(row)}</td>
+                    <td key={c.key} className={`px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200 ${c.sticky ? 'sticky left-0 z-[1] bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50' : ''}`}>{c.render(row)}</td>
                   ))}
                 </tr>
               );

@@ -805,7 +805,6 @@ export function CloudAccounts() {
               rowKey={r => r.id}
               pageSize={pageSize}
               pageSizeOptions={PAGE_SIZES}
-              tableId="cloud-accounts.inventory"
               onRowClick={r => navigate(`/cloud-accounts/${r.id}`)}
               emptyMessage={allRows.length === 0 && !search && !statusFilter && !environmentFilter && !providerFilter ? 'No cloud accounts connected yet. Click "+ Add Account" to connect your first one.' : 'No accounts match these filters.'}
               server={providerFilter ? {
