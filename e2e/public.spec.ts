@@ -5,13 +5,15 @@ import { test, expect, type ConsoleMessage } from '@playwright/test';
  *
  * WHY THIS SUITE EXISTS
  *
- * The authenticated suite (smoke.spec.ts) has never executed once: it needs
- * SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD, which are not configured, so every
- * "verified" claim about this frontend has really been a bundle grep plus an
- * unauthenticated HTTP 200. Nothing had ever driven a real browser against a
- * real build.
+ * The authenticated suite (smoke.spec.ts) covers the logged-in product and
+ * needs SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD. It now runs post-deploy and on
+ * a schedule; for a long time it did not run at all, because those secrets
+ * were never configured, and every "verified" claim about this frontend was
+ * really a bundle grep plus an unauthenticated HTTP 200.
  *
- * Everything here runs with NO credentials and NO deployed environment: the
+ * This suite is the half that needs no credentials, so it gates EVERY push
+ * rather than only a deploy. Everything here runs with no credentials and no
+ * deployed environment: the
  * Playwright config builds the app and serves `dist`, so this can run on every
  * push. It does not replace the authenticated suite -- it covers what can be
  * proven without a tenant, which is considerably more than nothing:
