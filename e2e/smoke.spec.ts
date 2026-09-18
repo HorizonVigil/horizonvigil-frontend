@@ -49,10 +49,26 @@ test.describe('go-live smoke test', () => {
   });
 
   test('cloud accounts list loads, and a real connection can be opened', async ({ page }) => {
-    await page.goto('/cloud-accounts');
+    /*
+     * The Inventory tab is named explicitly, not left to the default.
+     *
+     * `/cloud-accounts` opens on Overview, whose first table is "Top Accounts
+     * Requiring Attention" -- and that component binds navigation to BUTTONS
+     * inside its cells, not to the row. Clicking `tr` there does nothing, so
+     * this test failed on its first ever execution by selecting the wrong
+     * table rather than by finding a product defect.
+     *
+     * Inventory is the tab that actually lists connections with a row-level
+     * click through to the detail page, which is the behaviour being asserted.
+     */
+    await page.goto('/cloud-accounts?tab=Inventory');
     await expectPageRendersCleanly(page, '/cloud-accounts');
 
+    // Wait for the list itself, not a timeout: the rows arrive with the
+    // inventory request.
     const firstRow = page.locator('table tbody tr').first();
+    await firstRow.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
+
     if (await firstRow.count() === 0) {
       test.info().annotations.push({
         type: 'skipped-assertion',
