@@ -113,6 +113,102 @@ const ROLES = [
     links: ['Reports & Dashboards', 'Issues'],
   },
 ];
+/**
+ * Coverage facts for the hero trust row and the stat band.
+ *
+ * Every number here is checkable against the shipped connector rather than
+ * estimated: REGIONAL_SCANNERS (88) + GLOBAL_SCANNERS (13) = 101 registered AWS
+ * service scanners in horizonvigil-connector-aws/src/routes/discovery.ts. If
+ * that registry changes, this copy has to change with it — the numbers are a
+ * claim about the product, so they live next to the code that makes them true
+ * rather than being rounded up for effect.
+ */
+const COVERAGE_FACTS = [
+  { value: '101', label: 'AWS service scanners registered and running today.' },
+  { value: '2', label: 'Clouds live in production — AWS and Google Cloud.' },
+  { value: 'Read-only', label: 'Access requested by default. No write permission needed to start.' },
+  { value: '11', label: 'Modules sharing one org-scoped data model and one permission set.' },
+];
+
+/**
+ * The DevSecOps suite — NOT AVAILABLE YET, and described that way throughout.
+ *
+ * Every capability below has user-interface code in this repository, but none
+ * of it is reachable: src/routes/lazyRoutes.manifest.ts lists the pages the
+ * router actually mounts, and these are absent from it. That is the whole
+ * reason they are rendered as a separate, explicitly-labelled roadmap rather
+ * than folded into the module grid above — a visitor must not be able to read
+ * "vulnerability findings" as something they can go and use today, because the
+ * module count the rest of this page claims (eleven) deliberately excludes
+ * them.
+ *
+ * `status` values are blunt on purpose. 'In development' means the scanning
+ * work exists in some form but is not wired up end to end; 'Planned' means
+ * there is nothing to turn on yet.
+ */
+const DEVSECOPS_ROADMAP: {
+  name: string;
+  status: 'In development' | 'Planned';
+  desc: string;
+  tags: string[];
+}[] = [
+  {
+    name: 'Vulnerability findings',
+    status: 'In development',
+    desc: 'Container, code, and dependency results collected into one findings queue per org — de-duplicated across repeated scans so a weekly re-scan updates a finding instead of adding another copy of it.',
+    tags: ['Image scanning', 'SCA', 'De-duplication'],
+  },
+  {
+    name: 'Application & code security',
+    status: 'In development',
+    desc: 'Static analysis, dependency, and hardcoded-secret checks run against connected repositories, reported next to the cloud resources they belong to.',
+    tags: ['SAST', 'Dependencies', 'Secret detection'],
+  },
+  {
+    name: 'Container & Kubernetes security',
+    status: 'In development',
+    desc: 'Image-layer and cluster-hardening checks, attached to the EKS and GKE clusters already inventoried in the Clusters module.',
+    tags: ['Cluster hardening', 'Image layers'],
+  },
+  {
+    name: 'Infrastructure security',
+    status: 'Planned',
+    desc: 'Cloud posture and network-exposure checks, plus drift between what is deployed and what the IaC says should be.',
+    tags: ['Posture', 'Exposure', 'IaC drift'],
+  },
+  {
+    name: 'Scan scheduling & history',
+    status: 'Planned',
+    desc: 'Per-scanner scheduling, coverage status, and run history — so a scanner that did not run is visibly different from a scanner that ran and found nothing.',
+    tags: ['Scheduling', 'Coverage status'],
+  },
+  {
+    name: 'Source inventory',
+    status: 'Planned',
+    desc: 'Repositories, build artefacts, and images tracked alongside cloud resources, so a finding can be traced from a running container back to the commit that produced it.',
+    tags: ['Repositories', 'Artefacts', 'Traceability'],
+  },
+];
+
+/**
+ * A neutral comparison against how this is usually done today.
+ *
+ * Deliberately not a named-competitor table: nothing here asserts anything
+ * about a third party's product, only about the two approaches every cloud team
+ * has already tried — logging into each provider's own console, and stitching
+ * exports together in a spreadsheet. Statements about HorizonVigil are limited
+ * to the capabilities described elsewhere on this page.
+ */
+const COMPARISON_ROWS = [
+  { label: 'One login across every account and provider', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Cross-region resource inventory collected automatically', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Which resource caused a cost change', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Findings linked to the resource that caused them', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Role scoped to a single account, not a blanket admin toggle', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Audit log of who changed what inside the tool', consoles: false, spreadsheet: false, hv: true },
+  { label: 'Read-only access by default', consoles: true, spreadsheet: true, hv: true },
+];
+
 
 function Section({ id, className = '', children }: { id?: string; className?: string; children: React.ReactNode }) {
   return <section id={id} className={`max-w-6xl mx-auto px-5 py-20 ${className}`}>{children}</section>;
@@ -156,6 +252,7 @@ export function MarketingHome() {
       <MarketingNav />
       <Hero />
       <TrustBar />
+      <CoverageBand />
       <ProblemTransition />
       <HowItWorks />
       <ProductOverview />
@@ -166,6 +263,8 @@ export function MarketingHome() {
       <AICapabilities />
       <SecurityCompliance />
       <ComplianceBenchmarks />
+      <DevSecOpsRoadmap />
+      <ComparisonTable />
       <DocsPreview />
       <ProductPreview />
       <PricingTeaser />
@@ -219,6 +318,31 @@ function Hero() {
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
             Start on the free plan today. Add automation, SSO, and higher retention as your team grows.
           </p>
+          <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-6 text-xs text-slate-500 dark:text-slate-400">
+            <li className="flex items-center gap-1.5">
+              <span className="text-emerald-500" aria-hidden="true">✓</span>
+              No credit card required
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="text-emerald-500" aria-hidden="true">✓</span>
+              Read-only access by default
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="text-emerald-500" aria-hidden="true">✓</span>
+              101 AWS service scanners
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="text-emerald-500" aria-hidden="true">✓</span>
+              Cancel anytime
+            </li>
+          </ul>
+          <button
+            type="button"
+            onClick={() => scrollToSection('platform')}
+            className="text-sm font-semibold text-brand-600 dark:text-brand-400 hover:underline mt-6"
+          >
+            See everything it covers →
+          </button>
         </div>
 
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shrink-0 w-full">
@@ -708,6 +832,204 @@ function FinalCTA() {
         <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">Start free</Link>
         <a href={CONTACT_SALES_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">Talk to sales</a>
       </div>
+    </Section>
+  );
+}
+/**
+ * The verifiable-coverage band.
+ *
+ * Placed immediately after the hero because the first question a platform lead
+ * asks is "how much of my estate does this actually see?" — and the honest
+ * answer is a scanner count plus a plain statement of what is read-only, not a
+ * percentage with nothing behind it. Numbers come from COVERAGE_FACTS, which is
+ * tied to the connector's own scanner registry (see its comment).
+ */
+function CoverageBand() {
+  return (
+    <Section id="coverage" className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
+      <div className="max-w-6xl mx-auto px-5">
+        <div className="max-w-2xl mb-12">
+          <Eyebrow>Coverage, in numbers</Eyebrow>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">
+            How much of your cloud it actually reads.
+          </h2>
+          <p className="text-slate-600 dark:text-slate-300 mt-4">
+            Coverage is the part of a cloud tool worth checking first, so these are counts rather than adjectives.
+            Each figure below is measured against the connector that runs in production today.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {COVERAGE_FACTS.map(f => (
+            <div key={f.label} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+              <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-2">{f.value}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{f.label}</div>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-6 max-w-2xl">
+          Scan intervals and regions are configured per account at connect time. Connecting an account reads its
+          inventory and cost data — it does not modify anything in it.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * The DevSecOps roadmap.
+ *
+ * Rendered as its own section, styled as clearly not-yet-available (dashed
+ * borders, muted status pills, an explicit "not available yet" badge), because
+ * these are the capabilities most likely to be misread as shipping. They are
+ * all absent from src/routes/lazyRoutes.manifest.ts, so this describes work in
+ * progress rather than a feature list.
+ *
+ * The visual distinction is deliberate and load-bearing: every claim on the
+ * rest of this page is about something a visitor can use today, and mixing
+ * these into the module grid would quietly break that.
+ */
+function DevSecOpsRoadmap() {
+  return (
+    <Section id="devsecops" className="!max-w-none border-y border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/20">
+      <div className="max-w-6xl mx-auto px-5">
+        <div className="max-w-3xl mb-12">
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-1 mb-4">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              Coming soon — not available yet
+            </span>
+          </div>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">
+            The DevSecOps suite, in development.
+          </h2>
+          <p className="text-slate-600 dark:text-slate-300 mt-4">
+            Vulnerability findings, application and code security, container and Kubernetes security, and
+            infrastructure security are being built on the same inventory and identity model as the modules above —
+            so a finding can name the account, the resource, and the owner without a second integration.
+          </p>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">
+            None of the items below can be used today. They are listed so you know what is coming and can tell us
+            what matters most — not because they are ready.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {DEVSECOPS_ROADMAP.map(item => (
+            <div
+              key={item.name}
+              className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-5"
+            >
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{item.name}</div>
+                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                  {item.status}
+                </span>
+              </div>
+              <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-3">{item.desc}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {item.tags.map(t => (
+                  <span key={t} className="text-[11px] font-medium px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-10 flex flex-wrap items-center gap-3">
+          <a
+            href={CONTACT_SALES_HREF}
+            className="text-sm font-semibold px-5 py-2.5 rounded-md border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-900"
+          >
+            Tell us what to build first
+          </a>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            We would rather ship these fully working than half-connected.
+          </span>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * The comparison section.
+ *
+ * Compares against the two approaches teams actually use today — per-provider
+ * consoles, and exported cost data in a spreadsheet — rather than against a
+ * named competitor. Nothing here asserts anything about another company's
+ * product, which is both the honest framing and the one that stays true when
+ * their feature sets change.
+ *
+ * A "no" in the console or spreadsheet column is not a criticism of those
+ * tools; it is the specific reason a team ends up looking for something else.
+ * The one row those approaches do win (read-only access) is shown as a tie on
+ * purpose — a table where the product wins every row is not a comparison.
+ */
+function ComparisonTable() {
+  const columnClass = 'text-center px-4 py-3 text-sm';
+  return (
+    <Section id="why">
+      <div className="max-w-2xl mb-12">
+        <Eyebrow>Why not just use the consoles</Eyebrow>
+        <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">
+          The consoles are not the problem. Not talking to each other is.
+        </h2>
+        <p className="text-slate-600 dark:text-slate-300 mt-4">
+          Most teams already own a monitoring tool, a cost dashboard, and a security scanner. The gap is that none of
+          them can answer "which resource, in which account, changed what" — so the work lands on someone to
+          reconcile by hand.
+        </p>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+        <table className="w-full min-w-[36rem] border-collapse">
+          <caption className="sr-only">
+            Comparison of per-provider consoles, manual spreadsheets, and HorizonVigil across common cloud
+            operations tasks.
+          </caption>
+          <thead>
+            <tr className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800">
+              <th scope="col" className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Task
+              </th>
+              <th scope="col" className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Provider consoles
+              </th>
+              <th scope="col" className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Manual spreadsheets
+              </th>
+              <th scope="col" className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+                HorizonVigil
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {COMPARISON_ROWS.map(row => (
+              <tr key={row.label} className="border-b border-slate-100 dark:border-slate-800/60 last:border-b-0">
+                <th scope="row" className="text-left px-4 py-3 text-sm font-normal text-slate-700 dark:text-slate-200">
+                  {row.label}
+                </th>
+                {[row.consoles, row.spreadsheet, row.hv].map((ok, i) => (
+                  <td key={i} className={columnClass}>
+                    <span
+                      className={ok
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-slate-300 dark:text-slate-600'}
+                    >
+                      {ok ? '✓' : '—'}
+                    </span>
+                    <span className="sr-only">{ok ? 'Yes' : 'No'}</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-400 dark:text-slate-500 mt-4 max-w-2xl">
+        Provider consoles and spreadsheets are read-only by nature, and so is HorizonVigil by default — that row is a
+        tie, not a win. Where it differs is having one place where the same resource carries its account, its cost,
+        and its security context together.
+      </p>
     </Section>
   );
 }

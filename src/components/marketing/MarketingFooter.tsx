@@ -17,7 +17,9 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
   {
     title: 'Product',
     links: [
+      { label: 'Coverage', href: '/#coverage', section: true },
       { label: 'Platform', href: '/#platform', section: true },
+      { label: 'DevSecOps', href: '/#devsecops', section: true },
       { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
       { label: 'Documentation', href: '/docs' },
@@ -54,7 +56,7 @@ export function MarketingFooter() {
         <div className="col-span-2">
           <Logo />
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-xs">
-            One control plane for AWS and GCP — inventory, cost, security, and automated remediation.
+            One control plane for AWS and GCP — inventory, cost, security, and guided remediation.
           </p>
         </div>
         {COLUMNS.map(col => (

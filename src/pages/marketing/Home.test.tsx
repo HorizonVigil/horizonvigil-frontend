@@ -152,3 +152,71 @@ describe('MarketingHome', () => {
     expect(docsLink).toHaveAttribute('href', '/docs');
   });
 });
+/**
+ * The coverage and roadmap sections are the two additions most able to mislead,
+ * so they are asserted rather than trusted: the coverage numbers have to be the
+ * real scanner count, and the DevSecOps work has to be visibly marked as not
+ * available.
+ */
+describe('MarketingHome coverage and roadmap honesty', () => {
+  it('states the real registered AWS scanner count', () => {
+    renderHome();
+
+    // 88 regional + 13 global scanners, counted from the connector's own
+    // REGIONAL_SCANNERS/GLOBAL_SCANNERS registry. If that registry changes,
+    // this copy has to change with it.
+    expect(screen.getAllByText('101').length).toBeGreaterThan(0);
+    expect(document.body.textContent).toMatch(/101 AWS service scanners/);
+  });
+
+  it('labels the DevSecOps section as not available rather than shipping it', () => {
+    const { container } = renderHome();
+
+    expect(container.querySelector('#devsecops')).toBeInTheDocument();
+    expect(screen.getByText(/coming soon — not available yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/none of the items below can be used today/i)).toBeInTheDocument();
+  });
+
+  it('names each DevSecOps capability with a not-yet-shipped status', () => {
+    renderHome();
+
+    for (const name of [
+      'Vulnerability findings',
+      'Application & code security',
+      'Container & Kubernetes security',
+      'Infrastructure security',
+      'Scan scheduling & history',
+      'Source inventory',
+    ]) {
+      expect(screen.getByText(name), name).toBeInTheDocument();
+    }
+
+    // Every card carries an explicit status, so none can read as available.
+    const statuses = screen.getAllByText(/^(In development|Planned)$/);
+    expect(statuses.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('does not fold the unshipped DevSecOps capabilities into the module count', () => {
+    renderHome();
+
+    const pageText = document.body.textContent ?? '';
+
+    // The eleven-module claim covers modules a visitor can use today; the
+    // roadmap must stay outside it.
+    expect(pageText).toMatch(/eleven modules\. one data model\./i);
+    expect(pageText).not.toMatch(/seventeen modules/i);
+    expect(pageText).not.toMatch(/fifteen modules/i);
+  });
+
+  it('renders the comparison as a real, accessible table', () => {
+    renderHome();
+
+    const table = screen.getByRole('table');
+    expect(table).toBeInTheDocument();
+
+    // A caption and row headers keep the comparison readable by assistive tech
+    // rather than being a decorative grid of ticks.
+    expect(within(table).getByRole('columnheader', { name: /horizonvigil/i })).toBeInTheDocument();
+    expect(within(table).getAllByRole('rowheader').length).toBeGreaterThan(0);
+  });
+});
