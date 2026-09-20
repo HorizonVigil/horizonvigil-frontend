@@ -980,7 +980,44 @@ function ComparisonTable() {
           reconcile by hand.
         </p>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      {/*
+        Two presentations, one source: stacked cards below `sm`, the real table
+        from `sm` up. Both map over COMPARISON_ROWS, so they cannot drift.
+
+        The table alone could not be made to fit a phone. Its min-content width
+        is wider than 375px, and an `overflow-x-auto` wrapper was NOT sufficient
+        to stop the DOCUMENT scrolling sideways: measured in a real browser, the
+        page overflowed by 166px with the wrapper in place, neutralising the
+        table's min-width only reduced it to 52px, and the wrapper's own
+        overflow-x was `auto` the whole time. Cards are deterministic at any
+        width and read better than four cramped columns.
+      */}
+      <div className="sm:hidden flex flex-col gap-3">
+        {COMPARISON_ROWS.map(row => (
+          <div key={row.label} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{row.label}</div>
+            <dl className="mt-3 flex flex-col gap-2">
+              {([
+                ['Provider consoles', row.consoles],
+                ['Manual spreadsheets', row.spreadsheet],
+                ['HorizonVigil', row.hv],
+              ] as const).map(([label, ok]) => (
+                <div key={label} className="flex items-center justify-between gap-3">
+                  <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>
+                  <dd className={ok
+                    ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                    : 'text-sm text-slate-300 dark:text-slate-600'}>
+                    {ok ? '✓' : '—'}
+                    <span className="sr-only">{ok ? 'Yes' : 'No'}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden sm:block rounded-xl border border-slate-200 dark:border-slate-800">
         <table className="w-full min-w-[36rem] border-collapse">
           <caption className="sr-only">
             Comparison of per-provider consoles, manual spreadsheets, and HorizonVigil across common cloud
