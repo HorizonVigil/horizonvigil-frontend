@@ -1568,9 +1568,28 @@ export interface OverviewDashboard {
 }
 
 export interface ActivityEntry { id: string; action: string; targetType: string | null; targetId: string | null; metadata: Record<string, unknown>; occurredAt: string; actor: { email: string; name: string | null } | null }
+/**
+ * How a change was made, classified server-side from CloudTrail's own signals
+ * (connector-aws lib/changeProvenance.ts). `actorClass` is 'unknown' whenever
+ * the signals do not settle it -- notably the AWS CLI, which people and CI
+ * both use -- and `ambiguityReason` then says why. Never render 'unknown' as
+ * a person.
+ */
+export interface ChangeProvenance {
+  actorClass: 'human' | 'automation' | 'aws_service' | 'unknown';
+  actorKind: 'console' | 'cli' | 'sdk' | 'terraform' | 'cloudformation' | 'cdk' | 'pulumi' | 'ansible' | 'ai_assistant' | 'aws_service' | 'unknown';
+  basis: 'invoked_by' | 'identity_type' | 'user_agent' | 'none';
+  actorLabel: string | null;
+  ambiguityReason: string | null;
+  summary: string;
+}
+
 export interface CloudTrailEvent {
   eventId: string; eventName: string; eventTime: string; eventSource: string;
   username: string | null; userIdentityType: string | null; userIdentityArn: string | null;
+  /** The AWS service that made the call, when one did. Null for principal-initiated changes. */
+  invokedBy: string | null;
+  provenance: ChangeProvenance;
   sourceIpAddress: string | null; userAgent: string | null; awsRegion: string | null; readOnly: boolean | null;
   errorCode: string | null; errorMessage: string | null;
   resources: { resourceType?: string; resourceName?: string }[];

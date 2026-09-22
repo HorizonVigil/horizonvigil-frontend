@@ -23,7 +23,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CardSkeleton } from '../Skeleton';
 import { EmptyState } from '../EmptyState';
 import { Icon } from '../icons';
-import { api, friendlyErrorMessage } from '../../lib/api';
+import { api, friendlyErrorMessage, type ChangeProvenance } from '../../lib/api';
 import type { UnifiedAccountRow } from '../../lib/unifiedAccounts';
 import { ProviderChips, type ProviderValue } from './ProviderChips';
 
@@ -35,6 +35,51 @@ interface Change {
   status: string | null;
   resource: string | null;
   extra: string | null;
+  /**
+   * How the change was made, classified server-side. Absent for providers
+   * whose feed does not carry the signals (GCP/Azure today) -- which is why
+   * this is optional rather than defaulted to 'unknown': "we did not classify
+   * this provider" and "we classified it and could not tell" are different
+   * statements, and only the second deserves a badge.
+   */
+  provenance?: ChangeProvenance;
+}
+
+/**
+ * How a change was made, at a glance.
+ *
+ * The point of the colour is triage, not decoration: a security group changed
+ * by Terraform at 14:00 and the same change made by hand in the console at
+ * 02:00 demand completely different responses, and until now the feed showed
+ * an IAM role name for both.
+ *
+ * `unknown` is deliberately NOT styled as a warning. It is not a problem with
+ * the change -- it is the absence of a signal, and colouring it red would
+ * train people to chase CloudTrail's gaps instead of their own estate. It
+ * carries the reason as a tooltip so the gap is explicable, not just visible.
+ */
+function ActorBadge({ provenance }: { provenance: ChangeProvenance }) {
+  const tone =
+    provenance.actorClass === 'human'
+      ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+      : provenance.actorClass === 'automation'
+        ? 'bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+        : provenance.actorClass === 'aws_service'
+          ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+          : 'bg-slate-50 text-slate-400 dark:bg-slate-800/60 dark:text-slate-500';
+
+  const label =
+    provenance.actorLabel
+    ?? (provenance.actorClass === 'unknown' ? 'Unattributed' : 'Unknown');
+
+  return (
+    <span
+      className={['inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium', tone].join(' ')}
+      title={provenance.summary}
+    >
+      {label}
+    </span>
+  );
 }
 
 interface ChangesPanelProps {
@@ -208,6 +253,7 @@ function normalizeAwsChanges(
         who: normalizeText(
           event.username ?? event.userIdentityType,
         ),
+        provenance: event.provenance,
         operation: normalizeText(event.eventName),
         status: errorCode ? 'error' : 'ok',
         resource,
@@ -253,6 +299,9 @@ function normalizeProviderChanges(
         id,
         when: normalizeNullableText(event.when),
         who: normalizeText(event.who),
+        // No provenance: the GCP/Azure change feeds do not carry the signals
+        // CloudTrail does, and inventing an 'unknown' badge for them would
+        // claim we classified something we never looked at.
         operation: normalizeText(event.operation),
         status: normalizeStatus(event.status),
         resource: normalizeNullableText(event.resource),
@@ -848,6 +897,13 @@ export function ChangesPanel({
                       'break-words',
                     ].join(' ')}
                   >
+                    {event.provenance ? (
+                      <>
+                        <ActorBadge provenance={event.provenance} />
+                        <span aria-hidden="true">{' '}</span>
+                      </>
+                    ) : null}
+
                     <span>{who}</span>
 
                     {resource ? (
