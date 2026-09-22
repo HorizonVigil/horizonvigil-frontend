@@ -77,7 +77,9 @@ test.describe('go-live smoke test', () => {
 
     // Wait for the list itself, not a timeout: the rows arrive with the
     // inventory request.
-    const firstRow = page.locator('table tbody tr').first();
+    // Empty-state rows are real <tr> elements too, but only data rows expose
+    // keyboard activation because DataTable has an onRowClick handler.
+    const firstRow = page.locator('table tbody tr[tabindex="0"]').first();
     await firstRow.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
 
     if (await firstRow.count() === 0) {

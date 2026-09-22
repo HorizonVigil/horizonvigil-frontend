@@ -88,6 +88,12 @@ describe('authenticated E2E suite integrity', () => {
     }
   });
 
+  it('cloud-account smoke ignores the empty-state table row', () => {
+    const spec = stripComments(source('e2e/smoke.spec.ts'));
+
+    expect(spec).toMatch(/tbody tr\[tabindex=["']0["']\]/);
+  });
+
   it('the smoke project is still wired to the spec and its setup', () => {
     const config = stripComments(source('playwright.config.ts'));
 
