@@ -52,8 +52,14 @@ function Coverage({ workspace }: { workspace: AdvisorWorkspace }) {
   return <div className="space-y-3">
     <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h2 className="font-semibold text-slate-950 dark:text-white">What the advisor could verify</h2><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{workspace.coverageNote}</p></div>
     {workspace.evidence.map(item => <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-center justify-between gap-3"><div className="font-medium text-slate-900 dark:text-white">{item.label}</div><Badge>{item.state}</Badge></div>
+      <div className="flex items-center justify-between gap-3"><div><div className="font-medium text-slate-900 dark:text-white">{item.label}</div>{item.provider && <div className="mt-0.5 text-xs text-slate-400">{item.provider} evidence</div>}</div><Badge>{item.state}</Badge></div>
       <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{item.summary}</p>
+      {(item.capabilityState || item.freshness || item.completeness) && <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        {item.capabilityState && <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Capability: {item.capabilityState.replace(/_/g, ' ')}</span>}
+        {item.freshness && <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Freshness: {item.freshness}</span>}
+        {item.completeness && <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Completeness: {item.completeness.replace(/_/g, ' ')}</span>}
+      </div>}
+      {item.limitation && <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><Icon name="info" size={15}/><span>{item.limitation}</span></div>}
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-400"><span>Retrieved {formatDate(item.retrievedAt)}</span><span>Observed {formatDate(item.observedAt)}</span></div>
       {safeAdvisorHref(item.href) && <Link className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400" to={item.href}>Open source module <Icon name="arrow-up-right" size={14} /></Link>}
     </div>)}

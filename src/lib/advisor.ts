@@ -5,6 +5,8 @@ export type DecisionStatus = 'approved' | 'dismissed' | 'deferred';
 export interface AdvisorEvidence {
   id: string; label: string; domain: AdvisorDomain; state: 'available' | 'partial' | 'unavailable' | 'denied';
   summary: string; retrievedAt: string; observedAt: string | null; href: string;
+  provider?: string; connectionId?: string; capabilityState?: string; freshness?: string; completeness?: string;
+  limitation?: string | null; rawEvidenceReference?: string;
 }
 export interface AdvisorSignal {
   id: string; title: string; description: string; domain: AdvisorDomain;
