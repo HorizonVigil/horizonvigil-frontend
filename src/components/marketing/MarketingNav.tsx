@@ -5,9 +5,8 @@ import { useTheme } from '../../lib/theme';
 import { scrollToSection } from '../../lib/scrollToSection';
 
 const SECTION_LINKS = [
-  { id: 'coverage', label: 'Coverage' },
+  { id: 'intelligence', label: 'Intelligence' },
   { id: 'platform', label: 'Platform' },
-  { id: 'devsecops', label: 'DevSecOps' },
   { id: 'security', label: 'Security' },
 ];
 const PAGE_LINKS = [

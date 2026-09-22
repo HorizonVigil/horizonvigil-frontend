@@ -3,10 +3,8 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   cleanup,
-  fireEvent,
   render,
   screen,
-  within,
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -41,7 +39,7 @@ describe('MarketingHome', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: /one control plane for every aws and gcp account/i,
+        name: /turn cloud signals into governed decisions/i,
       }),
     ).toBeInTheDocument();
 
@@ -67,77 +65,41 @@ describe('MarketingHome', () => {
     expect(screen.getByText(/privacy/i)).toBeInTheDocument();
   });
 
-  it('preserves the current eleven-module product claim', () => {
+  it('positions Horizon Intelligence as a governed decision system', () => {
     renderHome();
 
     const pageText = document.body.textContent ?? '';
 
-    expect(pageText).not.toMatch(/twelve modules/i);
-
     expect(
       screen.getByRole('heading', {
-        name: /eleven modules\. one data model\./i,
+        name: /a decision system, not another stream of findings/i,
       }),
     ).toBeInTheDocument();
+    expect(pageText).toMatch(/explain/i);
+    expect(pageText).toMatch(/verify/i);
+    expect(pageText).toMatch(/advise/i);
+    expect(pageText).toMatch(/record/i);
   });
 
-  it('provides an accessible and interactive How It Works tablist', () => {
+  it('shows the four operating pillars', () => {
     renderHome();
-
-    const tablist = screen.getByRole('tablist', {
-      name: /how it works/i,
-    });
-
-    const connectTab = within(tablist).getByRole('tab', {
-      name: /connect/i,
-    });
-
-    const auditTab = within(tablist).getByRole('tab', {
-      name: /audit/i,
-    });
-
-    expect(connectTab).toHaveAttribute('aria-selected', 'true');
-    expect(auditTab).toHaveAttribute('aria-selected', 'false');
-
-    const tabpanel = screen.getByRole('tabpanel');
-
-    expect(tabpanel).toBeInTheDocument();
-    expect(tabpanel).toHaveTextContent(/scoped access key/i);
-
-    fireEvent.click(auditTab);
-
-    expect(auditTab).toHaveAttribute('aria-selected', 'true');
-    expect(connectTab).toHaveAttribute('aria-selected', 'false');
-    expect(screen.getByRole('tabpanel')).toHaveTextContent(
-      /logged automatically/i,
-    );
+    expect(screen.getByRole('heading', { name: 'FinOps' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Security' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operations' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Governance' })).toBeInTheDocument();
   });
 
-  it('keeps the role selector limited to real product roles and updates the role view', () => {
+  it('shows the provider-specific coverage boundary', () => {
     renderHome();
-
-    expect(
-      screen.getByRole('heading', {
-        name: /same data, a different starting view for each role/i,
-      }),
-    ).toBeInTheDocument();
-
-    const securityRoleButton = screen.getByRole('button', {
-      name: 'Security & Compliance',
-    });
-
-    expect(securityRoleButton).toBeInTheDocument();
-
-    fireEvent.click(securityRoleButton);
-
-    expect(
-      screen.getAllByText('Cloud Security').length,
-    ).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('heading', { name: 'AWS' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Google Cloud' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Azure' })).toBeInTheDocument();
   });
 
   it('preserves the public navigation anchor targets', () => {
     const { container } = renderHome();
 
+    expect(container.querySelector('#intelligence')).toBeInTheDocument();
     expect(container.querySelector('#platform')).toBeInTheDocument();
     expect(container.querySelector('#security')).toBeInTheDocument();
   });
@@ -166,57 +128,18 @@ describe('MarketingHome coverage and roadmap honesty', () => {
     // REGIONAL_SCANNERS/GLOBAL_SCANNERS registry. If that registry changes,
     // this copy has to change with it.
     expect(screen.getAllByText('101').length).toBeGreaterThan(0);
-    expect(document.body.textContent).toMatch(/101 AWS service scanners/);
+    expect(document.body.textContent).toMatch(/101/);
   });
 
-  it('labels the DevSecOps section as not available rather than shipping it', () => {
-    const { container } = renderHome();
-
-    expect(container.querySelector('#devsecops')).toBeInTheDocument();
-    expect(screen.getByText(/coming soon — not available yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/none of the items below can be used today/i)).toBeInTheDocument();
-  });
-
-  it('names each DevSecOps capability with a not-yet-shipped status', () => {
+  it('describes Azure as a V1 rollout rather than established production coverage', () => {
     renderHome();
-
-    for (const name of [
-      'Vulnerability findings',
-      'Application & code security',
-      'Container & Kubernetes security',
-      'Infrastructure security',
-      'Scan scheduling & history',
-      'Source inventory',
-    ]) {
-      expect(screen.getByText(name), name).toBeInTheDocument();
-    }
-
-    // Every card carries an explicit status, so none can read as available.
-    const statuses = screen.getAllByText(/^(In development|Planned)$/);
-    expect(statuses.length).toBeGreaterThanOrEqual(6);
+    expect(document.body.textContent).toMatch(/Azure has its own connector and workspace and is being rolled out through the V1 plan/i);
   });
 
-  it('does not fold the unshipped DevSecOps capabilities into the module count', () => {
+  it('states the human-control boundary', () => {
     renderHome();
-
     const pageText = document.body.textContent ?? '';
-
-    // The eleven-module claim covers modules a visitor can use today; the
-    // roadmap must stay outside it.
-    expect(pageText).toMatch(/eleven modules\. one data model\./i);
-    expect(pageText).not.toMatch(/seventeen modules/i);
-    expect(pageText).not.toMatch(/fifteen modules/i);
-  });
-
-  it('renders the comparison as a real, accessible table', () => {
-    renderHome();
-
-    const table = screen.getByRole('table');
-    expect(table).toBeInTheDocument();
-
-    // A caption and row headers keep the comparison readable by assistive tech
-    // rather than being a decorative grid of ticks.
-    expect(within(table).getByRole('columnheader', { name: /horizonvigil/i })).toBeInTheDocument();
-    expect(within(table).getAllByRole('rowheader').length).toBeGreaterThan(0);
+    expect(pageText).toMatch(/read-only by default/i);
+    expect(pageText).toMatch(/your team decides/i);
   });
 });

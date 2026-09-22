@@ -203,6 +203,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
 /** Maps navConfig module labels to icon names — keeps navigation data-driven while the icons stay explicit. */
 export const NAV_ICON_MAP: Record<string, IconName> = {
   'AI Copilot': 'ai',
+  'Intelligence': 'ai',
   'Overview': 'overview',
   'Cloud Accounts': 'cloud',
   'Resources': 'resources',
