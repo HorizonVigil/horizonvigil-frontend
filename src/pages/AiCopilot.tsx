@@ -1,219 +1,146 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { FilterBar } from '../components/FilterBar';
-import { Breadcrumb } from '../components/Breadcrumb';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Badge } from '../components/Badge';
+import { Drawer } from '../components/Drawer';
 import { EmptyState } from '../components/EmptyState';
-import { useConfirm } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
+import { api, friendlyErrorMessage } from '../lib/api';
+import { useOrg } from '../lib/orgContext';
 import { useToast } from '../lib/toast';
-import { api, friendlyErrorMessage, type ConversationSummary, type ChatMessage, type ChatSource } from '../lib/api';
-import { renderMarkdownLite } from '../lib/chatMarkdown';
+import { pendingSignals, safeAdvisorHref, type AdvisorAnswer, type AdvisorDecision, type AdvisorMode, type AdvisorSignal, type AdvisorWorkspace, type DecisionStatus } from '../lib/advisor';
+import { sampleAdvisorWorkspace } from '../lib/advisorSample';
+import { AdvisorConversations } from './AdvisorConversations';
 
-function SourceTags({ sources }: { sources: ChatSource[] }) {
-  if (sources.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1 mt-1.5">
-      {sources.map((s, i) => (
-        <span key={i} title={s.summary} className="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400">
-          {s.type.replace(/_/g, ' ')}
-        </span>
-      ))}
+type View = 'overview' | 'queue' | 'advisor' | 'decisions' | 'outcomes' | 'evidence';
+const VIEWS: Array<{ key: View; label: string }> = [
+  { key: 'overview', label: 'Overview' }, { key: 'queue', label: 'Decision queue' },
+  { key: 'advisor', label: 'Advisor' }, { key: 'decisions', label: 'Decision records' },
+  { key: 'outcomes', label: 'Outcomes' }, { key: 'evidence', label: 'Evidence & coverage' },
+];
+
+function formatDate(value: string | null): string {
+  if (!value) return 'Not observed';
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? 'Unknown' : date.toLocaleString();
+}
+
+function decisionFor(workspace: AdvisorWorkspace, signalId: string): AdvisorDecision | undefined {
+  return workspace.decisions.find(item => item.signal_id === signalId);
+}
+
+function Metric({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+  return <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="mt-2 text-3xl font-semibold tabular-nums text-slate-950 dark:text-white">{value}</div>
+    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{detail}</div>
+  </div>;
+}
+
+function SignalCard({ signal, decision, onOpen }: { signal: AdvisorSignal; decision?: AdvisorDecision; onOpen: () => void }) {
+  return <article className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-brand-700">
+    <div className="flex flex-wrap items-center gap-2"><Badge>{signal.severity}</Badge><Badge>{signal.domain}</Badge><span className="text-xs text-slate-400">{signal.provider}</span>{decision && <Badge>{decision.status}</Badge>}</div>
+    <h3 className="mt-3 text-base font-semibold text-slate-950 dark:text-white">{signal.title}</h3>
+    <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{signal.description}</p>
+    <div className="mt-4 flex items-end justify-between gap-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+      <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Impact</div><div className="mt-0.5 text-sm font-medium text-slate-700 dark:text-slate-200">{signal.impact}</div></div>
+      <button type="button" onClick={onOpen} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-white dark:text-slate-950">Review <Icon name="arrow-right" size={15} /></button>
     </div>
-  );
+  </article>;
+}
+
+function Coverage({ workspace }: { workspace: AdvisorWorkspace }) {
+  return <div className="space-y-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h2 className="font-semibold text-slate-950 dark:text-white">What the advisor could verify</h2><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{workspace.coverageNote}</p></div>
+    {workspace.evidence.map(item => <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-3"><div className="font-medium text-slate-900 dark:text-white">{item.label}</div><Badge>{item.state}</Badge></div>
+      <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{item.summary}</p>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-400"><span>Retrieved {formatDate(item.retrievedAt)}</span><span>Observed {formatDate(item.observedAt)}</span></div>
+      {safeAdvisorHref(item.href) && <Link className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400" to={item.href}>Open source module <Icon name="arrow-up-right" size={14} /></Link>}
+    </div>)}
+  </div>;
 }
 
 export function AiCopilot() {
+  const { currentOrg, scope } = useOrg();
   const { toast } = useToast();
-  const { confirm, dialog: confirmDialog } = useConfirm();
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const requestedView = params.get('view') as View | null;
+  const view: View = VIEWS.some(item => item.key === requestedView) ? requestedView! : 'overview';
+  const [workspace, setWorkspace] = useState<AdvisorWorkspace | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [sample, setSample] = useState(false);
+  const [selected, setSelected] = useState<AdvisorSignal | null>(null);
+  const [answer, setAnswer] = useState<AdvisorAnswer | null>(null);
+  const [answerLoading, setAnswerLoading] = useState(false);
+  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus>('approved');
+  const [rationale, setRationale] = useState('');
+  const [reviewAt, setReviewAt] = useState('');
+  const [saving, setSaving] = useState(false);
+  const scopeKey = `${currentOrg?.id ?? 'none'}:${scope?.type ?? 'org'}:${scope?.id ?? currentOrg?.id ?? 'none'}`;
 
-  /*
-   * Memoised so the effect below can depend on it honestly. As a plain
-   * function it was redeclared on every render, so the only way to make the
-   * effect run once was an empty dependency array that misstated what the
-   * effect actually uses.
-   */
-  const loadConversations = useCallback(async () => {
-    try {
-      const res = await api.getConversations();
-      setConversations(res.items);
-    } catch (err) {
-      const message = friendlyErrorMessage(err, 'Failed to load conversations.');
-      setError(message);
-      toast(message, 'error');
-    }
-  }, [toast]);
+  const load = useCallback(async () => {
+    if (!scopeKey) return;
+    setLoading(true); setError(null); setSample(false);
+    try { setWorkspace(await api.getAdvisorWorkspace()); }
+    catch (cause) { setWorkspace(null); setError(friendlyErrorMessage(cause, 'Advisor data could not be loaded.')); }
+    finally { setLoading(false); }
+  }, [scopeKey]);
 
-  useEffect(() => { void loadConversations(); }, [loadConversations]);
+  useEffect(() => { void load(); }, [load]);
+  const pending = useMemo(() => workspace ? pendingSignals(workspace) : [], [workspace]);
+  const critical = workspace?.signals.filter(signal => signal.severity === 'critical').length ?? 0;
+  const availableEvidence = workspace?.evidence.filter(item => item.state === 'available').length ?? 0;
 
-  useEffect(() => {
-    if (!activeId) { setMessages([]); return; }
-    api.getConversationMessages(activeId)
-      .then((res) => setMessages(res.items))
-      .catch((err) => {
-        const message = friendlyErrorMessage(err, 'Failed to load this conversation.');
-        setError(message);
-        toast(message, 'error');
-      });
-  }, [activeId, toast]);
+  function showSample() { setWorkspace(sampleAdvisorWorkspace()); setSample(true); setError(null); }
+  function openSignal(signal: AdvisorSignal) { setSelected(signal); setAnswer(null); setRationale(''); setReviewAt(''); setDecisionStatus('approved'); }
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
-
-  async function handleSend() {
-    const message = input.trim();
-    if (!message || sending) return;
-    setInput('');
-    setError(null);
-    setSending(true);
-    setMessages((prev) => [...prev, { id: `local-${Date.now()}`, role: 'user', content: message, sources: [], created_at: new Date().toISOString() }]);
-    try {
-      const reply = await api.sendChatMessage({ conversationId: activeId ?? undefined, message });
-      setActiveId(reply.conversationId);
-      setMessages((prev) => [...prev, { id: `local-${Date.now()}-a`, role: 'assistant', content: reply.message, sources: reply.sources, created_at: new Date().toISOString() }]);
-      await loadConversations();
-    } catch (err) {
-      setError((err as Error).message || 'The AI Copilot is unavailable right now.');
-    } finally {
-      setSending(false);
-    }
+  async function ask(mode: AdvisorMode) {
+    if (!selected || sample) return;
+    setAnswerLoading(true); setAnswer(null);
+    try { setAnswer(await api.explainAdvisorSignal({ signalId: selected.id, mode })); }
+    catch (cause) { toast(friendlyErrorMessage(cause, 'The advisor could not explain this signal.'), 'error'); }
+    finally { setAnswerLoading(false); }
   }
 
-  async function handleDelete(id: string, title: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!(await confirm(`Delete conversation "${title}"? This is irreversible.`))) return;
+  async function saveDecision() {
+    if (!selected || !workspace || sample || !rationale.trim() || (decisionStatus === 'deferred' && !reviewAt)) return;
+    setSaving(true);
     try {
-      await api.deleteConversation(id);
-      if (activeId === id) setActiveId(null);
-      await loadConversations();
-    } catch (err) {
-      toast(friendlyErrorMessage(err, 'Failed to delete conversation.'), 'error');
-    }
+      const record = await api.recordAdvisorDecision({ signalId: selected.id, status: decisionStatus, rationale: rationale.trim(), reviewAt: decisionStatus === 'deferred' ? new Date(reviewAt).toISOString() : null });
+      setWorkspace({ ...workspace, decisions: [record, ...workspace.decisions.filter(item => item.signal_id !== record.signal_id)] });
+      toast('Decision recorded with its evidence context.', 'success'); setSelected(null);
+    } catch (cause) { toast(friendlyErrorMessage(cause, 'The decision could not be recorded.'), 'error'); }
+    finally { setSaving(false); }
   }
 
-  async function handlePin(id: string, pinned: boolean, e: React.MouseEvent) {
-    e.stopPropagation();
-    try {
-      await api.pinConversation(id, !pinned);
-      await loadConversations();
-    } catch (err) {
-      toast(friendlyErrorMessage(err, 'Failed to update pin.'), 'error');
-    }
-  }
+  if (loading) return <div className="space-y-4" aria-busy="true"><div className="h-40 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800"/><div className="grid gap-4 md:grid-cols-4">{[1,2,3,4].map(n => <div key={n} className="h-28 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800"/>)}</div></div>;
 
-  async function handleRenameSubmit(id: string) {
-    const title = renameValue.trim();
-    setRenamingId(null);
-    if (!title || title === conversations.find((c) => c.id === id)?.title) return;
-    try {
-      await api.renameConversation(id, title);
-      await loadConversations();
-    } catch (err) {
-      toast(friendlyErrorMessage(err, 'Failed to rename conversation.'), 'error');
-    }
-  }
+  if (!workspace) return <div className="space-y-4"><EmptyState icon="ai" title="Intelligence workspace unavailable" description={error ?? 'The advisor service did not return a workspace.'} action={{ label: 'View sample workspace', onClick: showSample }} /><div className="flex justify-center"><button type="button" onClick={() => void load()} className="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400">Try the live service again</button></div></div>;
 
-  return (
-    <div>
-      <FilterBar title="AI Copilot" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
+  const visibleSignals = view === 'queue' ? pending : workspace.signals;
+  return <div key={scopeKey} className="space-y-5 pb-10">
+    <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 px-5 py-6 text-white shadow-lg sm:px-7">
+      <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-brand-500/20 blur-3xl" />
+      <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-end"><div><div className="flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-brand-300"><Icon name="sparkles" size={16}/> HORIZON INTELLIGENCE V1</div><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight sm:text-4xl">Your cloud. Every decision, explained.</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">A read-only decision layer over cost, security and operations. HorizonVigil brings the evidence together; your team makes the call.</p></div>
+      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm"><div className="text-xs uppercase tracking-wide text-slate-400">Active scope</div><div className="mt-1 font-semibold">{scope?.name ?? currentOrg?.name ?? 'Organization'}</div><div className="mt-1 text-xs text-slate-400">Updated {formatDate(workspace.retrievedAt)}</div></div></div>
+    </section>
+    {sample && <div role="status" className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"><Icon name="info" size={18}/><div><strong>Sample workspace.</strong> This illustrative scenario is local to your browser and is never mixed with customer data. Decisions are disabled.</div></div>}
+    <nav aria-label="Intelligence workspace" className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800">{VIEWS.map(item => <button key={item.key} type="button" onClick={() => setParams(item.key === 'overview' ? {} : { view: item.key })} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${view === item.key ? 'border-brand-600 text-brand-700 dark:text-brand-300' : 'border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-white'}`}>{item.label}</button>)}</nav>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4 h-[calc(100vh-160px)]">
-        <div className="flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <button
-            onClick={() => { setActiveId(null); setMessages([]); }}
-            className="m-2 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-3 py-2"
-          >
-            + New conversation
-          </button>
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
-            {conversations.length === 0 && <p className="text-xs text-slate-400 px-2 py-4">No conversations yet.</p>}
-            {conversations.map((c) => (
-              renamingId === c.id ? (
-                <input
-                  key={c.id}
-                  autoFocus
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => void handleRenameSubmit(c.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); void handleRenameSubmit(c.id); }
-                    if (e.key === 'Escape') setRenamingId(null);
-                  }}
-                  className="w-full rounded-md px-2 py-2 mb-1 text-sm border border-brand-400 dark:border-brand-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              ) : (
-                <div
-                  key={c.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setActiveId(c.id)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveId(c.id); } }}
-                  className={`w-full text-left rounded-md px-2 py-2 mb-1 text-sm group flex items-center justify-between gap-1 cursor-pointer ${activeId === c.id ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                >
-                  <span className="truncate flex-1">{c.pinned ? '📌 ' : ''}{c.title}</span>
-                  <span className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameValue(c.title); }} className="text-slate-300 hover:text-brand-500 focus-visible:text-brand-500 text-xs" aria-label="Rename conversation" title="Rename">✎</button>
-                    <button type="button" onClick={(e) => void handlePin(c.id, c.pinned, e)} className="text-slate-300 hover:text-brand-500 focus-visible:text-brand-500 text-xs" aria-label={c.pinned ? 'Unpin conversation' : 'Pin conversation'} title={c.pinned ? 'Unpin' : 'Pin'}>📌</button>
-                    <button type="button" onClick={(e) => void handleDelete(c.id, c.title, e)} className="text-slate-300 hover:text-red-500 focus-visible:text-red-500 text-xs" aria-label="Delete conversation" title="Delete">✕</button>
-                  </span>
-                </div>
-              )
-            ))}
-          </div>
-        </div>
+    {view === 'advisor' ? <AdvisorConversations /> : view === 'evidence' ? <Coverage workspace={workspace} /> : view === 'decisions' ? <div className="space-y-3">{workspace.decisions.length === 0 ? <EmptyState icon="scroll-text" title="No decisions recorded" description="Review a signal and record the team's rationale. The advisor never applies cloud changes." /> : workspace.decisions.map(item => <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="flex flex-wrap items-center gap-2"><Badge>{item.status}</Badge><span className="text-xs text-slate-400">{formatDate(item.created_at)}</span></div><h3 className="mt-2 font-semibold text-slate-950 dark:text-white">{item.signal_title}</h3><p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{item.rationale}</p>{item.review_at && <p className="mt-2 text-xs text-slate-400">Review on {formatDate(item.review_at)}</p>}</div>)}</div> : view === 'outcomes' ? <EmptyState icon="chart-line" title="Outcome measurement starts after decisions" description="V1 records the human decision and evidence. Savings and risk reduction remain “not evaluated” until HorizonVigil can compare a later observation against the same signal." /> : <>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Needs a decision" value={pending.length} detail="Open or due for review"/><Metric label="Critical" value={critical} detail="Highest urgency signals"/><Metric label="Evidence available" value={`${availableEvidence}/${workspace.evidence.length}`} detail="Sources successfully retrieved"/><Metric label="Recorded decisions" value={workspace.decisions.length} detail={workspace.decisionsAvailable ? 'Auditable team rationale' : 'Storage unavailable'} /></div>
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end"><div><h2 className="text-lg font-semibold text-slate-950 dark:text-white">{view === 'queue' ? 'Decision queue' : 'Priority intelligence'}</h2><p className="text-sm text-slate-500 dark:text-slate-400">Signals are derived from live module evidence in the selected scope.</p></div><div className="flex items-center gap-2 text-xs text-slate-500"><span className={`h-2 w-2 rounded-full ${workspace.model.available ? 'bg-emerald-500' : 'bg-amber-500'}`}/>{workspace.model.label}</div></div>
+      {visibleSignals.length === 0 ? <EmptyState icon="check-circle" title="Queue is clear" description="There are no current signals needing a decision in this scope." /> : <div className="grid gap-4 lg:grid-cols-2">{visibleSignals.map(signal => <SignalCard key={signal.id} signal={signal} decision={decisionFor(workspace, signal.id)} onOpen={() => openSignal(signal)} />)}</div>}
+    </>}
 
-        <div className="flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 ? (
-              <EmptyState
-                icon="sparkles"
-                title="Ask about your cloud infrastructure"
-                description="Cost, security findings, Kubernetes clusters, resources — the Copilot fetches live HorizonVigil data for whatever you ask, scoped to what you're allowed to see."
-              />
-            ) : (
-              messages.map((m) => (
-                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-xl px-4 py-2 ${m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100'}`}>
-                    {m.role === 'user' ? <p className="text-sm whitespace-pre-wrap">{m.content}</p> : renderMarkdownLite(m.content)}
-                    {m.role === 'assistant' && <SourceTags sources={m.sources} />}
-                  </div>
-                </div>
-              ))
-            )}
-            {sending && (
-              <div className="flex justify-start">
-                <div className="rounded-xl px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-400 text-sm">Thinking… (CPU-served model, this can take a while)</div>
-              </div>
-            )}
-            {error && <p className="text-sm text-red-500">{error}</p>}
-          </div>
-          <div className="border-t border-slate-200 dark:border-slate-800 p-3 flex gap-2">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
-              placeholder="Ask about cost, security, Kubernetes, resources…"
-              disabled={sending}
-              className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white disabled:opacity-60"
-            />
-            <button
-              onClick={() => void handleSend()}
-              disabled={sending || !input.trim()}
-              className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium px-4 py-2"
-            >
-              Send
-            </button>
-          </div>
-        </div>
-      </div>
-      {confirmDialog}
-    </div>
-  );
+    <Drawer open={selected !== null} onClose={() => setSelected(null)} title={selected?.title ?? 'Signal review'} wide>{selected && <div className="space-y-5">
+      <div className="flex flex-wrap gap-2"><Badge>{selected.severity}</Badge><Badge>{selected.domain}</Badge><Badge>{selected.provider}</Badge></div>
+      <div><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">What was observed</div><p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{selected.description}</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-400">Resource</dt><dd className="mt-1 font-medium text-slate-800 dark:text-slate-200">{selected.resource}</dd></div><div><dt className="text-xs text-slate-400">Observed</dt><dd className="mt-1 font-medium text-slate-800 dark:text-slate-200">{formatDate(selected.observedAt)}</dd></div></dl></div>
+      <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Suggested next step</div><p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-200">{selected.recommendation}</p></div>
+      {!sample && <div><div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Ask the advisor</div><div className="grid grid-cols-3 gap-2">{(['explain','verify','advise'] as AdvisorMode[]).map(mode => <button key={mode} type="button" disabled={answerLoading} onClick={() => void ask(mode)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold capitalize text-slate-700 hover:border-brand-500 hover:text-brand-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200">{mode}</button>)}</div>{answerLoading && <p className="mt-3 text-sm text-slate-500">Reviewing the retrieved evidence…</p>}{answer && <div className="mt-3 rounded-xl border border-brand-200 bg-brand-50 p-4 text-sm leading-6 text-slate-800 dark:border-brand-900 dark:bg-brand-950/30 dark:text-slate-200"><div className="mb-1 flex items-center justify-between"><strong className="capitalize">{answer.mode}</strong><span className="text-xs text-slate-400">{answer.engine}</span></div>{answer.answer}{answer.limitations.length > 0 && <ul className="mt-3 list-disc pl-5 text-xs text-slate-500">{answer.limitations.map(item => <li key={item}>{item}</li>)}</ul>}</div>}</div>}
+      {safeAdvisorHref(selected.sourceHref) && <Link to={selected.sourceHref} className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 dark:text-brand-400">Inspect source evidence <Icon name="arrow-up-right" size={14}/></Link>}
+      {!sample && workspace.decisionsAvailable && <div className="border-t border-slate-200 pt-5 dark:border-slate-800"><h3 className="font-semibold text-slate-950 dark:text-white">Record the human decision</h3><p className="mt-1 text-xs text-slate-500">This creates an audit record. It does not change any cloud resource.</p><div className="mt-3 grid grid-cols-3 gap-2">{(['approved','dismissed','deferred'] as DecisionStatus[]).map(status => <button key={status} type="button" onClick={() => setDecisionStatus(status)} className={`rounded-lg border px-2 py-2 text-xs font-semibold capitalize ${decisionStatus === status ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300' : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>{status}</button>)}</div><label className="mt-3 block text-xs font-medium text-slate-600 dark:text-slate-300">Rationale<textarea value={rationale} onChange={event => setRationale(event.target.value)} maxLength={2000} rows={3} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white" placeholder="What did the reviewer decide and why?" /></label>{decisionStatus === 'deferred' && <label className="mt-3 block text-xs font-medium text-slate-600 dark:text-slate-300">Review date<input type="datetime-local" value={reviewAt} onChange={event => setReviewAt(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-900" /></label>}<button type="button" onClick={() => void saveDecision()} disabled={saving || !rationale.trim() || (decisionStatus === 'deferred' && !reviewAt) || !workspace.canDecide} className="mt-3 w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Recording…' : workspace.canDecide ? 'Record decision' : 'Viewer access — decisions disabled'}</button></div>}
+    </div>}</Drawer>
+  </div>;
 }
