@@ -51,6 +51,8 @@ describe('authenticated E2E suite integrity', () => {
     expect(setup).toMatch(/SMOKE_TEST_PASSWORD/);
     expect(setup).toMatch(/getByRole\(\s*['"]button['"]/);
     expect(setup).toMatch(/storageState/);
+    expect(setup).toMatch(/Create your organization/);
+    expect(setup).toMatch(/#main-content/);
 
     // Must not fabricate a session instead of logging in.
     expect(setup).not.toMatch(/addInitScript[\s\S]{0,200}access_token/);

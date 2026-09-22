@@ -2,6 +2,7 @@ import { test as setup, expect } from '@playwright/test';
 
 const email = process.env.SMOKE_TEST_EMAIL;
 const password = process.env.SMOKE_TEST_PASSWORD;
+const smokeOrgName = process.env.SMOKE_TEST_ORG_NAME || 'HorizonVigil Production Smoke';
 
 /**
  * Logs in once via the real Login page (real Supabase Auth call, not a
@@ -44,5 +45,21 @@ setup('authenticate', async ({ page }) => {
   // Successful sign-in lands on /overview (or wherever RequireAuth's
   // "from" redirect sends it) -- either way, off /login.
   await expect(page).not.toHaveURL(/\/login$/, { timeout: 10_000 });
+
+  // A dedicated smoke user can be freshly provisioned or have its tenant
+  // removed during test-data maintenance. Bootstrap exactly one stable tenant
+  // when the authenticated product explicitly presents the zero-org screen.
+  // This is intentionally UI-driven: it verifies the real organization
+  // creation path and leaves normal accounts untouched.
+  const createOrgHeading = page.getByRole('heading', { name: 'Create your organization' });
+  if (await createOrgHeading.isVisible().catch(() => false)) {
+    await page.getByLabel('Organization name').fill(smokeOrgName);
+    await page.getByRole('button', { name: 'Create organization', exact: true }).click();
+    await expect(page.locator('#main-content')).toBeVisible({ timeout: 20_000 });
+  }
+
+  // Authentication without a usable tenant is not a release-ready session.
+  // Persist storage only after the application shell is available.
+  await expect(page.locator('#main-content')).toBeVisible({ timeout: 20_000 });
   await page.context().storageState({ path: 'e2e/.auth/session.json' });
 });

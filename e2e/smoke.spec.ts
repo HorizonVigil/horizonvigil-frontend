@@ -48,6 +48,15 @@ test.describe('go-live smoke test', () => {
     await expectPageRendersCleanly(page, '/overview');
   });
 
+  test('AI Intelligence loads live workspace and evidence coverage', async ({ page }) => {
+    await expectPageRendersCleanly(page, '/ai-copilot');
+    await expect(page.getByRole('heading', { name: 'Your cloud. Every decision, explained.' })).toBeVisible();
+    await expect(page.getByText('Intelligence workspace unavailable')).toHaveCount(0);
+
+    await expectPageRendersCleanly(page, '/ai-copilot?view=evidence');
+    await expect(page.getByRole('heading', { name: 'What the advisor could verify' })).toBeVisible();
+  });
+
   test('cloud accounts list loads, and a real connection can be opened', async ({ page }) => {
     /*
      * The Inventory tab is named explicitly, not left to the default.
@@ -108,5 +117,10 @@ test.describe('go-live smoke test', () => {
 
   test('reports loads', async ({ page }) => {
     await expectPageRendersCleanly(page, '/reports');
+  });
+
+  test('AWS cluster console loads', async ({ page }) => {
+    await expectPageRendersCleanly(page, '/clusters/aws');
+    await expect(page.getByRole('heading', { name: 'AWS EKS Console' })).toBeVisible();
   });
 });
