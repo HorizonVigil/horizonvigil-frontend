@@ -52,6 +52,7 @@ describe('authenticated E2E suite integrity', () => {
     expect(setup).toMatch(/getByRole\(\s*['"]button['"]/);
     expect(setup).toMatch(/storageState/);
     expect(setup).toMatch(/Create your organization/);
+    expect(setup).toMatch(/createOrgHeading\.or\(appShell\)/);
     expect(setup).toMatch(/#main-content/);
 
     // Must not fabricate a session instead of logging in.

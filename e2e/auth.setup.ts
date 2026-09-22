@@ -52,14 +52,16 @@ setup('authenticate', async ({ page }) => {
   // This is intentionally UI-driven: it verifies the real organization
   // creation path and leaves normal accounts untouched.
   const createOrgHeading = page.getByRole('heading', { name: 'Create your organization' });
-  if (await createOrgHeading.isVisible().catch(() => false)) {
+  const appShell = page.locator('#main-content');
+  await expect(createOrgHeading.or(appShell)).toBeVisible({ timeout: 20_000 });
+
+  if (await createOrgHeading.isVisible()) {
     await page.getByLabel('Organization name').fill(smokeOrgName);
     await page.getByRole('button', { name: 'Create organization', exact: true }).click();
-    await expect(page.locator('#main-content')).toBeVisible({ timeout: 20_000 });
   }
 
   // Authentication without a usable tenant is not a release-ready session.
   // Persist storage only after the application shell is available.
-  await expect(page.locator('#main-content')).toBeVisible({ timeout: 20_000 });
+  await expect(appShell).toBeVisible({ timeout: 20_000 });
   await page.context().storageState({ path: 'e2e/.auth/session.json' });
 });

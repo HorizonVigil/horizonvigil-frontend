@@ -2,7 +2,6 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/auth';
 import { useOrg } from '../../lib/orgContext';
 import { useState } from 'react';
-import { api } from '../../lib/api';
 
 export function RequireAuth() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -16,9 +15,9 @@ export function RequireAuth() {
 
 /** Post-login landing per spec §2: one org -> straight into Overview; zero orgs -> create-org prompt. */
 export function RequireOrg() {
-  const { orgs, currentOrg, isLoading, refresh } = useOrg();
+  const { orgs, currentOrg, isLoading, createOrg } = useOrg();
   if (isLoading) return <FullScreenSpinner />;
-  if (orgs.length === 0) return <CreateFirstOrg onCreated={refresh} />;
+  if (orgs.length === 0) return <CreateFirstOrg onCreate={createOrg} />;
   if (!currentOrg) return <FullScreenSpinner />;
   return <Outlet />;
 }
@@ -31,7 +30,7 @@ function FullScreenSpinner() {
   );
 }
 
-function CreateFirstOrg({ onCreated }: { onCreated: () => void }) {
+function CreateFirstOrg({ onCreate }: { onCreate: (name: string) => Promise<void> }) {
   const { signOut } = useAuth();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,15 +43,8 @@ function CreateFirstOrg({ onCreated }: { onCreated: () => void }) {
     setError(null);
     setSuccess(null);
     try {
-      const result = await api.createOrganization(name.trim());
-      // Check if the slug was modified due to duplicate
-      if (result?.slug && name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') !== result.slug) {
-        setSuccess(`Organization created! Slug was auto-modified to "${result.slug}" because the original was already taken.`);
-      } else {
-        setSuccess(`Organization "${name.trim()}" created successfully!`);
-      }
-      // Refresh org list and navigate after a short delay
-      setTimeout(() => onCreated(), 1500);
+      await onCreate(name.trim());
+      setSuccess(`Organization "${name.trim()}" created successfully!`);
     } catch (err) {
       const errorMessage = (err as Error).message;
       // Handle duplicate slug error gracefully
