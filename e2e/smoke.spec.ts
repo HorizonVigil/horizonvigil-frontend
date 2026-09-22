@@ -50,11 +50,16 @@ test.describe('go-live smoke test', () => {
 
   test('AI Intelligence loads live workspace and evidence coverage', async ({ page }) => {
     await expectPageRendersCleanly(page, '/ai-copilot');
-    await expect(page.getByRole('heading', { name: 'Your cloud. Every decision, explained.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your AWS cloud. Every decision, explained.' })).toBeVisible();
     await expect(page.getByText('Intelligence workspace unavailable')).toHaveCount(0);
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=evidence');
     await expect(page.getByRole('heading', { name: 'What the advisor could verify' })).toBeVisible();
+
+    await expectPageRendersCleanly(page, '/ai-copilot?view=governance');
+    await expect(page.getByRole('heading', { name: 'AWS production governance is active' })).toBeVisible();
+    await expect(page.getByText('Human approval')).toBeVisible();
+    await expect(page.getByText('Required')).toBeVisible();
   });
 
   test('cloud accounts list loads, and a real connection can be opened', async ({ page }) => {
