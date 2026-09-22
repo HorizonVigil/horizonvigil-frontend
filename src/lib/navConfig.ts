@@ -131,6 +131,7 @@ export interface NavModule {
 }
 
 const OVERVIEW = '/overview';
+const INTELLIGENCE = '/ai-copilot';
 const ACCOUNTS = '/cloud-accounts';
 const RESOURCES = '/resources';
 const FINOPS = '/finops';
@@ -178,6 +179,13 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'overview',
     section: 'Get Started',
     to: OVERVIEW,
+    children: [],
+  },
+  {
+    label: 'Intelligence',
+    icon: 'ai',
+    section: 'Get Started',
+    to: INTELLIGENCE,
     children: [],
   },
   {

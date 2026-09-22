@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import type { AdvisorAnswer, AdvisorDecision, AdvisorMode, AdvisorWorkspace, DecisionStatus } from './advisor';
 
 type Service =
   | 'overview' | 'awsAccounts' | 'gcpAccounts' | 'azureAccounts' | 'resources' | 'customDashboards' | 'costManagement'
@@ -1502,6 +1503,13 @@ class ApiClient {
 
   // ── ai-copilot ────────────────────────────────────────────────────────────
 
+  getAdvisorWorkspace() { return this.get<AdvisorWorkspace>('aiCopilot', '/api/ai-copilot/advisor/workspace'); }
+  explainAdvisorSignal(data: { signalId: string; mode: AdvisorMode }) {
+    return this.post<AdvisorAnswer>('aiCopilot', '/api/ai-copilot/advisor/explain', data);
+  }
+  recordAdvisorDecision(data: { signalId: string; status: DecisionStatus; rationale: string; reviewAt?: string | null }, idempotencyKey = crypto.randomUUID()) {
+    return this.postIdempotent<AdvisorDecision>('aiCopilot', '/api/ai-copilot/advisor/decisions', data, idempotencyKey);
+  }
   sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
   getConversations() { return this.get<{ items: ConversationSummary[] }>('aiCopilot', '/api/ai-copilot/conversations'); }
   getConversationMessages(id: string) { return this.get<{ items: ChatMessage[] }>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}/messages`); }

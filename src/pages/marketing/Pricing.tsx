@@ -56,12 +56,12 @@ export function Pricing() {
             id={PAGE_TITLE_ID}
             className="text-4xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-5xl"
           >
-            Pricing that scales with your fleet.
+            Start with visibility. Scale into decision intelligence.
           </h1>
 
           <p className="mx-auto mt-4 max-w-xl text-slate-600 dark:text-slate-300">
-            Start free. Upgrade when you have more accounts to connect, not
-            before.
+            Connect one account free. Add account scale, users, automation,
+            retention, and support as your cloud operating model grows.
           </p>
 
           <div
@@ -102,6 +102,27 @@ export function Pricing() {
             </button>
           </div>
         </header>
+
+        <section className="mx-auto w-full max-w-6xl px-5 pb-10 sm:px-6 lg:px-8" aria-labelledby="included-heading">
+          <div className="rounded-2xl border border-brand-200 bg-brand-50/70 p-5 dark:border-brand-900 dark:bg-brand-950/20 sm:p-6">
+            <h2 id="included-heading" className="text-sm font-semibold text-slate-900 dark:text-white">
+              A shared operating model at every stage
+            </h2>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ['Explain', 'Understand the signal and affected resources.'],
+                ['Verify', 'Inspect source evidence and coverage.'],
+                ['Advise', 'Compare next steps before action.'],
+                ['Record', 'Keep ownership and outcomes reviewable.'],
+              ].map(([title, copy]) => (
+                <div key={title} className="rounded-lg bg-white/80 p-3 dark:bg-slate-900/70">
+                  <p className="text-xs font-semibold text-brand-700 dark:text-brand-300">{title}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">{copy}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
         <section
           aria-labelledby="plans-heading"

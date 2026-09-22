@@ -121,7 +121,7 @@ export function AppRail() {
         <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800">
           <div className={`flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500 ${expanded ? '' : 'justify-center'}`}>
             <Icon name="shield-check" size={14} />
-            {expanded && <span className="truncate">SOC 2 · Production</span>}
+            {expanded && <span className="truncate">Read-only by default</span>}
           </div>
         </div>
       </aside>

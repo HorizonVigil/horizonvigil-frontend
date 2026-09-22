@@ -54,15 +54,15 @@ export function ChatWidget() {
       {open && (
         <div className="mb-3 w-80 sm:w-96 h-[28rem] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 shrink-0">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">HorizonVigil Assistant</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Horizon Intelligence</span>
             <div className="flex items-center gap-2">
-              <Link to="/ai-copilot" className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline">Full view</Link>
+              <Link to="/ai-copilot?view=advisor" className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline">Open advisor</Link>
               <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none">×</button>
             </div>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
             {messages.length === 0 && (
-              <p className="text-xs text-slate-400 py-4">Ask about your cost, security findings, resources, or Kubernetes clusters.</p>
+              <p className="text-xs text-slate-400 py-4">Ask what changed, why it matters, and what evidence supports the next step.</p>
             )}
             {messages.map((m) => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
