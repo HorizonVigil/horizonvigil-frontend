@@ -1507,8 +1507,11 @@ class ApiClient {
   explainAdvisorSignal(data: { signalId: string; mode: AdvisorMode }) {
     return this.post<AdvisorAnswer>('aiCopilot', '/api/ai-copilot/advisor/explain', data);
   }
-  recordAdvisorDecision(data: { signalId: string; status: DecisionStatus; rationale: string; reviewAt?: string | null }, idempotencyKey = crypto.randomUUID()) {
+  recordAdvisorDecision(data: { signalId: string; status: DecisionStatus; rationale: string; owner: string; reviewAt?: string | null; advisorRunId?: string | null }, idempotencyKey = crypto.randomUUID()) {
     return this.postIdempotent<AdvisorDecision>('aiCopilot', '/api/ai-copilot/advisor/decisions', data, idempotencyKey);
+  }
+  recordAdvisorOutcome(decisionId: string, data: { outcome: Exclude<import('./advisor').DecisionOutcome, 'not_evaluated'>; notes: string }, idempotencyKey = crypto.randomUUID()) {
+    return this.postIdempotent<import('./advisor').AdvisorOutcomeRecord>('aiCopilot', `/api/ai-copilot/advisor/decisions/${pathSegment(decisionId)}/outcomes`, data, idempotencyKey);
   }
   sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
   getConversations() { return this.get<{ items: ConversationSummary[] }>('aiCopilot', '/api/ai-copilot/conversations'); }
