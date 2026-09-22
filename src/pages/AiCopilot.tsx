@@ -42,6 +42,10 @@ function SignalCard({ signal, decision, onOpen }: { signal: AdvisorSignal; decis
     <div className="flex flex-wrap items-center gap-2"><Badge>{signal.severity}</Badge><Badge>{signal.domain}</Badge><span className="text-xs text-slate-400">{signal.provider}</span>{decision && <Badge>{decision.status}</Badge>}</div>
     <h3 className="mt-3 text-base font-semibold text-slate-950 dark:text-white">{signal.title}</h3>
     <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{signal.description}</p>
+    <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-2">
+      <div><span className="font-semibold text-slate-600 dark:text-slate-300">Changed by:</span> {signal.actor ?? 'Not attributable from current evidence'}</div>
+      <div><span className="font-semibold text-slate-600 dark:text-slate-300">Owner:</span> {signal.owner ?? 'Unassigned'}</div>
+    </div>
     <div className="mt-4 flex items-end justify-between gap-4 border-t border-slate-100 pt-3 dark:border-slate-800">
       <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Impact</div><div className="mt-0.5 text-sm font-medium text-slate-700 dark:text-slate-200">{signal.impact}</div></div>
       <button type="button" onClick={onOpen} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-white dark:text-slate-950">Review <Icon name="arrow-right" size={15} /></button>

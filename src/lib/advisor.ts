@@ -1,5 +1,5 @@
 /** Versioned contract with the independently deployed AI gateway. */
-export type AdvisorDomain = 'cost' | 'security' | 'operations';
+export type AdvisorDomain = 'cost' | 'security' | 'operations' | 'compliance' | 'change';
 export type AdvisorMode = 'explain' | 'verify' | 'advise';
 export type DecisionStatus = 'approved' | 'dismissed' | 'deferred';
 export type DecisionOutcome = 'not_evaluated' | 'effective' | 'ineffective' | 'inconclusive';
@@ -42,5 +42,5 @@ export function pendingSignals(workspace: AdvisorWorkspace): AdvisorSignal[] {
   });
 }
 export function safeAdvisorHref(value: string): string | null {
-  return /^\/(cost-management|cost-optimization|cloud-security|cloud-accounts|resources|monitoring)([/?#]|$)/.test(value) && !value.includes('\\') ? value : null;
+  return /^\/(cost-management|cost-optimization|cloud-security|cloud-compliance|cloud-accounts|clusters\/aws|resources|monitoring)([/?#]|$)/.test(value) && !value.includes('\\') ? value : null;
 }

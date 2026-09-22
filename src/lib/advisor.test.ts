@@ -16,6 +16,8 @@ describe('advisor workspace helpers', () => {
 
   it('only links to known first-party evidence routes', () => {
     expect(safeAdvisorHref('/cloud-security?tab=posture')).toBe('/cloud-security?tab=posture');
+    expect(safeAdvisorHref('/cloud-compliance')).toBe('/cloud-compliance');
+    expect(safeAdvisorHref('/cloud-accounts?tab=Changes')).toBe('/cloud-accounts?tab=Changes');
     expect(safeAdvisorHref('https://example.com')).toBeNull();
     expect(safeAdvisorHref('/cloud-security\\..\\settings')).toBeNull();
   });
