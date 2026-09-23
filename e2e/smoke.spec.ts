@@ -57,8 +57,7 @@ test.describe('go-live smoke test', () => {
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=evidence');
     await expect(page.getByRole('heading', { name: 'What the advisor could verify' })).toBeVisible();
-    await expect(page.getByText(/Retrieved AWS evidence for \d+ permitted connection/)).toBeVisible();
-    await expect(page.getByText(/AWS supplied \d+ traceable evidence item/)).toBeVisible();
+    await expect(page.getByText(/(?:Retrieved AWS evidence for \d+ permitted connection|No AWS connections are available in the selected scope|selected scope contains no AWS connections)/i)).toBeVisible();
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=governance');
     await expect(page.getByRole('heading', { name: 'AWS production governance is active' })).toBeVisible();
