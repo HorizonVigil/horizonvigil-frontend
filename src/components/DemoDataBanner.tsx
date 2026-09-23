@@ -1,6 +1,8 @@
 import { Icon } from './icons';
 import { useDemoData } from '../lib/demoData/context';
 
+const demoDataAvailable = import.meta.env.MODE !== 'production';
+
 /**
  * Renders on any screen currently showing lib/demoData/seed.ts output --
  * deliberately loud (amber, dashed border) and distinct from the app's
@@ -10,6 +12,7 @@ import { useDemoData } from '../lib/demoData/context';
  */
 export function DemoDataBanner() {
   const { toggle } = useDemoData();
+  if (!demoDataAvailable) return null;
 
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-dashed border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
@@ -32,6 +35,7 @@ export function DemoDataBanner() {
  * it's off, so there's a way IN to the demo, not just a way out via the banner. */
 export function DemoDataToggle() {
   const { enabled, toggle } = useDemoData();
+  if (!demoDataAvailable) return null;
 
   return (
     <button
