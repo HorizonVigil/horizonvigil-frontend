@@ -1956,6 +1956,9 @@ export interface CostRecommendation {
   action_group: string | null; target_state_at_evaluation: string | null;
   rule_version: string | null; evaluated_at: string | null; expires_at: string | null; confidence: number | null;
   savings_state: SavingsState | null; observed_monthly_savings: number | null; verified_at: string | null;
+  implemented_at?: string | null; outcome_checked_at?: string | null; verification_method?: 'cur_resource_cost_7d' | 'resource_state' | 'manual_evidence' | null;
+  verification_reason?: string | null; baseline_daily_cost?: number | null; observed_daily_cost?: number | null;
+  verification_evidence?: Record<string, unknown> | null;
   /** null when ownership could not be looked up — distinct from an owner of null, which means nobody owns it. */
   ownership: RecommendationOwnership | null;
 }
