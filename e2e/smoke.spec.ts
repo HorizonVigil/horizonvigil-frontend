@@ -52,9 +52,13 @@ test.describe('go-live smoke test', () => {
     await expectPageRendersCleanly(page, '/ai-copilot');
     await expect(page.getByRole('heading', { name: 'Your AWS cloud. Every decision, explained.' })).toBeVisible();
     await expect(page.getByText('Intelligence workspace unavailable')).toHaveCount(0);
+    await expect(page.getByText('Live Intelligence is temporarily unavailable')).toHaveCount(0);
+    await expect(page.getByText('Sample workspace.')).toHaveCount(0);
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=evidence');
     await expect(page.getByRole('heading', { name: 'What the advisor could verify' })).toBeVisible();
+    await expect(page.getByText(/Retrieved AWS evidence for \d+ permitted connection/)).toBeVisible();
+    await expect(page.getByText(/AWS supplied \d+ traceable evidence item/)).toBeVisible();
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=governance');
     await expect(page.getByRole('heading', { name: 'AWS production governance is active' })).toBeVisible();
