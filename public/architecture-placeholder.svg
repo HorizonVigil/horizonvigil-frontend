@@ -1,0 +1,26 @@
+<svg width="400" height="300" viewBox="0 0 400 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="0.5" y="0.5" width="399" height="299" rx="7.5" fill="#1f2937" stroke="#4b5563"/>
+<text x="50%" y="30%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#a78bfa">
+  HorizonVigil
+</text>
+<text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#9ca3af">
+  AI Architecture Placeholder
+</text>
+<rect x="50" y="120" width="80" height="60" rx="4" fill="#6366f1"/>
+<text x="90" y="150" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#e0e7ff">
+  Data Ingest
+</text>
+<rect x="160" y="120" width="80" height="60" rx="4" fill="#8b5cf6"/>
+<text x="200" y="150" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#e0e7ff">
+  AI Core
+</text>
+<rect x="270" y="120" width="80" height="60" rx="4" fill="#a855f7"/>
+<text x="310" y="150" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#e0e7ff">
+  Output
+</text>
+<path d="M130 150H160" stroke="#9ca3af" stroke-width="2" stroke-linecap="round"/>
+<path d="M240 150H270" stroke="#9ca3af" stroke-width="2" stroke-linecap="round"/>
+<text x="50%" y="230" dominant-baseline="middle" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">
+  Scalable & Secure
+</text>
+</svg>
