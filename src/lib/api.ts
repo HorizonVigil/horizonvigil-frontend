@@ -63,6 +63,10 @@ function accountsPathPrefix(service: CloudAccountService): string {
 
 const CURRENT_ORG_STORAGE_KEY = 'cloudops360_current_org_id';
 const REQUEST_TIMEOUT_MS = 30_000;
+// The governed CPU model has a 180s server-side bound. Keep the browser alive
+// slightly longer so a valid audited completion is not discarded while the
+// model is still generating after a cold start.
+const AI_COPILOT_CHAT_TIMEOUT_MS = 190_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -219,6 +223,7 @@ function persistOrgId(orgId: string | null): void {
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
   let timedOut = false;
@@ -238,7 +243,7 @@ async function fetchWithTimeout(
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
 
   try {
     return await fetch(input, {
@@ -358,6 +363,7 @@ class ApiClient {
     service: Service,
     path: string,
     options: RequestInit = {},
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<T> {
     const baseUrl = normalizeServiceUrl(service);
 
@@ -386,7 +392,7 @@ class ApiClient {
     const response = await fetchWithTimeout(url, {
       ...options,
       headers,
-    });
+    }, timeoutMs);
 
     const requestId = responseRequestId(response);
     const contentType = response.headers.get('content-type');
@@ -459,12 +465,13 @@ class ApiClient {
     path: string,
     body?: unknown,
     headers?: Record<string, string>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ) {
     return this.request<T>(service, path, {
       method: 'POST',
       body: body !== undefined ? JSON.stringify(body) : undefined,
       headers,
-    });
+    }, timeoutMs);
   }
 
   /**
@@ -1513,7 +1520,9 @@ class ApiClient {
   recordAdvisorOutcome(decisionId: string, data: { outcome: Exclude<import('./advisor').DecisionOutcome, 'not_evaluated'>; notes: string }, idempotencyKey = crypto.randomUUID()) {
     return this.postIdempotent<import('./advisor').AdvisorOutcomeRecord>('aiCopilot', `/api/ai-copilot/advisor/decisions/${pathSegment(decisionId)}/outcomes`, data, idempotencyKey);
   }
-  sendChatMessage(data: { conversationId?: string; message: string }) { return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data); }
+  sendChatMessage(data: { conversationId?: string; message: string }) {
+    return this.post<ChatReply>('aiCopilot', '/api/ai-copilot/chat', data, undefined, AI_COPILOT_CHAT_TIMEOUT_MS);
+  }
   getConversations() { return this.get<{ items: ConversationSummary[] }>('aiCopilot', '/api/ai-copilot/conversations'); }
   getConversationMessages(id: string) { return this.get<{ items: ChatMessage[] }>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}/messages`); }
   renameConversation(id: string, title: string) { return this.patch<ConversationSummary>('aiCopilot', `/api/ai-copilot/conversations/${pathSegment(id)}`, { title }); }
