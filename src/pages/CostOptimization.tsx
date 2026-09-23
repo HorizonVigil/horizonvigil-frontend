@@ -44,6 +44,13 @@ function money(n: number): string {
   return formatMoney(n, 2);
 }
 
+function outcomeTone(state: CostRecommendation['savings_state']): 'good' | 'warning' | 'neutral' | 'critical' {
+  if (state === 'verified') return 'good';
+  if (state === 'not_realised') return 'critical';
+  if (state === 'observed' || state === 'implemented') return 'warning';
+  return 'neutral';
+}
+
 const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'History'] as const;
 type Tab = typeof TABS[number];
 
@@ -566,7 +573,12 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   const statusColumn: Column<CostRecommendation> = {
     key: 'status', header: 'Status', render: r => <Badge tone={r.status === 'applied' ? 'good' : 'neutral'}>{r.status}</Badge>, sortValue: r => r.status,
   };
-  const columns: Column<CostRecommendation>[] = tab === 'History' ? [...baseColumns, statusColumn] : [...baseColumns, actionsColumn];
+  const outcomeColumn: Column<CostRecommendation> = {
+    key: 'outcome', header: 'Savings outcome',
+    render: r => <div className="space-y-1"><Badge tone={outcomeTone(r.savings_state)}>{(r.savings_state ?? 'identified').replace(/_/g, ' ')}</Badge>{r.savings_state === 'verified' && r.observed_monthly_savings != null && <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{money(r.observed_monthly_savings)}/mo observed</div>}</div>,
+    sortValue: r => r.savings_state ?? 'identified',
+  };
+  const columns: Column<CostRecommendation>[] = tab === 'History' ? [...baseColumns, statusColumn, outcomeColumn] : [...baseColumns, actionsColumn];
 
   const anomalyColumns: Column<CostAnomaly>[] = [
     { key: 'service', header: 'Service', render: a => a.service, sortValue: a => a.service },
@@ -721,6 +733,12 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
               <div className="text-slate-700 dark:text-slate-200">{selected.issue}</div>
             </div>
             <RecommendationEvidence recommendation={selected} />
+            {selected.status === 'applied' && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center gap-2"><span className="font-semibold text-slate-700 dark:text-slate-200">Savings outcome</span><Badge tone={outcomeTone(selected.savings_state)}>{(selected.savings_state ?? 'implemented').replace(/_/g, ' ')}</Badge></div>
+              <p className="mt-2 text-slate-600 dark:text-slate-300">{selected.verification_reason ?? 'Awaiting post-implementation billing evidence.'}</p>
+              {selected.baseline_daily_cost != null && selected.observed_daily_cost != null && <p className="mt-1 text-slate-500 dark:text-slate-400">Baseline {money(selected.baseline_daily_cost)}/day · observed {money(selected.observed_daily_cost)}/day{selected.observed_monthly_savings != null ? ` · ${money(selected.observed_monthly_savings)}/month reduction` : ''}</p>}
+              {selected.outcome_checked_at && <p className="mt-1 text-slate-400">Checked {new Date(selected.outcome_checked_at).toLocaleString()}</p>}
+            </div>}
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Recommended Action</div>
               <div className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 whitespace-pre-wrap">{selected.recommended_action}</div>
