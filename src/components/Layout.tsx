@@ -4,6 +4,7 @@ import { AppRail } from './AppRail';
 import { ChatWidget } from './ChatWidget';
 import { TopBar } from './TopBar';
 import { ErrorBoundary } from './ErrorBoundary';
+import { isCloudOnlyMode } from '../lib/featureFlags';
 
 export function Layout() {
   const location = useLocation();
@@ -46,7 +47,16 @@ export function Layout() {
           </ErrorBoundary>
         </main>
       </div>
-      <ChatWidget />
+      {/* cloudops-ai-gateway + cloudops-llm (this widget's whole backend) were
+          deleted 2026-09-07 as part of the cloud-only go-live scope cut --
+          unlike the sidebar's own hiddenInCloudOnlyMode entries (whose
+          backends are all still alive, just unlinked from nav), there is no
+          real service left for this to call. Gating it here rather than
+          deleting the component: same "hidden, not removed" convention as
+          the rest of cloud-only mode (see featureFlags.ts's isCloudOnlyMode
+          doc comment) -- restorable the same way, by flipping the flag back,
+          once/if the AI Copilot backend returns. */}
+      {!isCloudOnlyMode() && <ChatWidget />}
     </div>
   );
 }
