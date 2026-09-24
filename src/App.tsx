@@ -1,13 +1,12 @@
 import React from 'react';
-import AppRouter from './router';
-import './index.css'; // Assuming Tailwind CSS is imported here or in main.tsx/main.js
+import { RouterProvider } from 'react-router-dom';
+import router from './router';
+import './index.css'; // Assuming this file sets up Tailwind CSS or global styles
 
-const App: React.FC = () => {
+function App() {
   return (
-    <div id="app-container">
-      <AppRouter />
-    </div>
+    <RouterProvider router={router} />
   );
-};
+}
 
 export default App;
