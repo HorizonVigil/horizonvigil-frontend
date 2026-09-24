@@ -1,18 +1,41 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge, severityTone } from '../components/Badge';
 import { StatCard } from '../components/StatCard';
 import { RoadmapPanel } from '../components/EmptyState';
-import { SecurityPostureSummary, type SecurityPostureDashboard } from '../components/SecurityPostureSummary';
+import { Icon } from '../components/icons';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useFilters } from '../lib/filterContext';
-import { api, type VulnerabilityFinding, type CloudIdentity, type IdentitySummary, type ComplianceBenchmark } from '../lib/api';
+import { api, type VulnerabilityFinding, type IdentitySummary, type IdentityRisk, type PostureCheckReport } from '../lib/api';
+import { CredentialRiskCell, RiskFactorList } from '../components/cloudSecurity/CredentialRiskCell';
+import { DerivedPostureChecks } from '../components/cloudSecurity/DerivedPostureChecks';
 
-const TABS = ['Overview', 'Posture', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Cloud Vulnerabilities', 'Compliance', 'Multi-Cloud Coverage'] as const;
+// V1 scope decision (2026-09-08 audit): Cloud Security V1 is posture-only --
+// misconfigurations, exposure, identity risk, and provider-native compliance
+// evidence. No CVEs, no container/repo vulnerabilities, no scanners, no
+// attack paths. "Cloud Vulnerabilities" (removed below) was already just a
+// RoadmapPanel pointer into Vulnerability Management, not real data of its
+// own -- that whole surface is now gated for V2 (see App.tsx's redirects),
+// so there's nothing left for this tab to honestly point at.
+// "Posture" removed 2026-09-08 (production-readiness audit): that tab
+// rendered SecurityPostureSummary straight off the vulnerability dashboard,
+// i.e. 3,615 scanner/CVE findings, 167 critical -- entirely V2 data on the
+// V1 posture page, and the same number this page's own Overview showed as
+// "100/100" (good) while the tab called it "100 High risk". V1 posture is
+// the real provider-native surfaces below (Misconfigurations, Identity &
+// Access Risk, Exposed Resources); a V1
+// posture aggregation can earn a summary tab back once it exists.
+// Phase 10 (§10.1/§10.3): 'Compliance' left this page for its own module at
+// /cloud-compliance. Two business domains sharing one route is what made
+// both sidebar entries mark themselves active. 'Multi-Cloud Coverage'
+// became 'Source Coverage': the audit's name for it, and the honest one --
+// the page answers "which sources have actually been evaluated", not
+// "how many clouds do you have".
+const TABS = ['Overview', 'Misconfigurations', 'Identity & Access Risk', 'Exposed Resources', 'Source Coverage'] as const;
 type Tab = typeof TABS[number];
 const PROVIDERS = ['aws', 'gcp', 'azure'] as const;
 const PROVIDER_LABEL: Record<typeof PROVIDERS[number], string> = { aws: 'AWS', gcp: 'GCP', azure: 'Azure' };
@@ -33,20 +56,38 @@ function formatDate(value: string | null | undefined): string {
  * split this page follows.
  */
 export function CloudSecurity() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const showV2Notice = searchParams.get('notice') === 'vulnerability-management-is-v2';
+  const dismissV2Notice = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('notice');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const canSeeTab = useSubmenuAccess('cloud-security');
   const visibleTabs = TABS.filter(canSeeTab);
+  /**
+   * Phase 10: `?tab=Compliance` no longer exists on this page, and
+   * useTabParam would silently fall back to Overview — the exact dead end
+   * the previous move of this link produced. Forward it instead, so an old
+   * bookmark reaches the module it names.
+   */
+  const navigate = useNavigate();
+  const legacyComplianceTab = searchParams.get('tab') === 'Compliance';
+  useEffect(() => {
+    if (legacyComplianceTab) navigate('/cloud-compliance', { replace: true });
+  }, [legacyComplianceTab, navigate]);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const { connections } = useFilters();
   useEffect(() => {
     if (!canSeeTab(tab) && visibleTabs.length > 0) setTab(visibleTabs[0]);
   }, [tab, canSeeTab, visibleTabs, setTab]);
 
-  const [dashboard, setDashboard] = useState<SecurityPostureDashboard | null>(null);
   const [misconfigs, setMisconfigs] = useState<VulnerabilityFinding[]>([]);
   const [exposed, setExposed] = useState<VulnerabilityFinding[]>([]);
   const [identitySummary, setIdentitySummary] = useState<IdentitySummary | null>(null);
-  const [riskyIdentities, setRiskyIdentities] = useState<CloudIdentity[]>([]);
-  const [benchmarks, setBenchmarks] = useState<ComplianceBenchmark[]>([]);
+  const [riskyIdentities, setRiskyIdentities] = useState<IdentityRisk[]>([]);
+  /** Null means the checks could not be read -- rendered as such, never as clean. */
+  const [postureChecks, setPostureChecks] = useState<PostureCheckReport | null>(null);
   // Real, persisted findings -- connector-gcp's Security Command Center scan
   // and connector-azure's Defender for Cloud scan both write into the same
   // vulnerability_findings table every other source does; this tab was the
@@ -56,34 +97,57 @@ export function CloudSecurity() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // FIXED 2026-09-08 (live audit): this used to be a single Promise.all
+  // across all 9 independent fetches -- one of them throwing (a cold-start
+  // timeout, a transient 500, anything) rejected the whole thing, so every
+  // section on this page fell back to its blank/zero initial state and the
+  // page showed one generic "Load failed" banner. That's exactly what made
+  // Identity & Access Risk read as zero here while Cloud Accounts, which
+  // fetches the identical api.getIdentitySummary()/getIdentities() calls
+  // via Promise.allSettled (see its identities-tab loader), kept showing
+  // the real counts: same data, same endpoint, but this page discarded a
+  // result that had already come back successfully because a *different*
+  // call in the same batch failed. Promise.allSettled lets each section
+  // stand on its own result, and loadError now names only what actually
+  // failed instead of implying nothing loaded.
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    try {
-      const [dash, misconfig, exposedRes, idSummary, admin, broad, compliance, gcpScc, defender] = await Promise.all([
-        api.getVulnerabilityDashboard(),
-        api.getFindingsBySource('aws-config', { limit: 50 }),
-        api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
-        api.getIdentitySummary(),
-        api.getIdentities({ privilegeLevel: 'admin_equivalent', limit: 10 }),
-        api.getIdentities({ privilegeLevel: 'broad', limit: 10 }),
-        api.getComplianceBenchmarks({ limit: 20 }),
-        api.getFindingsBySource('gcp-scc', { limit: 50 }),
-        api.getFindingsBySource('defender', { limit: 50 }),
-      ]);
-      setDashboard(dash);
-      setMisconfigs(misconfig.items);
-      setExposed(exposedRes.items);
-      setIdentitySummary(idSummary);
-      setRiskyIdentities([...admin.items, ...broad.items]);
-      setBenchmarks(compliance.items);
-      setGcpFindings(gcpScc.items);
-      setAzureFindings(defender.items);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not load cloud security data.');
-    } finally {
-      setLoading(false);
-    }
+    const [misconfig, exposedRes, idSummary, risks, checks, gcpScc, defender] = await Promise.allSettled([
+      api.getFindingsBySource('aws-config', { limit: 50 }),
+      api.getFindingsBySource('iam-access-analyzer', { limit: 50 }),
+      api.getIdentitySummary(),
+      /**
+       * One call to the Cloud Security namespace, replacing two connector
+       * calls filtered by privilege level. The server already judges risk --
+       * privilege, MFA, key age, unused and surplus credentials -- and
+       * fetching the verdict rather than re-deriving it is why the count on
+       * the Overview and the rows in this table cannot disagree.
+       */
+      api.getIdentityRisks({ limit: 25 }),
+      api.getPostureChecks(),
+      api.getFindingsBySource('gcp-scc', { limit: 50 }),
+      api.getFindingsBySource('defender', { limit: 50 }),
+    ]);
+
+    const failed: string[] = [];
+    if (misconfig.status === 'fulfilled') setMisconfigs(misconfig.value.items); else failed.push('misconfigurations');
+    if (exposedRes.status === 'fulfilled') setExposed(exposedRes.value.items); else failed.push('exposed resources');
+    if (idSummary.status === 'fulfilled') setIdentitySummary(idSummary.value); else failed.push('identity summary');
+    if (risks.status === 'fulfilled') {
+      // Only identities the server actually flagged. An identity with no risk
+      // factors is not "low risk" filler for this table -- it is simply not a
+      // risk, and listing it would dilute the ones that are.
+      setRiskyIdentities(risks.value.items.filter((i) => i.riskFactors.length > 0));
+    } else failed.push('identity risks');
+    // Not added to `failed`: the block states its own unavailability, and
+    // saying it twice would read as two separate problems.
+    setPostureChecks(checks.status === 'fulfilled' ? checks.value : null);
+    if (gcpScc.status === 'fulfilled') setGcpFindings(gcpScc.value.items); else failed.push('GCP Security Command Center findings');
+    if (defender.status === 'fulfilled') setAzureFindings(defender.value.items); else failed.push('Azure Defender findings');
+
+    setLoadError(failed.length > 0 ? `Couldn't load: ${failed.join(', ')}. The rest of this page reflects real, loaded data.` : null);
+    setLoading(false);
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -96,17 +160,32 @@ export function CloudSecurity() {
     { key: 'discovered_at', header: 'Discovered', render: f => formatDate(f.discovered_at), sortValue: f => f.discovered_at },
   ];
 
-  const identityColumns: Column<CloudIdentity>[] = [
+  const identityColumns: Column<IdentityRisk>[] = [
     { key: 'name', header: 'Identity', render: i => i.display_name || i.native_label || i.native_id, sticky: true },
     { key: 'type', header: 'Type', render: i => i.identity_type },
-    { key: 'provider', header: 'Provider', render: i => i.provider.toUpperCase() },
     { key: 'privilege', header: 'Privilege', render: i => i.privilege_level ? <Badge tone={i.privilege_level === 'admin_equivalent' ? 'critical' : 'warning'}>{i.privilege_level.replace('_', ' ')}</Badge> : '—' },
     { key: 'mfa', header: 'MFA', render: i => i.mfa_enabled === null ? '—' : <Badge tone={i.mfa_enabled ? 'good' : 'critical'}>{i.mfa_enabled ? 'Enabled' : 'Disabled'}</Badge> },
+    // AWS-18. The connector already collected key age, unused keys and
+    // surplus keys; until now nothing showed them, so an admin-equivalent
+    // user holding two keys -- one never used -- displayed a single "MFA
+    // Disabled" badge and nothing else.
+    { key: 'credentials', header: 'Credentials', render: i => <CredentialRiskCell credentials={i.credentials} /> },
+    { key: 'factors', header: 'Why', render: i => <RiskFactorList factors={i.riskFactors} /> },
   ];
 
   return (
     <div className="min-w-0">
       <FilterBar title="Cloud Security" breadcrumb={<Breadcrumb />} showAccountFilter={false} showRegionFilter={false} showDateFilter={false} />
+
+      {showV2Notice && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 px-4 py-3 mb-4 text-xs">
+          <Icon name="info" size={15} className="text-slate-500 dark:text-slate-400 shrink-0 mt-0.5" />
+          <p className="flex-1 text-slate-600 dark:text-slate-300">
+            Vulnerability scanning, CVEs, and scanner orchestration are being redesigned for a future release and aren't part of this view. Cloud Security here covers posture, misconfigurations, exposure, and identity risk. Compliance evidence has its own module.
+          </p>
+          <button onClick={dismissV2Notice} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm leading-none shrink-0" aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       <div className="mb-5">
         <p className="max-w-3xl text-sm text-slate-500 dark:text-slate-400">
@@ -143,9 +222,35 @@ export function CloudSecurity() {
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatCard label="Connected Accounts" value={String(connections.length)} icon="cloud" />
-            <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'good'} />
-            <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'good'} />
-            <StatCard label="Risk Score" value={dashboard ? `${dashboard.riskScore}/100` : '—'} icon="gauge" iconTone={dashboard && dashboard.riskScore >= 50 ? 'critical' : dashboard && dashboard.riskScore >= 20 ? 'warning' : 'good'} />
+            {/*
+              Neutral at zero, for the same reason as Exposed Resources below
+              -- the reasoning in that comment applies identically here and
+              this card was simply missed. A green "0 Misconfigurations" is an
+              all-clear, and it renders whether posture was evaluated and found
+              clean, never evaluated, or fetched and FAILED (a rejected
+              misconfiguration read leaves this array empty; the banner names
+              it, but the card beside it still went green).
+            */}
+            <StatCard label="Misconfigurations" value={String(misconfigs.length)} icon="settings-2" iconTone={misconfigs.length > 0 ? 'warning' : 'neutral'} />
+            {/*
+              A zero here used to render in the "good" tone -- a green all-clear.
+              Verified 2026-09-09: there are ZERO V1 posture findings of ANY
+              kind in production (0 rows from aws_config / iam_access_analyzer
+              / gcp_scc / defender / security_hub against 4,075 V2 rows), so
+              that green zero was reporting "nothing is externally shared"
+              when in fact nothing had been evaluated. Neutral tone until
+              source coverage is proven, which lands with permission snapshots
+              in a later phase.
+            */}
+            <StatCard label="Exposed Resources" value={String(exposed.length)} icon="globe" iconTone={exposed.length > 0 ? 'critical' : 'neutral'} />
+            {/* The former "Risk Score" card read straight off the
+                vulnerability dashboard (V2 scanner findings) and rendered
+                100/100 as "good" on this page while the Posture tab called
+                the same 100 "High risk". Removed with that tab; a V1 score
+                needs a V1 population and one agreed direction first. */}
+            {/* Tone follows the value: an em dash means the summary could not
+                be read, and "unknown" must not be painted green. */}
+            <StatCard label="Identities at Risk" value={identitySummary ? String(identitySummary.adminEquivalent + identitySummary.broad) : '—'} icon="key" iconTone={!identitySummary ? 'neutral' : identitySummary.adminEquivalent > 0 ? 'critical' : 'good'} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -160,7 +265,7 @@ export function CloudSecurity() {
                       {providerConns.length === 0 ? 'Not connected' : `${connected} / ${providerConns.length} connected`}
                     </Badge>
                   </div>
-                  <button type="button" onClick={() => setTab('Multi-Cloud Coverage')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                  <button type="button" onClick={() => setTab('Source Coverage')} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
                     {providerConns.length === 0 ? 'Connect an account →' : 'View coverage →'}
                   </button>
                 </div>
@@ -171,18 +276,30 @@ export function CloudSecurity() {
                 <span className="text-sm font-medium text-slate-700 dark:text-slate-200">OCI</span>
                 <Badge tone="neutral">No connector</Badge>
               </div>
-              <p className="text-xs text-slate-400">Not built yet — see Multi-Cloud Coverage.</p>
+              <p className="text-xs text-slate-400">Not built yet — see Source Coverage.</p>
             </div>
           </div>
         </div>
       )}
 
-      {tab === 'Posture' && dashboard && <SecurityPostureSummary dashboard={dashboard} variant="full" />}
-
       {tab === 'Misconfigurations' && (
         <>
+          {/*
+            Two blocks, deliberately not merged. AWS Config's evaluations are
+            AWS's own assertion and can go to an auditor; the derived checks
+            below are HorizonVigil's, computed from collected inventory.
+            Blending them would launder one provenance into the other.
+          */}
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">AWS Config rule evaluations, re-presented as a posture/risk view of the same real findings behind Vulnerability Management's AWS Config tab.</p>
-          <DataTable columns={findingColumns} rows={misconfigs} rowKey={f => f.id} emptyMessage="No misconfigurations found." />
+          <DataTable
+            columns={findingColumns}
+            rows={misconfigs}
+            rowKey={f => f.id}
+            emptyMessage="No AWS Config evaluations have been collected. This is not the same as a clean estate — see the configuration checks below."
+          />
+          <div className="mt-4">
+            <DerivedPostureChecks report={postureChecks} />
+          </div>
         </>
       )}
 
@@ -197,50 +314,22 @@ export function CloudSecurity() {
             </div>
           )}
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            The most over-privileged identities across every connected account. <Link to="/cloud-accounts?tab=Identities" className="text-brand-600 dark:text-brand-400 hover:underline">View the full identity inventory →</Link>
+            The most over-privileged identities across every connected account. <Link to="/cloud-accounts?tab=Access" className="text-brand-600 dark:text-brand-400 hover:underline">View the full identity inventory →</Link>
           </p>
-          <DataTable columns={identityColumns} rows={riskyIdentities} rowKey={i => i.id} emptyMessage="No over-privileged identities found." />
+          <DataTable columns={identityColumns} rows={riskyIdentities} rowKey={i => i.id} emptyMessage="No over-privileged identities have been collected for the connected accounts." />
         </>
       )}
 
       {tab === 'Exposed Resources' && (
         <>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Resources IAM Access Analyzer flagged as shared outside your account or organization — a real, if partial, slice of "exposure." Full attack-path correlation (exposure + vulnerability + over-privileged identity on the same resource) lives in <Link to="/vulnerability-management?tab=Attack%20Paths" className="text-brand-600 dark:text-brand-400 hover:underline">Vulnerability Management's Attack Paths tab</Link>.
+            Resources IAM Access Analyzer flagged as shared outside your account or organization — a real, if partial, slice of "exposure." Full attack-path correlation (exposure + vulnerability + over-privileged identity on the same resource) isn't part of this release.
           </p>
-          <DataTable columns={findingColumns} rows={exposed} rowKey={f => f.id} emptyMessage="No externally-shared resources found." />
+          <DataTable columns={findingColumns} rows={exposed} rowKey={f => f.id} emptyMessage="No external-sharing findings have been collected. An empty list here is not proof that nothing is shared — it also looks like this when IAM Access Analyzer is not enabled on an account, or has not been evaluated yet." />
         </>
       )}
 
-      {tab === 'Cloud Vulnerabilities' && (
-        <RoadmapPanel
-          icon="target"
-          title="See the full unified vulnerability list"
-          description="Cloud vulnerabilities across every source live in Vulnerability Management's Security Findings tab — this page doesn't duplicate that table, it links to it."
-        />
-      )}
-
-      {tab === 'Compliance' && (
-        <>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Benchmark pass rates across connected accounts. <Link to="/vulnerability-management?tab=Compliance" className="text-brand-600 dark:text-brand-400 hover:underline">View the full framework breakdown →</Link>
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {benchmarks.length === 0 && <p className="text-xs text-slate-400 col-span-full">No benchmarks evaluated yet.</p>}
-            {benchmarks.map(b => (
-              <div key={b.id} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{b.framework.replace(/_/g, ' ').toUpperCase()}</div>
-                <div className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-white mt-1">
-                  {b.passRate === null ? '—' : `${Math.round(b.passRate * 100)}%`}
-                </div>
-                <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{b.passed_checks} / {b.total_checks} checks passed</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {tab === 'Multi-Cloud Coverage' && (
+      {tab === 'Source Coverage' && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-slate-500 dark:text-slate-400">
             AWS posture is covered by the Misconfigurations/Exposed Resources tabs above (AWS Config + IAM Access Analyzer). GCP Security Command Center and Azure Defender for Cloud are real, connected sources too — OCI has no native posture connector built yet.

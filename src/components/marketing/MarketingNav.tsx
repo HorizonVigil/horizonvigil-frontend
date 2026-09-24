@@ -5,6 +5,7 @@ import { useTheme } from '../../lib/theme';
 import { scrollToSection } from '../../lib/scrollToSection';
 
 const SECTION_LINKS = [
+  { id: 'intelligence', label: 'Intelligence' },
   { id: 'platform', label: 'Platform' },
   { id: 'security', label: 'Security' },
 ];
@@ -46,7 +47,7 @@ export function MarketingNav() {
       <div className="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between gap-4">
         <Logo />
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
+        <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600 dark:text-slate-300">
           {SECTION_LINKS.map(l => (
             <a key={l.id} href={`/#${l.id}`} onClick={e => handleSectionLinkClick(e, l.id)} className="hover:text-slate-900 dark:hover:text-white transition-colors">{l.label}</a>
           ))}
@@ -55,8 +56,8 @@ export function MarketingNav() {
           ))}
         </nav>
 
-        <div className="hidden md:flex items-center gap-2">
-          <button
+        <div className="hidden lg:flex items-center gap-2">
+          <button type="button"
             onClick={toggleTheme}
             aria-label="Toggle theme"
             className="h-9 w-9 rounded-md flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -71,10 +72,10 @@ export function MarketingNav() {
           </Link>
         </div>
 
-        <button
+        <button type="button"
           onClick={() => setOpen(o => !o)}
           aria-label="Toggle menu"
-          className="md:hidden h-9 w-9 flex flex-col items-center justify-center gap-1"
+          className="lg:hidden h-9 w-9 flex flex-col items-center justify-center gap-1"
         >
           <span className="block h-0.5 w-5 bg-slate-700 dark:bg-slate-200" />
           <span className="block h-0.5 w-5 bg-slate-700 dark:bg-slate-200" />
@@ -83,7 +84,7 @@ export function MarketingNav() {
       </div>
 
       {open && (
-        <div className="md:hidden border-t border-slate-200 dark:border-slate-800 px-5 py-4 flex flex-col gap-3">
+        <div className="lg:hidden border-t border-slate-200 dark:border-slate-800 px-5 py-4 flex flex-col gap-3">
           {SECTION_LINKS.map(l => (
             <a key={l.id} href={`/#${l.id}`} onClick={e => { handleSectionLinkClick(e, l.id); setOpen(false); }} className="text-sm font-medium text-slate-700 dark:text-slate-200">{l.label}</a>
           ))}

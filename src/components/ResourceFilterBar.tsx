@@ -31,7 +31,7 @@ export function ResourceFilterBar({ filters, totalCount }: { filters: ResourceFi
         </select>
       </label>
       {hasActiveFilters && (
-        <button onClick={clearFilters} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
+        <button type="button" onClick={clearFilters} className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:underline pb-2">Clear filters</button>
       )}
       <span className="text-xs text-slate-400 pb-2 ml-auto">{filtered.length.toLocaleString()} of {totalCount.toLocaleString()} loaded</span>
     </div>

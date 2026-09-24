@@ -8,6 +8,7 @@ import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useFilters } from '../lib/filterContext';
 import { api, type CostRecommendation, type VulnerabilityFinding, type AlertRow } from '../lib/api';
+import { isVulnerabilityDataEnabled } from '../lib/featureFlags';
 
 type IssueSource = 'cost' | 'security' | 'alert';
 type UnifiedSeverity = 'critical' | 'high' | 'medium' | 'low';
@@ -75,6 +76,13 @@ export function Issues() {
   const [costItems, setCostItems] = useState<CostRecommendation[]>([]);
   const [findings, setFindings] = useState<VulnerabilityFinding[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  // Real per-source totals (pagination.total, a genuine server-side count —
+  // see openTotals below), independent of the 200-per-source row cap on
+  // costItems/findings/alerts above. Those stay capped for populating the
+  // visible triage table; "Total Open Issues" must not be derived from them
+  // (fixed 2026-09-08 — was previously counting rows in the capped, merged
+  // array, so a real "3,619 open" org showed "204" here).
+  const [openTotals, setOpenTotals] = useState({ cost: 0, security: 0, alert: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -97,17 +105,23 @@ export function Issues() {
     try {
       const connectionId = account === 'all' ? undefined : account;
 
+      // Security findings excluded from this V1 queue 2026-09-08
+      // (production-readiness audit): every open vulnerability_findings row
+      // in production is a scanner/CVE record (V2), so this triage list was
+      // ~3,615 CVEs burying the 4 real V1 items, and its per-row "Open in
+      // Vulnerability Management" action pointed at a route that now
+      // redirects to a V2 notice. Cost + alerts are the real V1 work
+      // sources until /my-work exists.
+      const wantSecurity = isVulnerabilityDataEnabled();
       const [cost, sec, al] = await Promise.all([
         api.getSavingsOpportunities({
           connectionId,
           status: 'open',
           limit: 200,
         }),
-        api.getFindings({
-          connection_id: connectionId,
-          status: 'open',
-          limit: 200,
-        }),
+        wantSecurity
+          ? api.getFindings({ connection_id: connectionId, status: 'open', limit: 200 })
+          : Promise.resolve({ items: [], pagination: { total: 0 } }),
         api.getActiveAlerts({
           connection_id: connectionId,
           limit: 200,
@@ -119,6 +133,11 @@ export function Issues() {
       setCostItems(cost.items);
       setFindings(sec.items);
       setAlerts(al.items);
+      // Real totals, same api.<x>().pagination.total pattern already proven
+      // by Overview's OpenIssuesKpi widget (operationsWidgets.tsx) — a
+      // genuine server-side count, not the row-body length these calls also
+      // return (which is capped at the limit:200 requested above).
+      setOpenTotals({ cost: cost.pagination.total, security: sec.pagination.total, alert: al.pagination.total });
     } catch (err) {
       if (requestId !== loadRequestRef.current) return;
 
@@ -133,11 +152,16 @@ export function Issues() {
         setRefreshing(false);
       }
     }
-  }, [account, refreshToken, costItems.length, findings.length, alerts.length]);
+    // `refreshToken` is deliberately NOT here: nothing in this function reads
+    // it. It belongs on the effect below, which is what should re-run when the
+    // user presses refresh.
+  }, [account, costItems.length, findings.length, alerts.length]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // refreshToken is the trigger: pressing refresh in the filter bar bumps it
+    // and re-runs this effect, without pretending it is an input of load().
+  }, [load, refreshToken]);
 
   const allIssues = useMemo<UnifiedIssue[]>(() => {
     const merged = [...costItems.map(fromCostRecommendation), ...findings.map(fromFinding), ...alerts.map(fromAlert)];
@@ -179,35 +203,33 @@ export function Issues() {
   ];
 
   const stats = useMemo(() => {
-    let open = 0;
+    // "Total Open Issues", "Cost Recommendations", and "Security + Alerts"
+    // are real per-source totals (openTotals, from each API's own
+    // pagination.total) — NOT counts of the capped, merged allIssues array.
+    // Fixed 2026-09-08: an org with 3,619 real open issues was showing "204"
+    // here, because this used to count rows in a 200-per-source cap.
+    // "High + Critical" stays sample-based: no backend endpoint returns a
+    // real count filtered by severity, so this is necessarily a statistic
+    // over whatever's in the capped, loaded sample — same disclosed
+    // limitation as the table rows below ("capped at 200 records in this
+    // triage view").
     let highOrCritical = 0;
-    let openCost = 0;
-    let openSecurityOrAlerts = 0;
-
     for (const issue of allIssues) {
-      if (issue.status === 'open') open += 1;
-
       if (
         issue.status !== 'resolved' &&
         (issue.severity === 'critical' || issue.severity === 'high')
       ) {
         highOrCritical += 1;
       }
-
-      if (issue.source === 'cost' && issue.status === 'open') {
-        openCost += 1;
-      }
-
-      if (
-        (issue.source === 'security' || issue.source === 'alert') &&
-        issue.status === 'open'
-      ) {
-        openSecurityOrAlerts += 1;
-      }
     }
 
-    return { open, highOrCritical, openCost, openSecurityOrAlerts };
-  }, [allIssues]);
+    return {
+      open: openTotals.cost + openTotals.security + openTotals.alert,
+      highOrCritical,
+      openCost: openTotals.cost,
+      openSecurityOrAlerts: openTotals.security + openTotals.alert,
+    };
+  }, [allIssues, openTotals]);
 
   const formatDate = useCallback((value: string, includeTime = false) => {
     const date = new Date(value);

@@ -12,43 +12,54 @@ env:
   REPO: cloudops360
 
 jobs:
+  # This job was named build-and-test while only ever running `npm run build`.
+  # 635 unit tests, a typecheck and (since this change) a lint step existed in
+  # the repository and none of them gated a deploy: a push that broke every
+  # test still shipped, because the only thing standing between main and
+  # production was whether Vite could emit a bundle.
   build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Install dependencies
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::GH_PAT secret is required to install private HorizonVigil dependencies."
-            exit 1
-          fi
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          export GIT_CONFIG_COUNT=2
-          export GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_0=ssh://git@github.com/
-          export GIT_CONFIG_KEY_1=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_1=git@github.com:
-          npm install
-      # Matches the original cloudops360-1 monorepo's Cloudflare pipeline
-      # exactly: it calls `npx vite build` directly (deploy-cloudflare.yml),
-      # NOT `npm run build` -- the package.json build script is `tsc -b &&
-      # vite build`, and tsc -b DOES still enforce full type-checking even
-      # with noEmit:true in tsconfig (noEmit only suppresses output files,
-      # not error checking). Calling vite build directly bypasses tsc -b
-      # entirely, same as the original pipeline, and surfaces a batch of
-      # pre-existing type errors across the app unrelated to this migration
-      # (ConnectAwsAccountWizard, api.ts param types, missing vitest
-      # devDependency for two test files). Real, worth fixing, but a
-      # separate cleanup pass -- not gating this deploy on a check the
-      # existing prod frontend has never had to pass.
-      - run: npx vite build
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and component tests
+        run: npm test
+
+      - run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+
+      # Unauthenticated browser smoke tests. These need no credentials and no
+      # deployed environment -- Playwright builds and serves `dist` itself --
+      # so unlike the authenticated suite they can gate every push. They are
+      # what catches a code-split chunk that fails to load, which no unit test
+      # can see because unit tests never mount the router.
+      - name: Install Playwright browser
+        run: npx playwright install chromium --with-deps
+
+      - name: Browser smoke tests (unauthenticated)
+        run: npx playwright test --project=public
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   deploy:
     needs: build-and-test
@@ -121,6 +132,67 @@ jobs:
 
       - name: Show service URL
         run: gcloud run services describe ${{ env.SERVICE }} --region=${{ env.REGION }} --format='value(status.url)'
+
+  # ── POST-DEPLOY AUTHENTICATED GATE ──────────────────────────────────────
+  #
+  # Runs AFTER the revision is live and drives the REAL logged-in product
+  # against it. A deploy does not stand on its own: if the authenticated
+  # suite fails here, this workflow fails, the revision is marked bad, and
+  # the failure is attributable to the exact commit that shipped it.
+  #
+  # It runs post-deploy rather than pre-deploy on purpose. Running it before
+  # would test the PREVIOUS revision and prove nothing about the one being
+  # shipped.
+  #
+  # Missing credentials FAIL this job. They never downgrade it to a skip:
+  # a green deploy whose authenticated gate quietly did not run is the exact
+  # condition that left this suite at zero executions for months.
+  post-deploy-smoke:
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Verify smoke-test credentials are configured
+        env:
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "${SMOKE_TEST_EMAIL:-}" ] || [ -z "${SMOKE_TEST_PASSWORD:-}" ]; then
+            echo "::error::AUTHENTICATED E2E CONFIGURATION ERROR - smoke-test credentials are not configured"
+            exit 1
+          fi
+          echo "Smoke-test credentials are present."
+
+      - name: Authenticated smoke tests against the deployed revision
+        env:
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          npx playwright test --project=smoke --list > discovered.txt 2>&1
+          count="$(grep -c '› ' discovered.txt || true)"
+          echo "AUTHENTICATED TESTS DISCOVERED: ${count}"
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "::error::Zero authenticated tests discovered - the suite has become empty"
+            exit 1
+          fi
+          npx playwright test --project=smoke
+
+      # Safe to publish: the setup project (the only place a password is
+      # typed) records no trace, screenshot or video. See playwright.config.ts.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: post-deploy-playwright-report
+          path: playwright-report/
+          retention-days: 14
 
   # Genuinely separate test environment: its own GCP project
   # (cloudops360-test, own CPU quota) and its own Supabase project

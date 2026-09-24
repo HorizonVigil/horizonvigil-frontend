@@ -13,8 +13,6 @@ import type { Provider } from '../../lib/finops/overview';
 import {
   costByAccountBars,
   recordToBars,
-  summarizeBudgets,
-  optimizationByCategory,
   anomalySeverity,
   sortAnomalies,
   type BudgetRollup,
@@ -279,7 +277,13 @@ export function OptimizationPanel({
   categoryBars,
   topOpportunities,
 }: {
-  potentialMonthly: number;
+  /**
+   * Null when the optimization total is not something we can stand behind --
+   * the dashboard did not load, or open recommendations remain unevaluated.
+   * Rendering `money(0)` for that case advertises "nothing to save" on the
+   * strength of data that was never read.
+   */
+  potentialMonthly: number | null;
   categoryBars: BarDatum[];
   topOpportunities: CostRecommendation[];
 }) {
@@ -290,7 +294,11 @@ export function OptimizationPanel({
         <EmptyState icon="optimization" title="No open recommendations" />
       ) : (
         <div className="flex flex-col gap-3">
-          <MiniStat label="Potential monthly savings" value={money(potentialMonthly)} tone="good" />
+          <MiniStat
+            label="Potential monthly savings"
+            value={potentialMonthly === null ? '—' : money(potentialMonthly)}
+            tone="good"
+          />
           <BarChart data={categoryBars} valueFormatter={money} />
           <ul className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 pt-1">
             {topOpportunities.slice(0, 4).map((r) => (

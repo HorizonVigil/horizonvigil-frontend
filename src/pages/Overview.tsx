@@ -148,6 +148,56 @@ export function Overview() {
         </div>
       </div>
 
+      <section
+        aria-labelledby="intelligence-heading"
+        className="relative mb-5 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 px-5 py-5 text-white shadow-sm sm:px-6"
+      >
+        <div className="absolute -right-20 -top-24 h-56 w-56 rounded-full bg-brand-500/20 blur-3xl" aria-hidden="true" />
+        <div className="relative grid gap-5 xl:grid-cols-[1.2fr_.8fr] xl:items-center">
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              Horizon Intelligence
+            </div>
+            <h3 id="intelligence-heading" className="mt-2 text-xl font-semibold tracking-tight">
+              Move from signals to decisions.
+            </h3>
+            <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-400">
+              Review prioritized cost, security, and operations decisions with evidence, advisor guidance, ownership, and a durable outcome record.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/ai-copilot')}
+                className="rounded-md bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-500"
+              >
+                Review decision queue
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/ai-copilot?view=advisor')}
+                className="rounded-md border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
+              >
+                Ask AI Advisor
+              </button>
+            </div>
+          </div>
+          <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+            {[
+              ['01', 'Explain'],
+              ['02', 'Verify'],
+              ['03', 'Advise'],
+              ['04', 'Record'],
+            ].map(([number, label]) => (
+              <li key={label} className="rounded-lg border border-slate-800 bg-slate-900/80 p-3">
+                <span className="text-[10px] font-semibold text-brand-400">{number}</span>
+                <p className="mt-1 text-xs font-medium text-slate-200">{label}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
       {customizing && (
         <CustomizeBar scope={scope} defaults={prefs.defaults} onSetDefault={setDefaults} onReset={reset} onDone={() => setCustomizing(false)} />
       )}

@@ -1,33 +1,68 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 /**
- * Keeps a page's in-page tab state synced to a `?tab=` URL query param.
- * Without this, the sidebar's submenu links (navConfig.ts) and a page's own
- * tab buttons were two disconnected navigation systems — every submenu item
- * for a module pointed at the exact same bare URL, so clicking "Organizations"
- * in the sidebar just reloaded the Cloud Accounts page on whatever tab was
- * already showing, never actually switching to the Organizations tab. Now
- * the sidebar links carry `?tab=<value>` and this hook is the single source
- * of truth both directions: reading the URL on load/back-forward, and
- * writing it back when a tab button is clicked in-page.
+ * Keeps a page's in-page tab state synchronized with a `?tab=` query
+ * parameter.
+ *
+ * This provides one URL-backed source of truth for:
+ * - sidebar submenu navigation
+ * - in-page tab buttons
+ * - browser back/forward navigation
+ * - bookmarked/shared tab URLs
+ *
+ * The hook validates URL values against the supplied tab catalogue, so an
+ * unknown/stale tab never becomes an invalid application state.
+ *
+ * Query parameters unrelated to `tab` are preserved.
  */
-export function useTabParam<T extends string>(tabs: readonly T[], defaultTab: T): [T, (tab: T) => void] {
+export function useTabParam<T extends string>(
+  tabs: readonly T[],
+  defaultTab: T,
+): readonly [T, (tab: T) => void] {
   const [searchParams, setSearchParams] = useSearchParams();
-  const fromUrl = searchParams.get('tab');
-  const current = fromUrl && (tabs as readonly string[]).includes(fromUrl) ? (fromUrl as T) : defaultTab;
 
-  const setTab = useCallback((tab: T) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (tab === defaultTab) next.delete('tab');
-        else next.set('tab', tab);
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setSearchParams, defaultTab]);
+  const validTabs = useMemo(
+    () => new Set<string>(tabs),
+    [tabs],
+  );
 
-  return [current, setTab];
+  const current = useMemo<T>(() => {
+    const fromUrl = searchParams.get('tab');
+
+    if (fromUrl !== null && validTabs.has(fromUrl)) {
+      return fromUrl as T;
+    }
+
+    return defaultTab;
+  }, [searchParams, validTabs, defaultTab]);
+
+  const setTab = useCallback(
+    (tab: T) => {
+      // Defensively ignore a caller passing a value outside the current tab
+      // catalogue. This protects the URL from becoming an invalid state even
+      // when the runtime value came from an untyped boundary.
+      if (!validTabs.has(tab)) {
+        return;
+      }
+
+      setSearchParams(
+        previous => {
+          const next = new URLSearchParams(previous);
+
+          if (tab === defaultTab) {
+            next.delete('tab');
+          } else {
+            next.set('tab', tab);
+          }
+
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [defaultTab, setSearchParams, validTabs],
+  );
+
+  return [current, setTab] as const;
 }

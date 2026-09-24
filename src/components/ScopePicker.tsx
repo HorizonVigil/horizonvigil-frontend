@@ -170,7 +170,7 @@ export function ScopePicker() {
           >
             <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={12} />
           </button>
-          <button onClick={() => pick({ type: 'folder', id: folder.id, name: folder.name })} className={rowClass(scope?.type === 'folder' && scope.id === folder.id)}>
+          <button type="button" onClick={() => pick({ type: 'folder', id: folder.id, name: folder.name })} className={rowClass(scope?.type === 'folder' && scope.id === folder.id)}>
             <Icon name="folder" size={13} className="text-slate-400 shrink-0" />
             <span className="truncate">{folder.name}</span>
             {total > 0 && <span className="ml-auto shrink-0 text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">{total}</span>}
@@ -182,7 +182,7 @@ export function ScopePicker() {
             {projs.map((p) => (
               <div key={p.id} className="flex items-center gap-0.5" style={{ paddingLeft: (depth + 1) * 14 }}>
                 <span className="w-5 shrink-0" />
-                <button onClick={() => pick({ type: 'project', id: p.id, name: p.name })} className={rowClass(scope?.type === 'project' && scope.id === p.id)}>
+                <button type="button" onClick={() => pick({ type: 'project', id: p.id, name: p.name })} className={rowClass(scope?.type === 'project' && scope.id === p.id)}>
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
                   <span className="truncate">{p.name}</span>
                 </button>
@@ -199,7 +199,7 @@ export function ScopePicker() {
 
   return (
     <div className="relative" ref={ref}>
-      <button
+      <button type="button"
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-2 text-sm rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
       >
@@ -216,7 +216,7 @@ export function ScopePicker() {
             <div className="border-b border-slate-100 dark:border-slate-700 p-1.5">
               <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Organization</div>
               {orgs.map((o) => (
-                <button
+                <button type="button"
                   key={o.id}
                   onClick={() => { setCurrentOrg(o); setOpen(false); }}
                   className={`${rowClass(o.id === currentOrg?.id)} w-full`}
@@ -241,7 +241,7 @@ export function ScopePicker() {
             </div>
             <div className="max-h-[60vh] overflow-y-auto flex flex-col gap-0.5">
               {currentOrg && (!q || matches(currentOrg.name)) && (
-                <button onClick={() => pick({ type: 'org', id: currentOrg.id, name: currentOrg.name })} className={`${rowClass(!scope || scope.type === 'org')} w-full`}>
+                <button type="button" onClick={() => pick({ type: 'org', id: currentOrg.id, name: currentOrg.name })} className={`${rowClass(!scope || scope.type === 'org')} w-full`}>
                   <Icon name="building" size={13} className="text-slate-400 shrink-0" />
                   <span className="truncate">All of {currentOrg.name}</span>
                 </button>
@@ -250,7 +250,7 @@ export function ScopePicker() {
               {rootProjects.map((p) => (
                 <div key={p.id} className="flex items-center gap-0.5">
                   <span className="w-5 shrink-0" />
-                  <button onClick={() => pick({ type: 'project', id: p.id, name: p.name })} className={rowClass(scope?.type === 'project' && scope.id === p.id)}>
+                  <button type="button" onClick={() => pick({ type: 'project', id: p.id, name: p.name })} className={rowClass(scope?.type === 'project' && scope.id === p.id)}>
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
                     <span className="truncate">{p.name}</span>
                   </button>

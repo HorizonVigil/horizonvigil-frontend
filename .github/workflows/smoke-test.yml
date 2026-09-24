@@ -1,10 +1,12 @@
 name: Go-Live Smoke Test
 
-# Manual only (workflow_dispatch), not on every push -- this suite logs
-# into a real account in a real org and clicks through real pages against
-# whatever SMOKE_TEST_BASE_URL points at (production by default). Run it
-# before every production release, per the audit's "Recommended 36-Day
-# Sequence" #3 and the master spec's own §46.
+# Logs into a REAL account in a real org and clicks through real pages against
+# whatever SMOKE_TEST_BASE_URL points at (the deployed production frontend by
+# default). Run before every production release.
+#
+# Runs on a schedule and on demand, not on every push: it drives real
+# infrastructure and a real session. It is still a REQUIRED release gate --
+# `deploy.yml` will not promote a revision that has not passed this.
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +14,10 @@ on:
         description: 'Frontend URL to test (defaults to production)'
         required: false
         type: string
+  schedule:
+    # 06:00 UTC daily. Catches breakage introduced by backend/infra changes
+    # that no frontend commit would have triggered.
+    - cron: '0 6 * * *'
 
 jobs:
   smoke:
@@ -36,13 +42,73 @@ jobs:
           export GIT_CONFIG_VALUE_1=git@github.com:
           npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+
+      # ── Gate 1: credentials must EXIST ────────────────────────────────────
+      # A missing secret must fail as a configuration error. It must never
+      # become a skipped suite, a warning, or a green run -- "authenticated
+      # E2E passed" while nothing authenticated is the failure mode this whole
+      # workflow exists to prevent.
+      #
+      # Presence only. Values are never echoed, and `set -x` is never enabled.
+      - name: Verify smoke-test credentials are configured
+        env:
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          missing=0
+          if [ -z "${SMOKE_TEST_EMAIL:-}" ]; then
+            echo "::error::SMOKE_TEST_EMAIL is not configured"
+            missing=1
+          fi
+          if [ -z "${SMOKE_TEST_PASSWORD:-}" ]; then
+            echo "::error::SMOKE_TEST_PASSWORD is not configured"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::AUTHENTICATED E2E CONFIGURATION ERROR - refusing to run without credentials"
+            exit 1
+          fi
+          echo "Both smoke-test credentials are present."
+
+      # ── Gate 2: the suite must actually CONTAIN tests ─────────────────────
+      # This is the regression guard for the defect that made this suite
+      # worthless for months: it was discovered-but-never-executed, and a
+      # config change that silently matched zero files would look identical to
+      # a passing run. A zero-test suite is a failure here, not a success.
+      - name: Verify authenticated tests are discovered
         env:
           SMOKE_TEST_BASE_URL: ${{ inputs.base_url || '' }}
           SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: |
+          set -eu
+          npx playwright test --project=smoke --list > discovered.txt 2>&1 || {
+            echo "::error::Playwright could not list the authenticated suite"
+            cat discovered.txt
+            exit 1
+          }
+          count="$(grep -c '› ' discovered.txt || true)"
+          echo "AUTHENTICATED TESTS DISCOVERED: ${count}"
+          if [ "${count:-0}" -lt 1 ]; then
+            echo "::error::Zero authenticated tests were discovered. The suite has become empty - this is a regression, not a pass."
+            cat discovered.txt
+            exit 1
+          fi
+
+      # ── Gate 3: run them ─────────────────────────────────────────────────
+      - name: Authenticated browser smoke tests
+        env:
+          SMOKE_TEST_BASE_URL: ${{ inputs.base_url || '' }}
+          SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: npx playwright test --project=smoke
+
+      # Diagnostics are safe to publish: the `setup` project (the only place a
+      # password is typed) runs with trace/screenshot/video disabled, so
+      # nothing here can carry the credential. See playwright.config.ts.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: playwright-report
           path: playwright-report/

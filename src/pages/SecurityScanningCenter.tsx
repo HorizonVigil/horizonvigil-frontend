@@ -13,7 +13,6 @@ import type { IconName } from '../components/icons';
 const TABS = ['Overview', 'SAST', 'DAST', 'SCA', 'Container Scanning', 'IaC Scanning', 'Secrets Detection', 'API Security Testing', 'Web Security Testing', 'Pentest', 'Cloud Posture'] as const;
 type Tab = typeof TABS[number];
 
-const SCANNERS_URL = '/vulnerability-management?tab=Scanners';
 
 interface CategorySpec { icon: IconName; title: string; description: string; scanners?: string[]; href: string }
 

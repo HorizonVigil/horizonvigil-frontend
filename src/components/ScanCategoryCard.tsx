@@ -26,7 +26,14 @@ export function ScanCategoryCard({
   href: string;
   ctaLabel?: string;
 }) {
-  const connected = (scanners?.length ?? 0) > 0;
+  /*
+   * Narrowed, not asserted. `connected` and `scanners!` were two separate
+   * claims the compiler could not relate, so the non-null assertion was the
+   * only thing holding them together -- and it would have survived someone
+   * changing the guard. A concrete array makes the relationship checked.
+   */
+  const connectedScanners = scanners ?? [];
+  const connected = connectedScanners.length > 0;
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -42,7 +49,7 @@ export function ScanCategoryCard({
 
       <div className="flex flex-wrap gap-1.5">
         {connected ? (
-          scanners!.map(name => {
+          connectedScanners.map(name => {
             const reachable = statuses?.[name];
             return (
               <span key={name} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">

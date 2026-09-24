@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { listMfaFactors, enrollTotp, verifyTotp, unenrollTotp, type TotpFactor } from '../lib/mfa';
+import { useConfirm } from './ConfirmDialog';
 
 /** Self-contained so Settings.tsx doesn't need to thread MFA state through its already-large Profile tab. */
 export function MfaSettings() {
@@ -9,6 +10,7 @@ export function MfaSettings() {
   const [enrolling, setEnrolling] = useState<{ factorId: string; qrCode: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   async function refresh() {
     setLoading(true);
@@ -53,7 +55,24 @@ export function MfaSettings() {
     }
   }
 
+  /**
+   * Removing the last verified factor turns two-factor authentication OFF for
+   * this account. That is a security downgrade, and it was reachable in a
+   * single click with no confirmation and no statement of the consequence --
+   * the same class of unguarded destructive action that permanent-delete was
+   * gated for. It now says what will happen before it happens.
+   */
   async function remove(factorId: string) {
+    const isLastFactor = verified.length <= 1;
+
+    const confirmed = await confirm(
+      isLastFactor
+        ? 'Remove this authenticator? This turns OFF two-factor authentication for your account — sign-in will need only your password until you enrol another factor.'
+        : 'Remove this authenticator? You will no longer be able to use it to sign in.',
+    );
+
+    if (!confirmed) return;
+
     setError(null);
     setBusy(true);
     try {
@@ -103,7 +122,7 @@ export function MfaSettings() {
               <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Authenticator app enabled
               </span>
-              <button onClick={() => void remove(f.id)} disabled={busy} className="text-xs text-red-500 hover:underline disabled:opacity-60">Remove</button>
+              <button type="button" onClick={() => void remove(f.id)} disabled={busy} className="text-xs text-red-500 hover:underline disabled:opacity-60">Remove</button>
             </div>
           ))}
           {error && <p className="text-xs text-red-500">{error}</p>}
@@ -112,11 +131,13 @@ export function MfaSettings() {
         <div className="flex flex-col gap-2">
           <p className="text-xs text-slate-500 dark:text-slate-400">Not enabled. Add an authenticator app for a required second step at sign-in.</p>
           {error && <p className="text-xs text-red-500">{error}</p>}
-          <button onClick={() => void startEnroll()} disabled={busy} className="self-start rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60">
+          <button type="button" onClick={() => void startEnroll()} disabled={busy} className="self-start rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60">
             {busy ? 'Starting…' : 'Enable two-factor authentication'}
           </button>
         </div>
       )}
+
+      {dialog}
     </div>
   );
 }

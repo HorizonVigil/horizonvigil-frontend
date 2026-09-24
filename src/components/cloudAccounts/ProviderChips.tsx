@@ -1,94 +1,294 @@
 /**
- * Cloud Accounts — the shared "All clouds / AWS / Azure / GCP" chip row
- * (spec §6). Every tab that shows cloud accounts uses this so the provider
- * filter looks and behaves the same everywhere.
+ * Cloud Accounts — shared "All clouds / AWS / Azure / GCP" chip row (spec §6).
  *
- * - Interactive mode: pass `value` + `onChange` (`null` = all clouds).
- * - Status mode: pass `lockedTo` for tabs whose data source is one provider
- *   only — renders that provider active and the others disabled with a
- *   reason, no "All clouds", not clickable. Keeps the scope visible and
- *   consistent without pretending to be a filter it isn't.
+ * Interactive mode:
+ *   - `value` + `onChange`
+ *   - `null` means all clouds
+ *   - provider chips can expose scoped counts and unavailable states
+ *
+ * Locked/status mode:
+ *   - `lockedTo` identifies the single provider represented by the data source
+ *   - no "All clouds" option is shown
+ *   - other providers are visibly disabled and non-interactive
+ *
+ * This component owns presentation and interaction semantics only. It does not
+ * perform data fetching, authorization, or provider capability detection.
  */
+
 export type ProviderValue = 'aws' | 'azure' | 'gcp';
 
-const CHIPS: { value: ProviderValue; label: string }[] = [
+type ProviderChip = {
+  value: ProviderValue;
+  label: string;
+};
+
+type ProviderCounts = Partial<Record<ProviderValue, number>>;
+
+interface InteractiveProviderChipsProps {
+  value: ProviderValue | null;
+  onChange: (next: ProviderValue | null) => void;
+  counts?: ProviderCounts;
+  unavailable?: readonly ProviderValue[];
+  unavailableReason?: string;
+  lockedTo?: undefined;
+  className?: string;
+  ariaLabel?: string;
+}
+
+interface LockedProviderChipsProps {
+  lockedTo: ProviderValue;
+  lockedReason?: string;
+  className?: string;
+  ariaLabel?: string;
+  value?: undefined;
+  onChange?: undefined;
+}
+
+export type ProviderChipsProps =
+  | InteractiveProviderChipsProps
+  | LockedProviderChipsProps;
+
+const CHIPS: readonly ProviderChip[] = [
   { value: 'aws', label: 'AWS' },
   { value: 'azure', label: 'Azure' },
   { value: 'gcp', label: 'GCP' },
-];
+] as const;
 
-const chipClass = (active: boolean) =>
-  `text-xs rounded-full px-2.5 py-1 border transition-colors ${
+const DEFAULT_UNAVAILABLE_REASON =
+  'Not available for this provider yet';
+
+const DEFAULT_LOCKED_REASON =
+  'Not available for the other providers on this tab yet';
+
+function isProviderValue(value: unknown): value is ProviderValue {
+  return value === 'aws' || value === 'azure' || value === 'gcp';
+}
+
+function normalizeCount(value: unknown): number | null {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0
+  ) {
+    return null;
+  }
+
+  return Math.floor(value);
+}
+
+function normalizeReason(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const normalized = value?.trim();
+  return normalized || fallback;
+}
+
+function chipClass(active: boolean): string {
+  return [
+    'inline-flex items-center justify-center',
+    'rounded-full border px-2.5 py-1',
+    'text-xs font-medium leading-4',
+    'transition-colors',
+    'select-none',
+    'focus:outline-none',
+    'focus-visible:ring-2',
+    'focus-visible:ring-brand-500',
+    'focus-visible:ring-offset-1',
+    'dark:focus-visible:ring-offset-slate-950',
     active
-      ? 'bg-brand-600 border-brand-600 text-white'
-      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-  }`;
+      ? [
+          'border-brand-600 bg-brand-600 text-white',
+          'dark:border-brand-500 dark:bg-brand-500',
+        ].join(' ')
+      : [
+          'border-slate-200 text-slate-600',
+          'hover:bg-slate-50',
+          'dark:border-slate-700 dark:text-slate-300',
+          'dark:hover:bg-slate-800',
+        ].join(' '),
+  ].join(' ');
+}
 
-export function ProviderChips(
-  props:
-    | {
-        value: ProviderValue | null;
-        onChange: (next: ProviderValue | null) => void;
-        counts?: Partial<Record<ProviderValue, number>>;
-        unavailable?: ProviderValue[];
-        unavailableReason?: string;
-        lockedTo?: undefined;
-        className?: string;
-      }
-    | {
-        lockedTo: ProviderValue;
-        lockedReason?: string;
-        className?: string;
-        value?: undefined;
-        onChange?: undefined;
-      },
-) {
-  const className = props.className ?? '';
+function disabledChipClass(): string {
+  return [
+    'cursor-not-allowed',
+    'opacity-40',
+    'hover:bg-transparent',
+    'dark:hover:bg-transparent',
+  ].join(' ');
+}
 
-  if (props.lockedTo) {
-    const reason = props.lockedReason ?? 'Not available for the other providers on this tab yet';
+function providerLabel(provider: ProviderValue): string {
+  switch (provider) {
+    case 'aws':
+      return 'AWS';
+    case 'azure':
+      return 'Azure';
+    case 'gcp':
+      return 'GCP';
+    default:
+      return provider;
+  }
+}
+
+/**
+ * Shared provider filter/status control used throughout Cloud Accounts.
+ */
+export function ProviderChips(props: ProviderChipsProps) {
+  const className = props.className?.trim() ?? '';
+  const ariaLabel =
+    props.ariaLabel?.trim() || 'Cloud provider filter';
+
+  if ('lockedTo' in props && props.lockedTo !== undefined) {
+    const lockedTo = isProviderValue(props.lockedTo)
+      ? props.lockedTo
+      : 'aws';
+
+    const reason = normalizeReason(
+      props.lockedReason,
+      DEFAULT_LOCKED_REASON,
+    );
+
     return (
-      <div className={`flex items-center gap-1.5 flex-wrap ${className}`}>
-        <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Cloud</span>
-        {CHIPS.map((c) => {
-          const active = c.value === props.lockedTo;
+      <div
+        role="group"
+        aria-label={ariaLabel}
+        className={[
+          'flex flex-wrap items-center gap-1.5',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        <span
+          aria-hidden="true"
+          className="mr-1 text-[11px] uppercase tracking-wide text-slate-400"
+        >
+          Cloud
+        </span>
+
+        {CHIPS.map((chip) => {
+          const active = chip.value === lockedTo;
+
           return (
             <span
-              key={c.value}
+              key={chip.value}
+              aria-current={active ? 'true' : undefined}
+              aria-disabled={active ? undefined : 'true'}
               title={active ? undefined : reason}
-              className={`${chipClass(active)} ${active ? '' : 'opacity-40 cursor-not-allowed'}`}
+              className={[
+                chipClass(active),
+                !active ? disabledChipClass() : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
-              {c.label}
+              {chip.label}
             </span>
           );
         })}
+
+        <span className="sr-only">
+          {`This tab is limited to ${providerLabel(lockedTo)}. ${reason}`}
+        </span>
       </div>
     );
   }
 
-  const { value, onChange, counts, unavailable, unavailableReason = 'Not available for this provider yet' } = props;
+  const {
+    value,
+    onChange,
+    counts,
+    unavailable = [],
+    unavailableReason,
+  } = props;
+
+  const normalizedUnavailable = new Set(
+    unavailable.filter(isProviderValue),
+  );
+
+  const normalizedUnavailableReason = normalizeReason(
+    unavailableReason,
+    DEFAULT_UNAVAILABLE_REASON,
+  );
+
+  const hasCounts = counts !== undefined;
 
   return (
-    <div className={`flex items-center gap-1.5 flex-wrap ${className}`}>
-      <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">Cloud</span>
-      <button type="button" onClick={() => onChange(null)} className={chipClass(value === null)}>
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={[
+        'flex flex-wrap items-center gap-1.5',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <span
+        aria-hidden="true"
+        className="mr-1 text-[11px] uppercase tracking-wide text-slate-400"
+      >
+        Cloud
+      </span>
+
+      <button
+        type="button"
+        aria-pressed={value === null}
+        onClick={() => onChange(null)}
+        className={chipClass(value === null)}
+      >
         All clouds
       </button>
-      {CHIPS.map((c) => {
-        const count = counts?.[c.value];
-        const isUnavailable = unavailable?.includes(c.value) ?? false;
-        const disabled = isUnavailable || (counts != null && (count ?? 0) === 0);
+
+      {CHIPS.map((chip) => {
+        const count = normalizeCount(counts?.[chip.value]);
+        const unavailableForProvider = normalizedUnavailable.has(
+          chip.value,
+        );
+
+        /*
+         * A provider with a known zero count is disabled only when counts are
+         * explicitly supplied. Without counts, the component must not infer
+         * that a provider is unavailable.
+         */
+        const zeroCount = hasCounts && count === 0;
+        const disabled = unavailableForProvider || zeroCount;
+        const active = value === chip.value;
+
+        const disabledReason = unavailableForProvider
+          ? normalizedUnavailableReason
+          : zeroCount
+            ? `No ${chip.label} environments are available in the current scope`
+            : undefined;
+
         return (
           <button
-            key={c.value}
+            key={chip.value}
             type="button"
+            aria-pressed={active}
+            aria-disabled={disabled ? 'true' : undefined}
             disabled={disabled}
-            title={isUnavailable ? unavailableReason : undefined}
-            onClick={() => onChange(c.value)}
-            className={`${chipClass(value === c.value)} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+            title={disabledReason}
+            onClick={() => onChange(chip.value)}
+            className={[
+              chipClass(active),
+              disabled ? disabledChipClass() : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
-            {c.label}
-            {count != null && !isUnavailable && <span className="ml-1 tabular-nums opacity-70">{count}</span>}
+            <span>{chip.label}</span>
+
+            {count !== null && !unavailableForProvider ? (
+              <span
+                aria-label={`${count} ${chip.label} environment${count === 1 ? '' : 's'}`}
+                className="ml-1 tabular-nums opacity-70"
+              >
+                {count}
+              </span>
+            ) : null}
           </button>
         );
       })}

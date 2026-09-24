@@ -9,6 +9,7 @@ import { daysAgoISO, formatActivityAction, formatDate, money } from '../../../li
 import { dateRangeToDays } from '../../../lib/filterContext';
 import { scopeQueryKey, type WidgetComponent } from '../../../lib/overview/types';
 import { scopedConnectionId } from '../../../lib/overview/scope';
+import { isVulnerabilityDataEnabled } from '../../../lib/featureFlags';
 import { KpiValue, ViewAllLink, WidgetAction, WidgetBody, WidgetError, WidgetLoading, useWidgetQuery } from './shared';
 
 export const QuickActionsWidget: WidgetComponent = ({ ctx }) => {
@@ -174,7 +175,13 @@ export const RecommendedActionsWidget: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('recommended-actions', ctx, async () => {
     const [savings, findings, incidents] = await Promise.allSettled([
       ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
-      ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      // V2 excluded (2026-09-08 audit, "Overview recommendation cards still
+      // contain V2 CVEs"). This widget is module: null in registryMeta, so
+      // unlike the security widgets it is NOT removed by getEnabledModules()
+      // in cloud-only mode -- it rendered scanner CVEs as "Critical finding"
+      // on the V1 Overview and deep-linked each one into
+      // /vulnerability-management/findings/:id, a route that now redirects.
+      isVulnerabilityDataEnabled() && ctx.can.has('security.read') ? api.getFindings({ severity: 'critical', status: 'open', limit: 3, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
       ctx.can.has('incident.read') ? api.getIncidents({ status: 'open', limit: 3, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
     ]);
     const v = <T,>(r: PromiseSettledResult<T | null>) => (r.status === 'fulfilled' ? r.value : null);
@@ -240,7 +247,11 @@ export const OpenIssuesKpi: WidgetComponent = ({ ctx }) => {
   const query = useWidgetQuery('kpi-open-issues', ctx, async () => {
     const [recs, findings, alerts] = await Promise.allSettled([
       ctx.can.has('cost.read') ? api.getSavingsOpportunities({ status: 'open', limit: 1, connectionId: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
-      ctx.can.has('security.read') ? api.getFindings({ status: 'open', limit: 1, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
+      // V2 findings excluded from this V1 count (2026-09-08 audit): every
+      // open row in vulnerability_findings is a scanner/CVE record, so
+      // including it made "Open Issues" read ~3,619 when the real V1 work
+      // queue (cost recommendations + alerts) was 4 items.
+      isVulnerabilityDataEnabled() && ctx.can.has('security.read') ? api.getFindings({ status: 'open', limit: 1, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
       ctx.can.has('observability.read') ? api.getActiveAlerts({ limit: 1, connection_id: scopedConnectionId(ctx.scope) }) : Promise.resolve(null),
     ]);
     const t = (r: PromiseSettledResult<{ pagination: { total: number } } | null>) => (r.status === 'fulfilled' && r.value ? r.value.pagination.total : 0);

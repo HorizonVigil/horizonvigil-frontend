@@ -9,26 +9,19 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
+      # Full history. gitleaks scans a COMMIT RANGE (`<base>^..<head>`), and
+      # actions/checkout defaults to a depth-1 clone, so the base commit is
+      # not in the local history and git answers "unknown revision" -- which
+      # gitleaks reports as "failed to scan Git repository" and exits 1. The
+      # step looked like a secret-scan failure while having scanned nothing.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
 
-      - name: Install dependencies
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::GH_PAT secret is required to install private HorizonVigil dependencies."
-            exit 1
-          fi
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          export GIT_CONFIG_COUNT=2
-          export GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_0=ssh://git@github.com/
-          export GIT_CONFIG_KEY_1=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_1=git@github.com:
-          npm install
+      - run: npm ci
 
       - name: Type check
         run: npm run typecheck --if-present
@@ -57,14 +50,8 @@ jobs:
 
       - name: Build image for scanning
         if: steps.has-dockerfile.outputs.exists == 'true'
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::GH_PAT secret is required to build images that install private HorizonVigil dependencies."
-            exit 1
-          fi
-          DOCKER_BUILDKIT=1 docker build --secret id=gh_pat,env=GH_PAT -t local-scan-target:${{ github.sha }} .
+        run: docker build -t local-scan-target:${{ github.sha }} .
+
       # scanners: vuln only -- secret detection is gitleaks' job (above).
       # Running both here flagged UI placeholder copy (a GCP-key JSON
       # example in an account-connect form) as a "leaked" credential

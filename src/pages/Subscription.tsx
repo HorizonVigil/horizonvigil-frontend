@@ -35,11 +35,6 @@ function formatDate(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleDateString();
 }
 
-function formatReferralCents(cents: number): string {
-  const amount = Number.isFinite(cents) ? cents / 100 : 0;
-  return amount.toFixed(0);
-}
-
 const METRIC_LABELS: Record<string, string> = {
   cloud_accounts: 'Cloud Accounts', users: 'Users', api_requests: 'API Requests',
   ai_requests: 'AI Requests', storage_gb: 'Storage (GB)', automations: 'Automations / mo',
@@ -74,6 +69,9 @@ export function Subscription() {
   const [subscribing, setSubscribing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [providerStatus, setProviderStatus] = useState<{ provider: string; configured: boolean; mode: 'test' | 'live' | 'none' } | null>(null);
+  // Fail-closed: until provider status has loaded and reports 'live', paid
+  // checkout stays disabled. A null/undetermined status must not enable it.
+  const isLiveBilling = providerStatus?.mode === 'live';
   const [loadError, setLoadError] = useState<string | null>(null);
   const [billingPortalLoading, setBillingPortalLoading] = useState(false);
   const loadRequestId = useRef(0);
@@ -387,6 +385,7 @@ export function Subscription() {
         <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 px-4 py-2.5 mb-5 flex items-center gap-2.5">
           <span className="text-amber-600 dark:text-amber-400 text-base leading-none" aria-hidden="true">&#9888;</span>
           <p className="text-xs text-amber-800 dark:text-amber-300">
+            <span className="font-semibold">Checkout is disabled.</span>{' '}
             {providerStatus.mode === 'test' ? (
               <>
                 <span className="font-semibold">Test mode &mdash; {providerStatus.provider} is connected with test credentials.</span>{' '}
@@ -491,8 +490,17 @@ export function Subscription() {
                     </a>
                   ) : (
                     <button type="button"
-                      disabled={isCurrent || subscribing === plan.key || !!subscription}
+                      // Paid checkout is disabled unless a LIVE payment
+                      // provider is configured (2026-09-08 production
+                      // readiness audit: "Razorpay is in test mode on the
+                      // production site, but Subscribe remains enabled" ->
+                      // "Do not accept payment in test mode"). The honest
+                      // test-mode banner above was not enough on its own:
+                      // the button still started a checkout on the
+                      // production domain.
+                      disabled={isCurrent || subscribing === plan.key || !!subscription || !isLiveBilling}
                       onClick={() => handleSubscribe(plan)}
+                      title={!isLiveBilling && !isCurrent && !subscription ? 'Checkout is disabled until a live payment provider is configured.' : undefined}
                       className={`text-xs font-semibold py-2 rounded-md text-center ${isCurrent ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-default' : 'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50'}`}
                     >
                       {isCurrent
@@ -501,7 +509,9 @@ export function Subscription() {
                           ? 'Starting…'
                           : subscription
                             ? 'Use "Manage billing" to switch'
-                            : 'Subscribe'}
+                            : !isLiveBilling
+                              ? 'Checkout unavailable'
+                              : 'Subscribe'}
                     </button>
                   )}
                 </div>

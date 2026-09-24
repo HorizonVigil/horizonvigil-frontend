@@ -54,15 +54,15 @@ export function ChatWidget() {
       {open && (
         <div className="mb-3 w-80 sm:w-96 h-[28rem] rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 shrink-0">
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">HorizonVigil Assistant</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Horizon Intelligence</span>
             <div className="flex items-center gap-2">
-              <Link to="/ai-copilot" className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline">Full view</Link>
-              <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none">×</button>
+              <Link to="/ai-copilot?view=advisor" className="text-[10px] text-brand-600 dark:text-brand-400 hover:underline">Open advisor</Link>
+              <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg leading-none">×</button>
             </div>
           </div>
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
             {messages.length === 0 && (
-              <p className="text-xs text-slate-400 py-4">Ask about your cost, security findings, resources, or Kubernetes clusters.</p>
+              <p className="text-xs text-slate-400 py-4">Ask what changed, why it matters, and what evidence supports the next step.</p>
             )}
             {messages.map((m) => (
               <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -83,7 +83,7 @@ export function ChatWidget() {
               disabled={sending}
               className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-900 dark:text-white disabled:opacity-60"
             />
-            <button
+            <button type="button"
               onClick={() => void handleSend()}
               disabled={sending || !input.trim()}
               className="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-xs font-medium px-3 py-1.5"
@@ -93,7 +93,7 @@ export function ChatWidget() {
           </div>
         </div>
       )}
-      <button
+      <button type="button"
         onClick={() => setOpen((o) => !o)}
         className="h-12 w-12 rounded-full bg-brand-600 text-white shadow-lg flex items-center justify-center hover:bg-brand-700"
         aria-label="Open chat assistant"

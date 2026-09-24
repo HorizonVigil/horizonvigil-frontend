@@ -48,11 +48,48 @@ test.describe('go-live smoke test', () => {
     await expectPageRendersCleanly(page, '/overview');
   });
 
-  test('cloud accounts list loads, and a real connection can be opened', async ({ page }) => {
-    await page.goto('/cloud-accounts');
-    await expectPageRendersCleanly(page, '/cloud-accounts');
+  test('AI Intelligence loads live workspace and evidence coverage', async ({ page }) => {
+    await expectPageRendersCleanly(page, '/ai-copilot');
+    await expect(page.getByRole('heading', { name: 'Your AWS cloud. Every decision, explained.' })).toBeVisible();
+    await expect(page.getByText('Intelligence workspace unavailable')).toHaveCount(0);
+    await expect(page.getByText('Live Intelligence is temporarily unavailable')).toHaveCount(0);
+    await expect(page.getByText('Sample workspace.')).toHaveCount(0);
 
-    const firstRow = page.locator('table tbody tr').first();
+    await expectPageRendersCleanly(page, '/ai-copilot?view=evidence');
+    await expect(page.getByRole('heading', { name: 'What the advisor could verify' })).toBeVisible();
+    await expect(page.getByText(/(?:Retrieved AWS evidence for \d+ permitted connection|No AWS connections are available in the selected scope|selected scope contains no AWS connections)/i)).toBeVisible();
+
+    await expectPageRendersCleanly(page, '/ai-copilot?view=governance');
+    await expect(page.getByRole('heading', { name: 'AWS production governance is active' })).toBeVisible();
+    await expect(page.getByText('Human approval')).toBeVisible();
+    await expect(page.getByText('Required')).toBeVisible();
+  });
+
+  test('cloud accounts list loads, and a real connection can be opened', async ({ page }) => {
+    /*
+     * The Inventory tab is named explicitly, not left to the default.
+     *
+     * `/cloud-accounts` opens on Overview, whose first table is "Top Accounts
+     * Requiring Attention" -- and that component binds navigation to BUTTONS
+     * inside its cells, not to the row. Clicking `tr` there does nothing, so
+     * this test failed on its first ever execution by selecting the wrong
+     * table rather than by finding a product defect.
+     *
+     * Inventory is the tab that actually lists connections with a row-level
+     * click through to the detail page, which is the behaviour being asserted.
+     */
+    // The tab is part of the path handed to the helper, because the helper
+    // performs the navigation itself -- doing a goto() here first and calling
+    // it afterwards simply navigated twice and dropped the query string.
+    await expectPageRendersCleanly(page, '/cloud-accounts?tab=Inventory');
+
+    // Wait for the list itself, not a timeout: the rows arrive with the
+    // inventory request.
+    // Empty-state rows are real <tr> elements too, but only data rows expose
+    // keyboard activation because DataTable has an onRowClick handler.
+    const firstRow = page.locator('table tbody tr[tabindex="0"]').first();
+    await firstRow.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
+
     if (await firstRow.count() === 0) {
       test.info().annotations.push({
         type: 'skipped-assertion',
@@ -90,5 +127,10 @@ test.describe('go-live smoke test', () => {
 
   test('reports loads', async ({ page }) => {
     await expectPageRendersCleanly(page, '/reports');
+  });
+
+  test('AWS cluster console loads', async ({ page }) => {
+    await expectPageRendersCleanly(page, '/clusters/aws');
+    await expect(page.getByRole('heading', { name: 'AWS EKS Console' })).toBeVisible();
   });
 });

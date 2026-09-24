@@ -1,71 +1,201 @@
 import { LegalPage } from './LegalPage';
 
+const LEGAL_EMAIL = 'legal@horizonvigil.com';
+
 export function TermsOfService() {
   return (
-    <LegalPage title="Terms of Service" updated="August 2026">
-      <section>
-        <h2>1. Agreement</h2>
-        <p>These terms govern your use of HorizonVigil (the "Service"). By creating an account, you agree to these terms on behalf of yourself and, if applicable, your organization.</p>
+    <LegalPage
+      title="Terms of Service"
+      updated="August 2026"
+    >
+      <section aria-labelledby="terms-agreement">
+        <h2 id="terms-agreement">1. Agreement</h2>
+        <p>
+          These Terms of Service govern your use of HorizonVigil (the
+          "Service"). By creating an account or using the Service, you agree
+          to these terms on behalf of yourself and, if applicable, the
+          organization you represent.
+        </p>
       </section>
 
-      <section>
-        <h2>2. The Service</h2>
-        <p>HorizonVigil connects to cloud accounts you authorize (currently AWS and Google Cloud) and provides inventory, cost, security, and automation features on top of that data. Feature availability, included limits, and data retention vary by plan — see the pricing page for current details.</p>
+      <section aria-labelledby="terms-service">
+        <h2 id="terms-service">2. The Service</h2>
+        <p>
+          HorizonVigil connects to cloud accounts and projects that you
+          authorize and provides inventory, cost, security, reporting, and
+          related automation features based on the data and permissions
+          available through those connections.
+        </p>
+        <p>
+          Supported providers, features, included usage limits, and data
+          retention periods may vary by plan and may change over time. Current
+          plan details are described on the pricing page and, where
+          applicable, in your order or subscription agreement.
+        </p>
       </section>
 
-      <section>
-        <h2>3. Accounts and organizations</h2>
-        <p>You're responsible for the accuracy of information you provide and for maintaining the security of your login credentials. Organization owners are responsible for the roles and permissions they grant to other members within their organization.</p>
+      <section aria-labelledby="terms-accounts">
+        <h2 id="terms-accounts">3. Accounts and organizations</h2>
+        <p>
+          You are responsible for the accuracy of the information you provide
+          and for maintaining the security of your account credentials.
+        </p>
+        <p>
+          Organization owners and administrators are responsible for the
+          users, roles, permissions, and access they configure within their
+          organization.
+        </p>
       </section>
 
-      <section>
-        <h2>4. Cloud account authorization</h2>
-        <p>You represent that you have the authority to connect any cloud account or project you connect to HorizonVigil, and to grant the permissions that connection requires. You can disconnect an account at any time; automation tied to that account stops immediately on disconnect.</p>
+      <section aria-labelledby="terms-cloud-access">
+        <h2 id="terms-cloud-access">4. Cloud account authorization</h2>
+        <p>
+          You represent that you have the authority to connect each cloud
+          account or project you connect to HorizonVigil and to grant the
+          permissions required for the applicable functionality.
+        </p>
+        <p>
+          You may disconnect a cloud account or project at any time.
+          Disconnecting a connection prevents HorizonVigil from making further
+          requests through that connection, subject to any already-running
+          operations and applicable provider behavior.
+        </p>
       </section>
 
-      <section>
-        <h2>5. Automation and remediation</h2>
-        <p>Automation features (stop/start, right-sizing, and similar actions) only run when you explicitly enable them for a resource or policy. You're responsible for reviewing automation configuration before enabling it. Every automated action is recorded in your organization's audit log.</p>
+      <section aria-labelledby="terms-automation">
+        <h2 id="terms-automation">5. Automation and remediation</h2>
+        <p>
+          Where automation or remediation functionality is available, it
+          operates according to the configuration, permissions, and controls
+          you provide. You are responsible for reviewing automation
+          configurations and the permissions granted to HorizonVigil before
+          enabling or approving automated actions.
+        </p>
+        <p>
+          Automation availability and supported actions may vary by plan,
+          provider, resource type, and deployment configuration. Where the
+          Service records an automation event, that event may be available in
+          the organization's audit history.
+        </p>
       </section>
 
-      <section>
-        <h2>6. Billing</h2>
-        <p>Paid plans are billed monthly or annually in advance, per the pricing shown at checkout. Plan changes take effect immediately for upgrades and at the next billing period for downgrades. You can cancel at any time from the billing portal; we don't offer prorated refunds for partial billing periods except where required by law.</p>
+      <section aria-labelledby="terms-billing">
+        <h2 id="terms-billing">6. Billing</h2>
+        <p>
+          Paid plans are billed according to the billing interval, pricing,
+          usage limits, and other terms presented at checkout or in your
+          applicable subscription agreement.
+        </p>
+        <p>
+          Unless otherwise stated, upgrades take effect according to the
+          applicable billing system and downgrades take effect at the next
+          applicable billing period. You may cancel your subscription through
+          the available billing controls. Refunds, credits, and prorated
+          charges are handled according to the applicable subscription terms
+          and applicable law.
+        </p>
       </section>
 
-      <section>
-        <h2>7. Acceptable use</h2>
-        <p>You agree not to use the Service to access cloud accounts you're not authorized to access, to circumvent rate limits or security controls, or to resell the Service without a separate written agreement with us.</p>
+      <section aria-labelledby="terms-acceptable-use">
+        <h2 id="terms-acceptable-use">7. Acceptable use</h2>
+        <p>
+          You agree not to use the Service to access cloud accounts or
+          resources that you are not authorized to access, circumvent
+          applicable rate limits or security controls, interfere with the
+          operation of the Service, or resell the Service without a separate
+          written agreement with HorizonVigil.
+        </p>
       </section>
 
-      <section>
-        <h2>8. Availability</h2>
-        <p>We target the uptime SLA associated with your plan (see pricing) but the Service is provided without warranty of uninterrupted availability below Enterprise. We'll make reasonable efforts to notify you of planned maintenance.</p>
+      <section aria-labelledby="terms-availability">
+        <h2 id="terms-availability">8. Availability</h2>
+        <p>
+          We aim to provide reliable access to the Service. Availability
+          commitments, service levels, and remedies, if any, depend on your
+          applicable plan or subscription agreement.
+        </p>
+        <p>
+          We may perform planned maintenance, updates, or other operational
+          work that temporarily affects availability. Where reasonably
+          practical, we will provide advance notice of material planned
+          maintenance.
+        </p>
       </section>
 
-      <section>
-        <h2>9. Data ownership</h2>
-        <p>You retain ownership of your cloud resource data and account information. We retain ownership of the HorizonVigil platform itself. On account termination, you may export your data before deletion per our Privacy Policy's retention terms.</p>
+      <section aria-labelledby="terms-data-ownership">
+        <h2 id="terms-data-ownership">9. Data ownership</h2>
+        <p>
+          As between you and HorizonVigil, you retain your rights in data that
+          you provide to the Service or that HorizonVigil retrieves from cloud
+          environments you authorize, subject to the rights necessary for us
+          to provide the Service.
+        </p>
+        <p>
+          HorizonVigil retains all rights in the Service, including its
+          software, interfaces, documentation, and underlying technology,
+          except for rights that belong to you or other third parties.
+        </p>
+        <p>
+          Following account termination, data may remain available for the
+          applicable retention period and may be exported using available
+          product functionality before deletion, subject to our Privacy Policy
+          and applicable legal or contractual requirements.
+        </p>
       </section>
 
-      <section>
-        <h2>10. Limitation of liability</h2>
-        <p>The Service is provided "as is." To the maximum extent permitted by law, HorizonVigil is not liable for indirect, incidental, or consequential damages arising from use of the Service, including actions taken via automation features you configured.</p>
+      <section aria-labelledby="terms-liability">
+        <h2 id="terms-liability">10. Limitation of liability</h2>
+        <p>
+          To the maximum extent permitted by applicable law, the Service is
+          provided on an "as is" and "as available" basis, without warranties
+          except those expressly provided in an applicable written agreement.
+        </p>
+        <p>
+          To the maximum extent permitted by applicable law, HorizonVigil will
+          not be liable for indirect, incidental, special, consequential, or
+          punitive damages arising from or related to your use of the Service,
+          including consequences resulting from cloud configurations,
+          permissions, or automation actions that you authorize or configure.
+        </p>
       </section>
 
-      <section>
-        <h2>11. Termination</h2>
-        <p>You may terminate your account at any time. We may suspend or terminate accounts that violate these terms, with notice where practical.</p>
+      <section aria-labelledby="terms-termination">
+        <h2 id="terms-termination">11. Termination</h2>
+        <p>
+          You may terminate your account or subscription in accordance with the
+          applicable billing and subscription terms.
+        </p>
+        <p>
+          We may suspend or terminate access where reasonably necessary,
+          including for material violations of these terms, security risks,
+          fraud, non-payment, or misuse of the Service. Where practical and
+          legally permitted, we will provide notice before taking such action.
+        </p>
       </section>
 
-      <section>
-        <h2>12. Changes to these terms</h2>
-        <p>We'll update the date at the top of this page when these terms change, and notify account owners by email for material changes.</p>
+      <section aria-labelledby="terms-changes">
+        <h2 id="terms-changes">12. Changes to these terms</h2>
+        <p>
+          We may update these terms from time to time. We will update the date
+          displayed at the top of this page when changes are made.
+        </p>
+        <p>
+          For material changes, we may provide additional notice, including by
+          email to account owners where appropriate.
+        </p>
       </section>
 
-      <section>
-        <h2>13. Contact</h2>
-        <p>Questions about these terms: <a href="mailto:legal@horizonvigil.com" className="text-brand-600 dark:text-brand-400 hover:underline">legal@horizonvigil.com</a></p>
+      <section aria-labelledby="terms-contact">
+        <h2 id="terms-contact">13. Contact</h2>
+        <p>
+          Questions about these terms:{' '}
+          <a
+            href={`mailto:${LEGAL_EMAIL}`}
+            className="text-brand-600 underline-offset-2 hover:underline dark:text-brand-400"
+          >
+            {LEGAL_EMAIL}
+          </a>
+        </p>
       </section>
     </LegalPage>
   );

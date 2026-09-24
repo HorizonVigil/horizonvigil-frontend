@@ -26,16 +26,64 @@ interface WidgetData {
   alarms: MonitoringAlarm[];
 }
 
-function WidgetPreview({ widget, data }: { widget: { key: string; config: unknown }; data: WidgetData | null }) {
-  if (!data) return <div className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" />;
+function WidgetPreview({
+  widget,
+  data,
+  loading,
+  error,
+}: {
+  widget: { key: string; config: unknown };
+  data: WidgetData | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  /*
+   * Loading, failed and empty are three different things, and this rendered
+   * all of them as the same pulsing skeleton.
+   *
+   * The page already captured the failure -- `setWidgetDataError(...)` runs in
+   * the catch -- but nothing consumed it, so a widget whose data request had
+   * failed animated as if it were still loading, forever. A permanent
+   * skeleton reads as "still working", which is the one thing it is not.
+   */
+  if (error) {
+    return (
+      <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        {error}
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div
+        className="h-20 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800"
+        aria-busy="true"
+        aria-label="Loading widget data"
+      />
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+        No data for this widget yet.
+      </div>
+    );
+  }
 
   switch (widget.key) {
     case 'kpi_cost_mtd':
       return <StatCard label="Cost (Month to Date)" value={money(data.costMtd)} />;
     case 'kpi_resource_count':
       return <StatCard label="Resource Count" value={data.resourceTotal.toLocaleString()} />;
+    // V2 (2026-09-08 production-readiness audit): this counted
+    // vulnerability_findings, which in production is 100% scanner/CVE data.
+    // Kept as an explicit honest state rather than deleted so dashboards
+    // that already saved this widget degrade truthfully instead of silently
+    // falling through to a generic "preview not available".
     case 'kpi_open_findings':
-      return <StatCard label="Open Security Findings" value={data.openFindings.toLocaleString()} />;
+      return <EmptyState icon="shield-check-2" title="Not part of this release" description="Vulnerability and scanner findings are being redesigned for a future release. Cloud Security covers posture, exposure and identity risk." />;
     case 'resource_distribution_pie':
       return Object.keys(data.resourceByCategory).length > 0
         ? <Donut size={100} thickness={16} data={Object.entries(data.resourceByCategory).filter(([, v]) => v > 0).map(([label, value]) => ({ label, value, colorCategory: label }))} />
@@ -442,7 +490,7 @@ export function CustomDashboards() {
                           </button>
                         )}
                       </div>
-                      <WidgetPreview widget={w} data={widgetData} />
+                      <WidgetPreview widget={w} data={widgetData} loading={widgetDataLoading} error={widgetDataError} />
                     </div>
                   );
                 })}

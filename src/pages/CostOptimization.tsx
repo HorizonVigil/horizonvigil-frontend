@@ -9,11 +9,12 @@ import { useFilters } from '../lib/filterContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
-import { useConfirm } from '../components/ConfirmDialog';
-import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type RemediationRequest, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
+import { api, ApiError, type CostRecommendation, type RecommendationListParams, type CostAnomaly, type CloudResource, type ResourceMetric, type ExclusionReason, type ExclusionDuration, type Member, type GitInstallation, type GitRepo } from '../lib/api';
 import { money as formatMoney } from '../lib/format';
+import { isActionable, isUnevaluated, validityLabel, validityTone, validityExplanation, evidenceSummary, ownershipSummary } from '../lib/recommendationDisplay';
 import type { ResolvedGroupFilter } from '../lib/finops/groupFilter';
 import { PROVIDER_LABEL } from '../lib/finops/overview';
+import { safeExternalUrl } from '../lib/safeUrl';
 
 const EXCLUSION_REASONS: { value: ExclusionReason; label: string }[] = [
   { value: 'business_critical', label: 'Business Critical' },
@@ -43,6 +44,13 @@ function money(n: number): string {
   return formatMoney(n, 2);
 }
 
+function outcomeTone(state: CostRecommendation['savings_state']): 'good' | 'warning' | 'neutral' | 'critical' {
+  if (state === 'verified') return 'good';
+  if (state === 'not_realised') return 'critical';
+  if (state === 'observed' || state === 'implemented') return 'warning';
+  return 'neutral';
+}
+
 const TABS = ['Overview', 'Recommendations', 'Rightsizing', 'Idle Resources', 'Reserved Instances', 'Savings Plans', 'Cost Anomalies', 'History'] as const;
 type Tab = typeof TABS[number];
 
@@ -70,7 +78,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   // filter only applies when Account is "all".
   const groupIds = account === 'all' ? groupFilter.connectionIds : undefined;
   const groupFilterActive = Boolean(groupFilter.provider || groupFilter.environment !== 'all');
-  const { confirm, dialog: confirmDialog } = useConfirm();
   const canSeeNavTab = useSubmenuAccess('cost');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t] ?? t), [canSeeNavTab]);
   const visibleTabs = TABS.filter(canSeeTab);
@@ -98,8 +105,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   // The most recent resize_instance remediation request (if any) already
   // filed for this resource — lets the drawer show "Resize requested",
   // "Awaiting approval", etc. instead of offering a duplicate request.
-  const [resizeRequest, setResizeRequest] = useState<RemediationRequest | null>(null);
-  const [resizeRequesting, setResizeRequesting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tabError, setTabError] = useState<string | null>(null);
   const [anomalyError, setAnomalyError] = useState<string | null>(null);
@@ -113,7 +118,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
     if (!selected || selected.category !== 'rightsizing' || !selected.resource_id) {
       setSelectedResource(null);
       setSelectedCpuHistory([]);
-      setResizeRequest(null);
       return;
     }
 
@@ -127,28 +131,19 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
         metricName: 'CPUUtilization',
         limit: 60,
       }),
-      api.listRemediation({ connectionId: selected.connection_id }),
     ])
-      .then(([resource, metrics, remediation]) => {
+      .then(([resource, metrics]) => {
         if (cancelled) return;
 
         setSelectedResource(resource);
         setSelectedCpuHistory(
           [...metrics.items].sort((a, b) => a.ts.localeCompare(b.ts)),
         );
-        setResizeRequest(
-          remediation.items.find(
-            r =>
-              r.resource_id === selected.resource_id &&
-              r.action_type === 'resize_instance',
-          ) ?? null,
-        );
       })
       .catch(() => {
         if (cancelled) return;
         setSelectedResource(null);
         setSelectedCpuHistory([]);
-        setResizeRequest(null);
       })
       .finally(() => {
         if (!cancelled) setSelectedDetailLoading(false);
@@ -160,54 +155,13 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   }, [selected]);
 
 
-  // resize_instance's execute step can only ever safely issue StopInstances
-  // and stop there — AWS's stop is itself asynchronous, so a Worker
-  // invocation can't block waiting for it. Once a request lands in
-  // 'awaiting_stop', this polls finish-resize every few seconds (same "small
-  // step, caller drives the loop" shape as the sync/discovery polling
-  // elsewhere in this app) until the instance is confirmed stopped and the
-  // resize completes.
-  // Keyed on id+status (not the resizeRequest object itself) so the interval
-  // isn't torn down and rebuilt on every poll tick — setResizeRequest(updated)
-  // below produces a new object each time even when status hasn't changed,
-  // which would otherwise clear and never recreate the interval.
-  const resizeRequestId = resizeRequest?.id;
-  const resizeRequestStatus = resizeRequest?.status;
-  useEffect(() => {
-    if (!resizeRequestId || resizeRequestStatus !== 'awaiting_stop') return;
-
-    const interval = setInterval(() => {
-      void api
-        .finishResizeRemediation(resizeRequestId)
-        .then(updated => setResizeRequest(updated))
-        .catch(() => {
-          // Keep the current state. The next poll can recover from a transient
-          // API failure without interrupting the remediation workflow.
-        });
-    }, 8000);
-    return () => clearInterval(interval);
-  }, [resizeRequestId, resizeRequestStatus]);
-
-  async function requestAutomatedResize(recommendation: CostRecommendation, targetInstanceType: string) {
-    if (!recommendation.resource_id) return;
-    const ok = await confirm(
-      `Request an automated resize to "${targetInstanceType}"? This goes through an approval + dry-run before anything actually runs against AWS. Once executed, the instance will stop, resize, and restart — there will be real downtime for that duration.`,
-    );
-    if (!ok) return;
-    setResizeRequesting(true);
-    try {
-      const created = await api.requestRemediation({
-        connectionId: recommendation.connection_id, resourceId: recommendation.resource_id, actionType: 'resize_instance',
-        recommendationId: recommendation.id, targetConfig: { targetInstanceType },
-      });
-      setResizeRequest(created);
-      toast('Resize requested — an admin needs to approve it in Automation → Remediation before it runs.', 'success');
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Could not request automated resize', 'error');
-    } finally {
-      setResizeRequesting(false);
-    }
-  }
+  // The resize polling interval and requestAutomatedResize() that lived here
+  // were removed in V1: they called finishResizeRemediation()/
+  // requestRemediation(), i.e. a background job and a provider-mutating
+  // request, against a pathway the server now denies fail-closed. The
+  // audits' definition of gating explicitly includes "no background fetch or
+  // job", so leaving a silent 8-second poll against a 403 would not have
+  // satisfied it.
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -374,9 +328,17 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   }
 
 
+  // The server counts only `actionable` recommendations here (§9). What it
+  // leaves out is reported separately rather than folded into the total, so
+  // "nothing to save" and "nothing has been checked" stay distinguishable.
   const potentialMonthly = dashboard?.totalPotentialMonthlySavings ?? 0;
   const potentialAnnual = potentialMonthly * 12;
   const openRecommendationsCount = dashboard?.openRecommendations ?? 0;
+  const unevaluatedCount = dashboard?.recommendationBreakdown?.unevaluated ?? 0;
+  const notActionableCount = dashboard?.recommendationBreakdown?.notActionable ?? 0;
+  /** A zero is only printable once every open row has actually been judged. */
+  const savingsProven = dashboard !== null && (potentialMonthly > 0 || unevaluatedCount === 0);
+  const savingsNote = unevaluatedCount > 0 ? `${unevaluatedCount} not checked yet` : undefined;
 
   async function markDone(
     id: string,
@@ -575,13 +537,33 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
     { key: 'resource', header: 'Resource', render: r => r.resource_id ?? '—', sortValue: r => r.resource_id ?? '' },
     { key: 'issue', header: 'Issue', render: r => r.issue, sortValue: r => r.issue },
     { key: 'action', header: 'Recommended Action', render: r => r.recommended_action, sortValue: r => r.recommended_action },
-    { key: 'savings', header: '$/mo Savings', render: r => money(r.potential_monthly_savings), sortValue: r => r.potential_monthly_savings },
+    {
+      key: 'savings', header: '$/mo Savings',
+      // A dollar figure on a recommendation that cannot be acted on is not a
+      // saving, so it is not printed as one. The number itself stays visible
+      // in the drawer with its reason — struck through here rather than
+      // hidden, since removing it would look like the row has no estimate.
+      render: r => isActionable(r)
+        ? money(r.potential_monthly_savings)
+        : <span className="text-slate-400 dark:text-slate-500 line-through" title={validityExplanation(r)}>{money(r.potential_monthly_savings)}</span>,
+      sortValue: r => r.potential_monthly_savings,
+    },
     { key: 'priority', header: 'Priority', render: r => <Badge tone={r.priority === 'high' ? 'critical' : r.priority === 'medium' ? 'warning' : 'good'}>{r.priority}</Badge>, sortValue: r => r.priority },
+    {
+      key: 'validity', header: 'Validity',
+      render: r => <Badge tone={validityTone(r)}>{validityLabel(r)}</Badge>,
+      sortValue: r => validityLabel(r),
+    },
   ];
   const actionsColumn: Column<CostRecommendation> = {
     key: 'actions', header: 'Actions', render: r => (
       <div className="flex gap-2 text-xs">
-        <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+        {/* Apply is offered only on a recommendation that is actually
+            actionable. Production served an Apply button on four rows whose
+            target instances had already been deleted. */}
+        {isActionable(r)
+          ? <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-emerald-600 dark:text-emerald-400 hover:underline">Apply</button>
+          : <button type="button" onClick={e => { e.stopPropagation(); setSelected(r); }} className="text-slate-500 dark:text-slate-400 hover:underline" title={validityExplanation(r)}>Why not?</button>}
         <button type="button" onClick={e => { e.stopPropagation(); openNotifyModal(r); }} className="text-brand-600 dark:text-brand-400 hover:underline">Notify Owner</button>
         <button type="button" onClick={e => { e.stopPropagation(); openExcludeModal(r); }} className="text-amber-600 dark:text-amber-400 hover:underline">Exclude</button>
         <button type="button" onClick={e => { e.stopPropagation(); void markDone(r.id, 'dismissed'); }} disabled={mutationId === r.id} className="text-slate-400 hover:underline">Dismiss</button>
@@ -591,7 +573,12 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
   const statusColumn: Column<CostRecommendation> = {
     key: 'status', header: 'Status', render: r => <Badge tone={r.status === 'applied' ? 'good' : 'neutral'}>{r.status}</Badge>, sortValue: r => r.status,
   };
-  const columns: Column<CostRecommendation>[] = tab === 'History' ? [...baseColumns, statusColumn] : [...baseColumns, actionsColumn];
+  const outcomeColumn: Column<CostRecommendation> = {
+    key: 'outcome', header: 'Savings outcome',
+    render: r => <div className="space-y-1"><Badge tone={outcomeTone(r.savings_state)}>{(r.savings_state ?? 'identified').replace(/_/g, ' ')}</Badge>{r.savings_state === 'verified' && r.observed_monthly_savings != null && <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{money(r.observed_monthly_savings)}/mo observed</div>}</div>,
+    sortValue: r => r.savings_state ?? 'identified',
+  };
+  const columns: Column<CostRecommendation>[] = tab === 'History' ? [...baseColumns, statusColumn, outcomeColumn] : [...baseColumns, actionsColumn];
 
   const anomalyColumns: Column<CostAnomaly>[] = [
     { key: 'service', header: 'Service', render: a => a.service, sortValue: a => a.service },
@@ -649,9 +636,9 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <StatCard label="Potential Monthly Savings" value={money(potentialMonthly)} />
-        <StatCard label="Annualized Savings" value={money(potentialAnnual)} />
-        <StatCard label="Open Opportunities" value={String(openRecommendationsCount)} />
+        <StatCard label="Potential Monthly Savings" value={savingsProven ? money(potentialMonthly) : '—'} caption={savingsNote} />
+        <StatCard label="Annualized Savings" value={savingsProven ? money(potentialAnnual) : '—'} caption={savingsNote} />
+        <StatCard label="Open Opportunities" value={String(openRecommendationsCount)} caption={notActionableCount > 0 ? `${notActionableCount} no longer actionable` : undefined} />
         <StatCard label="High Priority" value={String(highPriorityCount)} />
       </div>
 
@@ -678,9 +665,21 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
 
       {tab === 'Overview' ? (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 text-sm text-slate-500 dark:text-slate-400">
-          <p>{openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts, worth {money(potentialMonthly)}/month if fully applied.</p>
+          <p>
+            {openRecommendationsCount} open recommendation{openRecommendationsCount === 1 ? '' : 's'} across your connected AWS accounts
+            {savingsProven ? `, worth ${money(potentialMonthly)}/month if fully applied.` : '.'}
+          </p>
+          {/* Counted separately, and said out loud. A recommendation whose
+              target has been deleted is not worth anything, and one nobody
+              has checked is not worth nothing either. */}
+          {notActionableCount > 0 && (
+            <p className="mt-2">{notActionableCount} further recommendation{notActionableCount === 1 ? ' is' : 's are'} no longer actionable — the resource changed or no longer exists, or the evidence behind it was too thin. {notActionableCount === 1 ? 'It is' : 'They are'} excluded from the savings figure. Open one to see why.</p>
+          )}
+          {unevaluatedCount > 0 && (
+            <p className="mt-2">{unevaluatedCount} recommendation{unevaluatedCount === 1 ? ' has' : 's have'} not been checked against your current resources yet, so {unevaluatedCount === 1 ? 'it is' : 'they are'} not counted in the savings figure either. Run "Sync Now" on the relevant AWS account to check {unevaluatedCount === 1 ? 'it' : 'them'}.</p>
+          )}
           <p className="mt-2">Recommendations are generated each time you run "Sync Now" on an AWS account, from your discovered resource inventory — idle instances, unattached volumes, unreleased IPs, stale snapshots, and rightsizing candidates identified from real CloudWatch utilization data. Reserved Instance, Savings Plan, and AWS's own rightsizing recommendations are separate — run "Sync Recommendations" on an AWS account's Recommendations tab to pull those in directly from AWS Cost Explorer's own analysis (real dollar figures, not estimated here). Savings Plan recommendations take AWS a little while to compute the first time — sync again shortly after if none appear immediately. Azure and GCP commitment recommendations are on the roadmap, not silently faked in the meantime — which is why those two clouds' Reserved Instances/Savings Plans tabs stay empty for now.</p>
-          <p className="mt-2">HorizonVigil only ever requests read-only AWS permissions, so it can't make changes to your account itself. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> on a recommendation shows you its details so you can action it yourself.</p>
+          <p className="mt-2">HorizonVigil connects read-only and does not make changes to your cloud accounts. Clicking <span className="font-medium text-slate-700 dark:text-slate-200">Apply</span> opens the recommendation's details so you can action it yourself — with exact CLI steps, or, for rightsizing, an optional pull request against your Terraform/Pulumi repository that you review and merge.</p>
           {dashboard && dashboard.openAnomalies > 0 && (
             <p className="mt-2">There {dashboard.openAnomalies === 1 ? 'is' : 'are'} also {dashboard.openAnomalies} open cost anomal{dashboard.openAnomalies === 1 ? 'y' : 'ies'} — see Cost Anomaly Detection below.</p>
           )}
@@ -721,9 +720,6 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
             onDismiss={() => void markDone(selected.id, 'dismissed')}
             onExclude={() => openExcludeModal(selected)}
             onNotifyOwner={() => openNotifyModal(selected)}
-            resizeRequest={resizeRequest}
-            resizeRequesting={resizeRequesting}
-            onRequestResize={targetType => void requestAutomatedResize(selected, targetType)}
             gitInstallations={gitInstallations}
           />
         ) : selected && (
@@ -736,6 +732,13 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Issue</div>
               <div className="text-slate-700 dark:text-slate-200">{selected.issue}</div>
             </div>
+            <RecommendationEvidence recommendation={selected} />
+            {selected.status === 'applied' && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center gap-2"><span className="font-semibold text-slate-700 dark:text-slate-200">Savings outcome</span><Badge tone={outcomeTone(selected.savings_state)}>{(selected.savings_state ?? 'implemented').replace(/_/g, ' ')}</Badge></div>
+              <p className="mt-2 text-slate-600 dark:text-slate-300">{selected.verification_reason ?? 'Awaiting post-implementation billing evidence.'}</p>
+              {selected.baseline_daily_cost != null && selected.observed_daily_cost != null && <p className="mt-1 text-slate-500 dark:text-slate-400">Baseline {money(selected.baseline_daily_cost)}/day · observed {money(selected.observed_daily_cost)}/day{selected.observed_monthly_savings != null ? ` · ${money(selected.observed_monthly_savings)}/month reduction` : ''}</p>}
+              {selected.outcome_checked_at && <p className="mt-1 text-slate-400">Checked {new Date(selected.outcome_checked_at).toLocaleString()}</p>}
+            </div>}
             <div>
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">Recommended Action</div>
               <div className="rounded-lg bg-slate-900 dark:bg-black text-slate-100 text-xs p-3 whitespace-pre-wrap">{selected.recommended_action}</div>
@@ -747,7 +750,14 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
             <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never makes this change for you — action it yourself in the AWS Console or CLI, then mark it done here.</p>
 
             <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button type="button" onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              {/* "Mark as done" asserts the customer carried out the action.
+                  Offering it on a recommendation whose target no longer
+                  exists invites a claim about work that could not have been
+                  done. Dismiss and Exclude stay available — those are how a
+                  customer clears an invalid row. */}
+              {isActionable(selected) && (
+                <button type="button" onClick={() => void markDone(selected.id, 'applied')} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+              )}
               <button type="button" onClick={() => openNotifyModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
               <button type="button" onClick={() => openExcludeModal(selected)} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
               <button type="button" onClick={() => void markDone(selected.id, 'dismissed')} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>
@@ -825,7 +835,40 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
           </div>
         )}
       </Modal>
-      {confirmDialog}
+    </div>
+  );
+}
+
+/**
+ * Why this recommendation should (or should not) be believed (§9).
+ *
+ * Shown on every recommendation, not only the invalid ones. A customer
+ * cannot tell a sound recommendation from an unsound one if the basis is
+ * only ever mentioned when something is wrong — and production had no way to
+ * tell them apart at all: four rows pointing at deleted instances rendered
+ * exactly like a good one, Apply button included.
+ */
+function RecommendationEvidence({ recommendation }: { recommendation: CostRecommendation }) {
+  const actionable = isActionable(recommendation);
+  return (
+    <div className={`rounded-lg border p-3 text-xs flex flex-col gap-1.5 ${
+      actionable
+        ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40'
+        : 'border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30'}`}>
+      <div className="flex items-center gap-2">
+        <Badge tone={validityTone(recommendation)}>{validityLabel(recommendation)}</Badge>
+        {recommendation.evaluated_at && (
+          <span className="text-slate-400 dark:text-slate-500">Checked {new Date(recommendation.evaluated_at).toLocaleString()}</span>
+        )}
+      </div>
+      <p className="text-slate-600 dark:text-slate-300">{validityExplanation(recommendation)}</p>
+      <p className="text-slate-500 dark:text-slate-400">{evidenceSummary(recommendation)}</p>
+      <p className="text-slate-500 dark:text-slate-400">{ownershipSummary(recommendation)}</p>
+      {isUnevaluated(recommendation) && (
+        // Never presented as "fine" — an unchecked recommendation is exactly
+        // as unproven as it sounds, and the customer is told what to do next.
+        <p className="text-slate-500 dark:text-slate-400">Run a sync for this account to check it against your current resources.</p>
+      )}
     </div>
   );
 }
@@ -840,17 +883,8 @@ export function CostOptimizationBody({ groupFilter }: { groupFilter: ResolvedGro
  * action it yourself" posture as the generic drawer — this composes real
  * commands from real data, it doesn't execute them.
  */
-const RESIZE_STATUS_LABEL: Record<RemediationRequest['status'], string> = {
-  pending_approval: 'Requested — awaiting admin approval', rejected: 'Request rejected', approved: 'Approved — awaiting dry-run',
-  dry_run_passed: 'Dry-run passed — awaiting execution', dry_run_failed: 'Dry-run failed', executing: 'Executing…',
-  awaiting_stop: 'Stopping instance…', completed: 'Resize completed', failed: 'Resize failed', rolled_back: 'Rolled back',
-};
-const RESIZE_STATUS_TONE: Record<RemediationRequest['status'], 'good' | 'warning' | 'critical' | 'neutral'> = {
-  pending_approval: 'neutral', rejected: 'critical', approved: 'neutral', dry_run_passed: 'neutral', dry_run_failed: 'critical',
-  executing: 'warning', awaiting_stop: 'warning', completed: 'good', failed: 'critical', rolled_back: 'neutral',
-};
 
-function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, resizeRequest, resizeRequesting, onRequestResize, gitInstallations }: {
+function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copied, onCopy, onApply, onDismiss, onExclude, onNotifyOwner, gitInstallations }: {
   recommendation: CostRecommendation;
   resource: CloudResource | null;
   cpuHistory: ResourceMetric[];
@@ -861,9 +895,6 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   onDismiss: () => void;
   onExclude: () => void;
   onNotifyOwner: () => void;
-  resizeRequest: RemediationRequest | null;
-  resizeRequesting: boolean;
-  onRequestResize: (targetInstanceType: string) => void;
   gitInstallations: GitInstallation[];
 }) {
   const currentType = typeof resource?.metadata.instanceType === 'string' ? resource.metadata.instanceType : null;
@@ -953,6 +984,8 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         <span className="text-xs text-slate-400 font-mono">{instanceId || recommendation.resource_id}</span>
       </div>
 
+      <RecommendationEvidence recommendation={recommendation} />
+
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -971,7 +1004,15 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
             <tr>
               <td className="px-3 py-2 text-slate-500 dark:text-slate-400">Recommended</td>
               <td className="px-3 py-2 font-mono font-medium text-emerald-600 dark:text-emerald-400">{recommendedType ?? '—'}</td>
-              <td className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Save {money(recommendation.potential_monthly_savings)}/mo</td>
+              {/* "Save $X/mo" is a promise. It is only made for a
+                  recommendation that can actually be acted on — the figure is
+                  still shown otherwise, but as an estimate that no longer
+                  applies rather than money on the table. */}
+              {isActionable(recommendation) ? (
+                <td className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Save {money(recommendation.potential_monthly_savings)}/mo</td>
+              ) : (
+                <td className="px-3 py-2 text-right text-slate-400 dark:text-slate-500">{money(recommendation.potential_monthly_savings)}/mo estimated — not currently claimable</td>
+              )}
             </tr>
           </tbody>
         </table>
@@ -991,33 +1032,35 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         )}
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Automated Resize</h3>
-          {resizeRequest && <Badge tone={RESIZE_STATUS_TONE[resizeRequest.status]}>{RESIZE_STATUS_LABEL[resizeRequest.status]}</Badge>}
-        </div>
-        {resizeRequest ? (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-xs text-slate-500 dark:text-slate-400 space-y-1">
-            <p>Target: <span className="font-mono text-slate-700 dark:text-slate-200">{resizeRequest.target_config?.targetInstanceType ?? recommendedType}</span></p>
-            {resizeRequest.status === 'pending_approval' && <p>An admin needs to approve this in Automation → Remediation before it runs.</p>}
-            {resizeRequest.status === 'dry_run_failed' && <p>{resizeRequest.dry_run_result?.reason ?? 'The pre-execution dry-run failed — see Automation → Remediation for details.'}</p>}
-            {resizeRequest.status === 'awaiting_stop' && <p>Instance is stopping — this page checks progress automatically every few seconds, then resizes and restarts it once stopped.</p>}
-            {resizeRequest.status === 'failed' && <p>{resizeRequest.execution_result?.errorMessage ?? resizeRequest.execution_result?.reason ?? 'The resize failed — see Automation → Remediation for details.'}</p>}
-            {resizeRequest.status === 'completed' && <p>Resize completed successfully — the instance is running on {resizeRequest.target_config?.targetInstanceType}.</p>}
-            {resizeRequest.status === 'rejected' && <p>This request was rejected. Dismiss this recommendation or use the manual CLI steps below instead.</p>}
-          </div>
-        ) : recommendedType ? (
-          <>
-            <button type="button" onClick={() => onRequestResize(recommendedType)} disabled={resizeRequesting} className="text-xs px-3 py-1.5 rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-              {resizeRequesting ? 'Requesting…' : 'Request Automated Resize'}
-            </button>
-            <p className="text-xs text-slate-400 mt-2">Goes through an approval + dry-run before anything runs against AWS — this only files the request. HorizonVigil executes it for real (using this account's own stored credentials) once an admin approves it, rather than you running commands yourself.</p>
-          </>
-        ) : (
-          <p className="text-xs text-slate-400">Not enough resource detail to request an automated resize — see the manual CLI steps below instead.</p>
-        )}
-      </div>
+      {/* "Automated Resize" removed in V1 (2026-09-08 production-readiness
+          audits, P0: "No direct provider mutation ships in V1" / "Remove
+          from V1 -- offer manual guide, ticket, or IaC draft only until
+          execution credentials and governance are certified").
 
+          The concrete reason: executing a resize called StopInstances /
+          ModifyInstanceAttribute / StartInstances using the SAME stored
+          credential used for read-only collection. There is no separate
+          execution identity, certified worker, canary, emergency stop, or
+          provider-verified outcome. The server now denies the whole
+          remediation pathway fail-closed (connector-aws lib/capabilities.ts),
+          so leaving this button would only start a flow that cannot finish.
+
+          What remains here is exactly what the audits permit for V1: the
+          Auto-PR draft below (a real, verified GitHub App integration) and
+          the guided manual CLI steps. */}
+      {/* Both fix paths below produce a real change — a pull request against
+          the customer's infrastructure repository, or CLI commands they will
+          paste into a terminal. Neither should be offered for a
+          recommendation that is not actionable: production would have
+          happily drafted a PR resizing an instance that had been deleted
+          three weeks earlier. */}
+      {!isActionable(recommendation) ? (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Fix</div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">No fix is offered for this recommendation. {validityExplanation(recommendation)}</p>
+        </div>
+      ) : (
+      <>
       <div>
         <div className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Auto-PR (GitHub) — Terraform/Pulumi</div>
         {gitInstallations.length === 0 ? (
@@ -1042,7 +1085,9 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
               <button type="button" onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
             )}
             {autoPrResult && 'prUrl' in autoPrResult && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: <a href={autoPrResult.prUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline">{autoPrResult.prUrl}</a></p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: {safeExternalUrl(autoPrResult.prUrl)
+                ? <a href={safeExternalUrl(autoPrResult.prUrl) ?? undefined} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline">{autoPrResult.prUrl}</a>
+                : <span className="font-mono">{autoPrResult.prUrl}</span>}</p>
             )}
             {autoPrResult && 'error' in autoPrResult && (
               <p className="text-xs text-red-500">{autoPrResult.error}</p>
@@ -1068,10 +1113,28 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
         )}
       </div>
 
-      <p className="text-xs text-slate-400 dark:text-slate-500">HorizonVigil only has read-only access to your AWS account and never runs these commands for you — run them yourself (Console or CLI), then mark this done here.</p>
+      {/* FIXED 2026-09-08 (live audit): this used to unconditionally say
+          "never runs these commands for you," directly contradicting the
+          Automated Resize section above it, which — for exactly this same
+          recommendation — can and does execute a real change using this
+          account's stored credentials once approved. The two paths need
+          different disclaimers, not one blanket claim that's only true for
+          one of them. */}
+      <p className="text-xs text-slate-400 dark:text-slate-500">
+        {cliCommands
+          ? 'The CLI commands above are run by you, not HorizonVigil — copy them into your own terminal, then mark this done here.'
+          : "HorizonVigil's documented AWS setup for this connection is read-only and doesn't run a change for you — action it yourself, then mark this done here."}
+      </p>
+      </>
+      )}
 
       <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-        <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        {/* See the generic drawer's copy of this: "mark as done" asserts the
+            customer performed the resize, which they cannot have done on an
+            instance that no longer exists. */}
+        {isActionable(recommendation) && (
+          <button type="button" onClick={onApply} className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">I've done this — mark as done</button>
+        )}
         <button type="button" onClick={onNotifyOwner} className="text-xs px-3 py-1.5 rounded-md border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950">Notify Owner</button>
         <button type="button" onClick={onExclude} className="text-xs px-3 py-1.5 rounded-md border border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950">Exclude</button>
         <button type="button" onClick={onDismiss} className="text-xs px-3 py-1.5 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Dismiss</button>

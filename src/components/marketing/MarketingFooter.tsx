@@ -17,17 +17,17 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
   {
     title: 'Product',
     links: [
+      { label: 'Horizon Intelligence', href: '/#intelligence', section: true },
       { label: 'Platform', href: '/#platform', section: true },
       { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
       { label: 'Documentation', href: '/docs' },
-      // No status-page service is wired up yet (nothing in marketingContent.ts
-      // or the env-style API URL constants points at one) -- this is a
-      // placeholder path, not a real status page. See navConfig.ts's
-      // real:false convention for the equivalent "planned, not built" signal
-      // on in-app nav; there's no such route here yet, so this just links
-      // through rather than rendering a disabled item.
-      { label: 'Status', href: '/status' },
+      // "Status" removed 2026-09-08 (live audit): /status had no route at
+      // all -- clicking it 404'd. No status-page service exists yet
+      // (nothing in marketingContent.ts or the env-style API URL constants
+      // points at one), so there's nothing honest to link to. Re-add once a
+      // real status page with synthetic probes exists, per the audit's own
+      // "publish a real status page... or remove the link until one exists."
     ],
   },
   {
@@ -55,7 +55,7 @@ export function MarketingFooter() {
         <div className="col-span-2">
           <Logo />
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-xs">
-            One control plane for AWS and GCP — inventory, cost, security, and automated remediation.
+            AI cloud decision intelligence for cost, security, operations, and governance.
           </p>
         </div>
         {COLUMNS.map(col => (

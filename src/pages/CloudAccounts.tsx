@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FilterBar } from '../components/FilterBar';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { StatCard } from '../components/StatCard';
@@ -16,7 +16,6 @@ import { HierarchyPanel } from '../components/cloudAccounts/HierarchyPanel';
 import { HealthPanel } from '../components/cloudAccounts/HealthPanel';
 import { ChangesPanel } from '../components/cloudAccounts/ChangesPanel';
 import { ActivityPanel } from '../components/cloudAccounts/ActivityPanel';
-import { AccessMatrix } from '../components/cloudAccounts/AccessMatrix';
 import { BulkOnboardingModal } from '../components/cloudAccounts/BulkOnboardingModal';
 import { ProviderChips } from '../components/cloudAccounts/ProviderChips';
 import { Modal } from '../components/Modal';
@@ -28,7 +27,6 @@ import { useSync, useSyncCompletion } from '../lib/syncContext';
 import { useTabParam } from '../lib/useTabParam';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { useToast } from '../lib/toast';
-import { Icon } from '../components/icons';
 import { downloadExcel } from '../lib/excelExport';
 import { api, ApiError, type CloudConnection, type GcpConnection, type AzureConnection, type AccountSummary, type AccountPermissionSummary, type Favorite, type CloudIdentity, type IdentitySummary, type IdentityEdge } from '../lib/api';
 import { type UnifiedAccountRow, toUnifiedRow, toUnifiedGcpRow, toUnifiedAzureRow } from '../lib/unifiedAccounts';
@@ -96,10 +94,6 @@ const PROVIDER_CHIPS = [{ value: 'aws', label: 'AWS' }, { value: 'gcp', label: '
 const ENVIRONMENT_OPTIONS = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 const PAGE_SIZES = [25, 50, 100];
 
-function money(n: number): string {
-  return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-}
-
 /**
  * Each cloud models "permissions" differently, so this reads the exact
  * fields each connector's own identity-ingestion code actually writes into
@@ -144,12 +138,12 @@ export function CloudAccounts() {
   const { syncStates, startDiscovery } = useSync();
 
   /** Same "Discover Resources" (+ "Sync Cost" for AWS/Azure rows) the account detail page's buttons trigger, exposed here as a one-click row action. */
-  function syncNow(row: UnifiedAccountRow) {
+  const syncNow = useCallback((row: UnifiedAccountRow) => {
     startDiscovery(row.id, row.provider === 'gcp' ? 'gcpAccounts' : row.provider === 'azure' ? 'azureAccounts' : 'awsAccounts');
     if (row.provider === 'aws') void api.syncAccountCost(row.id).catch(() => {});
     else if (row.provider === 'azure') void api.syncAzureAccountCost(row.id).catch(() => {});
     toast('Sync started — resources will update as it completes.', 'success');
-  }
+  }, [startDiscovery, toast]);
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set());
   const canSeeNavTab = useSubmenuAccess('cloud');
   const canSeeTab = useCallback((t: Tab) => canSeeNavTab(TAB_TO_NAV_LABEL[t]), [canSeeNavTab]);
@@ -162,6 +156,27 @@ export function CloudAccounts() {
   const [gcpConnections, setGcpConnections] = useState<GcpConnection[]>([]);
   const [azureConnections, setAzureConnections] = useState<AzureConnection[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
+  // URL-addressable open, for Overview's "Connect Cloud Account" quick
+  // action (previously ?tab=Onboarding, a tab this page hasn't had since
+  // onboarding folded into "+ Connect Cloud" + Bulk Onboarding -- that quick
+  // action silently landed on the default Overview tab instead of opening
+  // anything). ?action=connect opens the same chooser the button does, then
+  // clears itself so a refresh/back doesn't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('action') === 'connect') {
+      setChooserOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+    /*
+     * Mount only. Consumes the one-shot `?action=connect` deep link and
+     * strips it from the URL. Depending on searchParams/setSearchParams
+     * would re-open the chooser every time any query parameter changed.
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [awsWizardOpen, setAwsWizardOpen] = useState(false);
   const [gcpWizardOpen, setGcpWizardOpen] = useState(false);
@@ -178,7 +193,7 @@ export function CloudAccounts() {
     return () => { cancelled = true; };
   }, [refreshToken, toast]);
 
-  async function toggleFavorite(connectionId: string, name: string, provider: 'aws' | 'gcp' | 'azure') {
+  const toggleFavorite = useCallback(async (connectionId: string, name: string, provider: 'aws' | 'gcp' | 'azure') => {
     const path = `/cloud-accounts/${connectionId}`;
     const existing = favorites.find(f => f.path === path);
 
@@ -195,7 +210,7 @@ export function CloudAccounts() {
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Failed to update Favorites.', 'error');
     }
-  }
+  }, [favorites, toast]);
 
 
   // Inventory search/filter/bulk/pagination state. When a specific provider
@@ -434,9 +449,13 @@ export function CloudAccounts() {
   // in "All" mode it's the bounded per-cloud snapshot described above.
   const allRows = useMemo(() => [...awsConnections.map(toUnifiedRow), ...gcpConnections.map(toUnifiedGcpRow), ...azureConnections.map(toUnifiedAzureRow)], [awsConnections, gcpConnections, azureConnections]);
 
-  function findRow(id: string): UnifiedAccountRow | undefined {
-    return allRows.find(r => r.id === id);
-  }
+  // Memoised because runValidation depends on it; as a plain function it was
+  // rebuilt every render and would have defeated that callback's memoisation.
+  const findRow = useCallback(
+    (id: string): UnifiedAccountRow | undefined =>
+      allRows.find(r => r.id === id),
+    [allRows],
+  );
 
   /** Three providers, three separate backends, identical Disconnect/Delete contract — one dispatch point instead of the same 3-way branch repeated at every call site. */
   function disconnectFor(row: UnifiedAccountRow) {
@@ -444,18 +463,13 @@ export function CloudAccounts() {
     if (row.provider === 'azure') return api.disconnectAzureAccount(row.id);
     return api.disconnectAccount(row.id);
   }
-  function deletePermanentlyFor(row: UnifiedAccountRow) {
-    if (row.provider === 'gcp') return api.deleteGcpAccountPermanently(row.id);
-    if (row.provider === 'azure') return api.deleteAzureAccountPermanently(row.id);
-    return api.deleteAccountPermanently(row.id);
-  }
 
-  async function handleDisconnect(row: UnifiedAccountRow) {
+  const handleDisconnect = useCallback(async (row: UnifiedAccountRow) => {
     if (!(await confirm(`Disconnect "${row.name}"? It will be marked disconnected — discovered resources${row.provider === 'aws' ? ' and cost history are' : ' are'} kept.`))) return;
     await disconnectFor(row);
     toast(`Disconnected "${row.name}"`, 'success');
     await loadInventory();
-  }
+  }, [confirm, loadInventory, toast]);
 
   async function handleBulkDisconnect() {
     const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
@@ -472,27 +486,7 @@ export function CloudAccounts() {
     }
   }
 
-  async function handleDeletePermanently(row: UnifiedAccountRow) {
-    if (!(await confirm(`Permanently delete "${row.name}"? This is irreversible — its discovered resources and history are deleted too, not just this connection. Use Disconnect instead if you might reconnect it later.`))) return;
-    await deletePermanentlyFor(row);
-    toast(`Deleted "${row.name}" permanently`, 'success');
-    await loadInventory();
-  }
 
-  async function handleBulkDeletePermanently() {
-    const rows = [...selectedIds].map(findRow).filter((r): r is UnifiedAccountRow => !!r);
-    const n = rows.length;
-    if (!(await confirm(`Permanently delete ${n} selected account(s)? This is irreversible — their discovered resources and history are deleted too, not just the connections. Use Disconnect instead if you might reconnect them later.`))) return;
-    const results = await Promise.allSettled(rows.map(deletePermanentlyFor));
-    const failed = results.filter(r => r.status === 'rejected').length;
-    setSelectedIds(new Set());
-    await loadInventory();
-    if (failed === 0) {
-      toast(`Deleted ${n} account${n === 1 ? '' : 's'} permanently`, 'success');
-    } else {
-      toast(`Deleted ${n - failed} of ${n}; ${failed} failed.`, 'error');
-    }
-  }
 
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
@@ -560,7 +554,7 @@ export function CloudAccounts() {
     { key: 'last_used_at', header: 'Last Used', sortValue: r => r.last_used_at ?? '', render: r => r.last_used_at ? new Date(r.last_used_at).toLocaleDateString() : <span className="text-slate-400">Never</span> },
   ], []);
 
-  async function runValidation(id: string, knownName?: string) {
+  const runValidation = useCallback(async (id: string, knownName?: string) => {
     // knownName covers callers (like the Dashboard's Needing Attention list)
     // whose account may not be in the currently-loaded inventory set.
     const name = knownName ?? findRow(id)?.name ?? 'Account';
@@ -585,7 +579,7 @@ export function CloudAccounts() {
         void api.getAccountsSyncStatus().then(r => setSyncStatus(r.accounts));
       }
     }
-  }
+  }, [findRow, loadInventory, tab, toast]);
 
   const columns: Column<UnifiedAccountRow>[] = useMemo(() => [
     ...(bulkMode ? [{
@@ -626,12 +620,29 @@ export function CloudAccounts() {
               ? () => setUpdateCredsFor(r) : undefined
           }
           onDisconnect={() => void handleDisconnect(r)}
-          onDelete={() => void handleDeletePermanently(r)}
         />
       ),
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [bulkMode, selectedIds, validatingIds, allRows, syncStates, favorites]);
+    /*
+     * The four row-action handlers are now listed honestly.
+     *
+     * They used to be plain functions redeclared every render, so naming
+     * them here would have rebuilt this array on every render -- which is
+     * why the rule was suppressed instead. Each is now a useCallback with
+     * the dependencies eslint computed, so the memo can depend on them and
+     * still memoise.
+     *
+     * The suppression was hiding a real staleness bug: runValidation closes
+     * over `tab` and `loadInventory`, and NEITHER was in the list below, so
+     * a validation triggered after a tab change refreshed against the tab
+     * that was active when the columns were last built.
+     */
+  ], [
+    // allRows is reached transitively through findRow/runValidation, so
+    // naming it here as well would only rebuild the columns twice as often.
+    bulkMode, selectedIds, validatingIds, syncStates, favorites,
+    syncNow, toggleFavorite, handleDisconnect, runValidation,
+  ]);
 
   const anyErrors = allRows.map(r => syncStates[r.id]).filter(s => s?.status === 'error' && s.error);
 
@@ -749,7 +760,11 @@ export function CloudAccounts() {
             {bulkMode && selectedIds.size > 0 && (
               <>
                 <button onClick={() => void handleBulkDisconnect()} className="text-xs rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Disconnect {selectedIds.size} selected</button>
-                <button onClick={() => void handleBulkDeletePermanently()} className="text-xs rounded-md border border-red-600 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5" title="Irreversible — also deletes resources and history for each selected account">Delete {selectedIds.size} selected permanently</button>
+                {/* Bulk "Delete N selected permanently" removed in V1 (2026-09-08
+                    audits, P0): it could destroy several connections and all their
+                    history without ever listing which accounts, their object counts,
+                    dependencies, or retention/legal-hold effects, behind one generic
+                    Confirm. Disconnect above is reversible and preserves history. */}
               </>
             )}
             <button
@@ -790,6 +805,7 @@ export function CloudAccounts() {
               rowKey={r => r.id}
               pageSize={pageSize}
               pageSizeOptions={PAGE_SIZES}
+              tableId="cloud-accounts.inventory"
               onRowClick={r => navigate(`/cloud-accounts/${r.id}`)}
               emptyMessage={allRows.length === 0 && !search && !statusFilter && !environmentFilter && !providerFilter ? 'No cloud accounts connected yet. Click "+ Add Account" to connect your first one.' : 'No accounts match these filters.'}
               server={providerFilter ? {
@@ -1115,7 +1131,7 @@ function SettingsTab({ folderProjectCount }: { folderProjectCount: number }) {
 }
 
 /** Row-level "⋯" menu. Provider-specific actions are hidden when they do not apply. */
-function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect, onDelete }: {
+function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onSync, onToggleFavorite, onUpdateCredentials, onDisconnect }: {
   row: UnifiedAccountRow;
   validating: boolean;
   syncing: boolean;
@@ -1125,9 +1141,11 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
   onToggleFavorite: () => void;
   onUpdateCredentials?: () => void;
   onDisconnect: () => void;
-  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Disconnect is a soft status flip, so a disconnected row is still listed;
+  // what must change is which actions it offers.
+  const isDisconnected = row.status === 'disconnected';
   const { toast } = useToast();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1224,13 +1242,28 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
           style={{ position: 'fixed', top: coords.top, left: coords.left, width: 224 }}
           className="z-50 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 text-sm animate-[fadeIn_0.1s_ease-out]"
         >
-          <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Manually re-runs Discover Resources for this account right now">
-            {syncing ? 'Syncing…' : 'Sync Now'}
-          </button>
-          {row.provider === 'aws' && (
+          {/*
+            Actions are state-aware (§12.1). A DISCONNECTED connection was
+            still offering Sync Now, Validate Permissions and Disconnect --
+            all three are meaningless for it, and the server now refuses a
+            collection run on a disconnected connection anyway (409). Offering
+            a control whose only outcome is an error is the "never expose half
+            a workflow" rule in miniature.
+          */}
+          {!isDisconnected && (
+            <button role="menuitem" onClick={() => { setOpen(false); onSync(); }} disabled={syncing} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Queues a server-side collection run for this account. It keeps running if you close this tab.">
+              {syncing ? 'Syncing…' : 'Sync Now'}
+            </button>
+          )}
+          {row.provider === 'aws' && !isDisconnected && (
             <button role="menuitem" onClick={() => { setOpen(false); onValidate(); }} disabled={validating} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 disabled:opacity-50" title="Runs real sts:GetCallerIdentity + IAM/Organizations/CloudWatch/CloudTrail/Tagging/Cost Explorer permission checks">
               {validating ? 'Validating…' : 'Validate Permissions'}
             </button>
+          )}
+          {isDisconnected && (
+            <div className="px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400">
+              Disconnected — nothing is collected for this account. Reconnect it to resume.
+            </div>
           )}
           {row.provider === 'aws' && (
             <button role="menuitem" onClick={openConsole} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60" title="Opens the AWS Console using your browser's current AWS sign-in session">
@@ -1245,8 +1278,29 @@ function RowActionsMenu({ row, validating, syncing, isFavorited, onValidate, onS
             <button role="menuitem" onClick={() => { setOpen(false); onUpdateCredentials(); }} className="w-full text-left px-3 py-1.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60">Update Credentials</button>
           )}
           <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
-          <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
-          <button role="menuitem" onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" title="Irreversible — also deletes this account's resources and history">Delete Permanently</button>
+          {/* Disconnecting an already-disconnected connection is a no-op that
+              looks like a destructive action. Hidden rather than disabled, so
+              the menu reflects what is actually possible. */}
+          {!isDisconnected && (
+            <button role="menuitem" onClick={() => { setOpen(false); onDisconnect(); }} className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
+          )}
+          {/* Phase 0.6 (2026-09-08 audits, P0 "Disable by default"): permanent
+              purge is gated server-side until it has an impact preview with
+              authoritative object counts, dependency/retention and legal-hold
+              checks, typed confirmation, recent-MFA reauthentication, an
+              asynchronous checkpointed job, and a recovery window. Shown
+              disabled with the reason rather than hidden, per the action
+              contract ("Disabled controls explain the unmet prerequisite"),
+              and rather than left enabled to hit a 403. */}
+          <button
+            role="menuitem"
+            disabled
+            aria-disabled="true"
+            className="w-full text-left px-3 py-1.5 text-slate-400 dark:text-slate-600 cursor-not-allowed"
+            title="Unavailable in this release. Permanent deletion needs an impact preview, retention and legal-hold checks, and typed confirmation before it can be offered safely. Use Disconnect — it stops collection and keeps your history."
+          >
+            Delete Permanently — unavailable
+          </button>
         </div>,
         document.body,
       )}

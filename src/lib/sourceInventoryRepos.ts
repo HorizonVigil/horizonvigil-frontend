@@ -1,112 +1,369 @@
 import { api, type ScanRecord, type ScannerFinding } from './api';
+import {
+} from './unifiedAccounts';
 import type {
-  SourceAsset, AggregatedFinding, ScannerAttachment, Severity, SourceInventoryFilters,
+  AggregatedFinding,
+  ScannerAttachment,
+  Severity,
+  SourceAsset,
+  SourceInventoryFilters,
 } from './demoData/sourceInventory';
 
 /**
- * The real-data counterpart to lib/demoData/sourceInventory.ts, for the
- * Repositories category only -- Artifactories/Registries/Clusters/Servers
- * stay mock (no real backend yet) and are untouched by this file. Mirrors
- * lib/sourceInventoryClouds.ts's own conventions (derived, not fabricated,
- * fields; honest empty results where no real signal exists).
+ * Real-data implementation for the Source Inventory "Repositories" category.
  *
- * Unlike Clouds, getInstallationRepos has no pagination wrapper at all --
- * it already returns everything in one shot -- so there's no provider-vs-
- * "All" snapshot split needed here; every repo is fetched once and filtered
- * client-side, the same pattern CodeSecurity.tsx's own real Repositories
- * tab already uses.
+ * Current certified scope:
+ * - GitHub installations/repositories from the deployed Git integration API.
+ * - Recent persisted scan records for Semgrep, Dependency-Check, Grype,
+ *   Gitleaks, and TruffleHog.
+ * - Detailed findings from one repository's matched completed scans.
+ *
+ * Artifactories/Registries/Clusters/Servers remain outside this adapter.
+ * GitLab/Bitbucket are not fabricated as supported providers.
+ *
+ * Important bounded-read contract:
+ * - getGitInstallations()/getInstallationRepos() is the current real API
+ *   contract and returns its repository collection in one request per
+ *   installation.
+ * - Scan history is bounded to a fixed recent window per scanner.
+ * - Repository detail reuses that bounded scan window, then fetches result
+ *   pages only for the matched completed scans for that single repository.
+ *
+ * This module is not an authorization boundary. Backend/API scope and tenant
+ * authorization remain authoritative.
  */
 
-const REPO_SCANNERS = ['semgrep', 'dependency-check', 'grype', 'gitleaks', 'trufflehog'] as const;
-type RepoScanner = typeof REPO_SCANNERS[number];
+const REPO_SCANNERS = [
+  'semgrep',
+  'dependency-check',
+  'grype',
+  'gitleaks',
+  'trufflehog',
+] as const;
 
-const SCANNER_LABEL: Record<RepoScanner, string> = {
-  semgrep: 'Semgrep', 'dependency-check': 'Dependency-Check', grype: 'Grype', gitleaks: 'Gitleaks', trufflehog: 'TruffleHog',
-};
+type RepoScanner = (typeof REPO_SCANNERS)[number];
 
-interface RepoIdentity { installationId: string; installationLogin: string; fullName: string; defaultBranch: string; private: boolean }
+const SCANNER_LABEL: Readonly<Record<RepoScanner, string>> = Object.freeze({
+  semgrep: 'Semgrep',
+  'dependency-check': 'Dependency-Check',
+  grype: 'Grype',
+  gitleaks: 'Gitleaks',
+  trufflehog: 'TruffleHog',
+});
 
-function encodeRepoId(installationId: string, fullName: string): string {
-  return `repo-${encodeURIComponent(`${installationId}:${fullName}`)}`;
+interface RepoIdentity {
+  installationId: string;
+  installationLogin: string;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
 }
 
-function decodeRepoId(id: string): { installationId: string; fullName: string } | null {
-  const match = /^repo-(.+)$/.exec(id);
+const RECENT_SCANS_LIMIT = 200;
+const DETAIL_RESULTS_LIMIT = 100;
+
+function normalizeString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * Stable, reversible repository ID.
+ *
+ * encodeURIComponent protects repository/installation values from colliding
+ * with our separator and from producing malformed URLs.
+ */
+function encodeRepoId(
+  installationId: string,
+  fullName: string,
+): string {
+  return `repo-${encodeURIComponent(
+    `${installationId}:${fullName}`,
+  )}`;
+}
+
+function decodeRepoId(
+  id: string,
+): { installationId: string; fullName: string } | null {
+  if (typeof id !== 'string') return null;
+
+  const match = /^repo-(.+)$/.exec(id.trim());
   if (!match) return null;
-  const decoded = decodeURIComponent(match[1]);
-  const sep = decoded.indexOf(':');
-  if (sep < 0) return null;
-  return { installationId: decoded.slice(0, sep), fullName: decoded.slice(sep + 1) };
+
+  let decoded: string;
+
+  try {
+    decoded = decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+
+  const separator = decoded.indexOf(':');
+
+  if (separator < 1 || separator === decoded.length - 1) {
+    return null;
+  }
+
+  const installationId = decoded.slice(0, separator).trim();
+  const fullName = decoded.slice(separator + 1).trim();
+
+  if (!installationId || !fullName) return null;
+
+  return {
+    installationId,
+    fullName,
+  };
 }
 
 async function listAllRepos(): Promise<RepoIdentity[]> {
   const { items: installations } = await api.getGitInstallations();
-  const perInstallation = await Promise.all(installations.map(async inst => {
-    const { items } = await api.getInstallationRepos(inst.id);
-    return items.map((r): RepoIdentity => ({
-      installationId: inst.id, installationLogin: inst.account_login,
-      fullName: r.fullName, defaultBranch: r.defaultBranch, private: r.private,
-    }));
-  }));
-  return perInstallation.flat();
+
+  if (!Array.isArray(installations) || installations.length === 0) {
+    return [];
+  }
+
+  const perInstallation = await Promise.all(
+    installations
+      .filter(
+        (installation) =>
+          typeof installation?.id === 'string' &&
+          installation.id.trim().length > 0,
+      )
+      .map(async (installation) => {
+        const { items } = await api.getInstallationRepos(
+          installation.id,
+        );
+
+        if (!Array.isArray(items)) return [];
+
+        return items
+          .filter(
+            (repo) =>
+              typeof repo?.fullName === 'string' &&
+              repo.fullName.trim().length > 0,
+          )
+          .map(
+            (repo): RepoIdentity => ({
+              installationId: installation.id,
+              installationLogin:
+                typeof installation.account_login === 'string'
+                  ? installation.account_login
+                  : '',
+              fullName: repo.fullName.trim(),
+              defaultBranch:
+                typeof repo.defaultBranch === 'string'
+                  ? repo.defaultBranch.trim()
+                  : '',
+              private: repo.private === true,
+            }),
+          );
+      }),
+  );
+
+  const deduped = new Map<string, RepoIdentity>();
+
+  for (const repo of perInstallation.flat()) {
+    const key = `${repo.installationId}:${repo.fullName}`;
+
+    if (!deduped.has(key)) {
+      deduped.set(key, repo);
+    }
+  }
+
+  return [...deduped.values()].sort((a, b) =>
+    a.fullName.localeCompare(b.fullName),
+  );
 }
 
-/** One bounded page of recent scans per real repo-backing scanner --
- * listScans has no target/repo filter server-side, so this fetches once and
- * matches client-side, same "never loop every page" discipline as the
- * Clouds adapter's single getFindings call. */
-async function fetchRecentScansByScanner(): Promise<Record<RepoScanner, ScanRecord[]>> {
-  const entries = await Promise.all(REPO_SCANNERS.map(async scanner => {
-    const res = await api.listScans(scanner, { limit: 200 });
-    return [scanner, res.items] as const;
-  }));
-  return Object.fromEntries(entries) as Record<RepoScanner, ScanRecord[]>;
+async function fetchRecentScansByScanner(): Promise<
+  Record<RepoScanner, ScanRecord[]>
+> {
+  const entries = await Promise.all(
+    REPO_SCANNERS.map(async (scanner) => {
+      const response = await api.listScans(scanner, {
+        limit: RECENT_SCANS_LIMIT,
+      });
+
+      const items = Array.isArray(response.items)
+        ? response.items
+        : [];
+
+      return [
+        scanner,
+        items.filter((scan) => {
+          return (
+            typeof scan?.scan_id === 'string' &&
+            scan.scan_id.trim().length > 0 &&
+            scan?.target?.uri
+          );
+        }),
+      ] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries) as Record<
+    RepoScanner,
+    ScanRecord[]
+  >;
 }
 
-/** target.uri's exact form (https://github.com/org/repo, git@github.com:org/repo.git,
- * or a bare "org/repo") isn't guaranteed by any contract this frontend can
- * see -- matching by "does the URI contain the repo's own full name" is
- * tolerant of all of them without asserting a precision this data doesn't
- * actually promise. */
-function scanMatchesRepo(scan: ScanRecord, fullName: string): boolean {
-  return scan.target.uri.toLowerCase().includes(fullName.toLowerCase());
+/**
+ * `target.uri` does not have a documented canonical representation in this
+ * client. It may be HTTPS, SSH, or a bare "org/repo", so exact parsing would
+ * invent a stronger contract than the frontend has.
+ *
+ * Boundary-aware matching is still preferable to a raw substring match:
+ * it prevents "org/repository" from matching "org/repository-old".
+ */
+function scanMatchesRepo(
+  scan: ScanRecord,
+  fullName: string,
+): boolean {
+  const uri = normalizeString(scan.target?.uri);
+  const target = normalizeString(fullName);
+
+  if (!uri || !target) return false;
+
+  const normalizedUri = uri.toLowerCase();
+  const normalizedTarget = target.toLowerCase();
+
+  if (normalizedUri === normalizedTarget) return true;
+
+  const suffixes = [
+    `/${normalizedTarget}`,
+    `:${normalizedTarget}.git`,
+    `/${normalizedTarget}.git`,
+    normalizedTarget.endsWith('.git')
+      ? `:${normalizedTarget}`
+      : `:${normalizedTarget}.git`,
+  ];
+
+  return suffixes.some((suffix) =>
+    normalizedUri.endsWith(suffix),
+  );
 }
 
-function scannerAttachmentStatus(status: ScanRecord['status']): ScannerAttachment['status'] {
-  if (status === 'completed') return 'completed';
-  if (status === 'running' || status === 'queued') return 'running';
-  return 'failed'; // failed | cancelled | timeout
+function scanTimestamp(
+  scan: ScanRecord,
+): string | null {
+  const candidate = scan.finished_at ?? scan.created_at;
+
+  if (typeof candidate !== 'string' || candidate.trim() === '') {
+    return null;
+  }
+
+  const parsed = Date.parse(candidate);
+
+  return Number.isNaN(parsed) ? null : candidate;
 }
 
-function riskScoreFromFindingCount(findingCount: number): number {
-  return Math.min(100, findingCount * 3);
+function scannerAttachmentStatus(
+  status: ScanRecord['status'],
+): ScannerAttachment['status'] {
+  switch (status) {
+    case 'completed':
+      return 'completed';
+    case 'running':
+    case 'queued':
+      return 'running';
+    default:
+      return 'failed';
+  }
 }
 
-/** SourceAsset plus the one extra field the Asset List needs that doesn't
- * fit the shared shape -- a real total finding count (from ScanRecord.
- * finding_count, no extra calls), shown in place of a Crit/High/Med/Low
- * breakdown the list level genuinely doesn't have (see assetFromRepo's
- * comment). Not added to SourceAsset itself since no other category needs
- * it. */
+function riskScoreFromFindingCount(
+  findingCount: number,
+): number {
+  if (!Number.isFinite(findingCount) || findingCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, findingCount * 3));
+}
+
 export interface RepoAssetRow extends SourceAsset {
   totalFindings: number;
 }
 
-function assetFromRepo(repo: RepoIdentity, scansByScanner: Record<RepoScanner, ScanRecord[]>): RepoAssetRow {
+function assetFromRepo(
+  repo: RepoIdentity,
+  scansByScanner: Record<RepoScanner, ScanRecord[]>,
+): RepoAssetRow {
   const scanners: ScannerAttachment[] = [];
   let totalFindings = 0;
   let latestOverall: ScanRecord | null = null;
+  let latestOverallTimestamp = -Infinity;
 
   for (const scanner of REPO_SCANNERS) {
-    const matched = scansByScanner[scanner].filter(s => scanMatchesRepo(s, repo.fullName));
+    const matched = scansByScanner[scanner]
+      .filter((scan) => scanMatchesRepo(scan, repo.fullName))
+      .sort((a, b) => {
+        const aTime = scanTimestamp(a);
+        const bTime = scanTimestamp(b);
+
+        return (
+          (bTime ? Date.parse(bTime) : -Infinity) -
+          (aTime ? Date.parse(aTime) : -Infinity)
+        );
+      });
+
     if (matched.length === 0) continue;
-    const latest = [...matched].sort((a, b) => (b.finished_at ?? b.created_at).localeCompare(a.finished_at ?? a.created_at))[0];
-    scanners.push({ scanner: SCANNER_LABEL[scanner], status: scannerAttachmentStatus(latest.status), lastRunAt: latest.finished_at ?? latest.created_at });
-    totalFindings += matched.reduce((sum, s) => sum + s.finding_count, 0);
-    if (!latestOverall || (latest.finished_at ?? latest.created_at) > (latestOverall.finished_at ?? latestOverall.created_at)) latestOverall = latest;
+
+    const latest = matched[0];
+    const latestTimestamp = scanTimestamp(latest);
+
+    scanners.push({
+      scanner: SCANNER_LABEL[scanner],
+      status: scannerAttachmentStatus(latest.status),
+      lastRunAt: latestTimestamp,
+    });
+
+    for (const scan of matched) {
+      const findingCount =
+        typeof scan.finding_count === 'number' &&
+        Number.isFinite(scan.finding_count) &&
+        scan.finding_count >= 0
+          ? scan.finding_count
+          : 0;
+
+      totalFindings += findingCount;
+    }
+
+    const latestTime = latestTimestamp
+      ? Date.parse(latestTimestamp)
+      : -Infinity;
+
+    if (latestTime > latestOverallTimestamp) {
+      latestOverall = latest;
+      latestOverallTimestamp = latestTime;
+    }
   }
 
-  const bySeverity: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
+  scanners.sort((a, b) =>
+    a.scanner.localeCompare(b.scanner),
+  );
+
+  const overallStatus = latestOverall
+    ? scannerAttachmentStatus(latestOverall.status)
+    : null;
+
+  const scanRollup: SourceAsset['scanRollup'] =
+    !latestOverall
+      ? 'stale'
+      : overallStatus === 'completed'
+        ? 'completed'
+        : overallStatus === 'running'
+          ? 'partial'
+          : 'failed';
+
+  const bySeverity: Record<Severity, number> = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    informational: 0,
+  };
 
   return {
     id: encodeRepoId(repo.installationId, repo.fullName),
@@ -115,15 +372,10 @@ function assetFromRepo(repo: RepoIdentity, scansByScanner: Record<RepoScanner, S
     name: repo.fullName,
     owner: '—',
     scanners,
-    scanRollup: !latestOverall ? 'stale' : scannerAttachmentStatus(latestOverall.status) === 'completed' ? 'completed' : scannerAttachmentStatus(latestOverall.status) === 'running' ? 'partial' : 'failed',
-    lastAggregatedScanAt: latestOverall ? (latestOverall.finished_at ?? latestOverall.created_at) : null,
-    // Per-severity breakdown isn't shown at list level -- it only exists
-    // behind a getScanResults call per matched scan, and summing that
-    // across every repo on a page would reintroduce the N+1 problem this
-    // session already fixed once for Clouds. totalFindings (real, from
-    // ScanRecord.finding_count, zero extra calls) drives riskScore instead;
-    // real per-severity counts are computed on the detail page, where only
-    // one repo's own matched scans need fetching.
+    scanRollup,
+    lastAggregatedScanAt: scanTimestamp(
+      latestOverall as ScanRecord,
+    ),
     bySeverity,
     riskScore: riskScoreFromFindingCount(totalFindings),
     internetExposed: null,
@@ -131,90 +383,276 @@ function assetFromRepo(repo: RepoIdentity, scansByScanner: Record<RepoScanner, S
   };
 }
 
-function applyClientFilters(items: RepoAssetRow[], filters: SourceInventoryFilters): RepoAssetRow[] {
-  let out = items;
-  if (filters.search) { const q = filters.search.toLowerCase(); out = out.filter(a => a.name.toLowerCase().includes(q)); }
-  if (filters.subType) out = out.filter(a => a.subType === filters.subType);
-  if (filters.scanStatus) out = out.filter(a => a.scanRollup === filters.scanStatus);
-  if (filters.scanner) out = out.filter(a => a.scanners.some(s => s.scanner === filters.scanner));
-  if (filters.owner) out = out.filter(a => a.owner === filters.owner);
-  if (filters.internetExposed) out = out.filter(a => a.internetExposed === true);
-  // severity has no real per-repo signal at list level (see assetFromRow's
-  // comment) -- a severity filter here would always exclude everything if
-  // applied against the all-zero bySeverity, which is worse than a no-op;
-  // left unapplied at this level, same honest-limitation spirit.
-  return out;
-}
+function applyClientFilters(
+  items: readonly RepoAssetRow[],
+  filters: SourceInventoryFilters,
+): RepoAssetRow[] {
+  let result = [...items];
 
-export async function getRealRepoAssets(filters: SourceInventoryFilters = {}): Promise<{ items: RepoAssetRow[]; total: number }> {
-  if (filters.subType && filters.subType !== 'GitHub') {
-    // Honest empty result -- no GitLab/Bitbucket/Other connector exists yet.
-    return { items: [], total: 0 };
+  const search = filters.search?.trim().toLowerCase();
+
+  if (search) {
+    result = result.filter((asset) =>
+      asset.name.toLowerCase().includes(search),
+    );
   }
-  const [repos, scansByScanner] = await Promise.all([listAllRepos(), fetchRecentScansByScanner()]);
-  const items = applyClientFilters(repos.map(r => assetFromRepo(r, scansByScanner)), filters);
-  return { items, total: items.length };
+
+  if (filters.subType) {
+    result = result.filter(
+      (asset) => asset.subType === filters.subType,
+    );
+  }
+
+  if (filters.scanStatus) {
+    result = result.filter(
+      (asset) => asset.scanRollup === filters.scanStatus,
+    );
+  }
+
+  if (filters.scanner) {
+    result = result.filter((asset) =>
+      asset.scanners.some(
+        (scanner) => scanner.scanner === filters.scanner,
+      ),
+    );
+  }
+
+  if (filters.owner) {
+    result = result.filter(
+      (asset) => asset.owner === filters.owner,
+    );
+  }
+
+  if (filters.internetExposed) {
+    result = result.filter(
+      (asset) => asset.internetExposed === true,
+    );
+  }
+
+  /**
+   * Severity remains intentionally unapplied at repository-list level because
+   * ScanRecord exposes only total finding_count here. Applying the filter to
+   * the zero-filled bySeverity record would falsely mean "no repositories
+   * match". Detail-level scan results provide the actual per-severity data.
+   */
+  return result;
 }
 
-export async function getRealRepoAssetById(id: string): Promise<SourceAsset | null> {
+export async function getRealRepoAssets(
+  filters: SourceInventoryFilters = {},
+): Promise<{
+  items: RepoAssetRow[];
+  total: number;
+}> {
+  if (
+    filters.subType &&
+    filters.subType !== 'GitHub'
+  ) {
+    return {
+      items: [],
+      total: 0,
+    };
+  }
+
+  const [repos, scansByScanner] = await Promise.all([
+    listAllRepos(),
+    fetchRecentScansByScanner(),
+  ]);
+
+  const items = applyClientFilters(
+    repos.map((repo) =>
+      assetFromRepo(repo, scansByScanner),
+    ),
+    filters,
+  );
+
+  return {
+    items,
+    total: items.length,
+  };
+}
+
+export async function getRealRepoAssetById(
+  id: string,
+): Promise<SourceAsset | null> {
   const decoded = decodeRepoId(id);
+
   if (!decoded) return null;
-  const repos = await listAllRepos();
-  const repo = repos.find(r => r.installationId === decoded.installationId && r.fullName === decoded.fullName);
-  if (!repo) return null;
-  const scansByScanner = await fetchRecentScansByScanner();
-  return assetFromRepo(repo, scansByScanner);
+
+  try {
+    const repos = await listAllRepos();
+
+    const repo = repos.find(
+      (candidate) =>
+        candidate.installationId === decoded.installationId &&
+        candidate.fullName === decoded.fullName,
+    );
+
+    if (!repo) return null;
+
+    const scansByScanner =
+      await fetchRecentScansByScanner();
+
+    return assetFromRepo(repo, scansByScanner);
+  } catch {
+    return null;
+  }
 }
 
-const SEVERITY_RANK: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, informational: 0 };
+const SEVERITY_RANK: Readonly<Record<Severity, number>> =
+  Object.freeze({
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+    informational: 0,
+  });
 
-/** Bounded to one repo's own matched scans (at most 5, one per scanner) --
- * no N+1 concern, same principle the Clouds detail page already
- * established. Dedup groups by CVE when present -- a real, comparable
- * identity across different scanners (e.g. Dependency-Check and Grype both
- * flagging the same CVE in this repo is a genuine instance of multi-
- * scanner convergence). Findings without a CVE (most SAST/secrets results)
- * are not forced into a dedup they can't honestly support -- each stays
- * its own AggregatedFinding with exactly one detectionSource, rather than
- * guessing at cross-scanner identity from incompatible per-scanner
- * `location` schemas. */
-export async function getRealRepoAggregatedFindings(asset: SourceAsset): Promise<AggregatedFinding[]> {
+/**
+ * Detail aggregation is bounded to the repository's matched completed scans.
+ *
+ * CVE is the only cross-scanner identity the current real finding contract
+ * supports safely. Findings without a CVE remain individual findings instead
+ * of being heuristically merged from incompatible location schemas.
+ */
+export async function getRealRepoAggregatedFindings(
+  asset: SourceAsset,
+): Promise<AggregatedFinding[]> {
   const decoded = decodeRepoId(asset.id);
+
   if (!decoded) return [];
 
-  const scansByScanner = await fetchRecentScansByScanner();
-  const matchedScans: { scanner: RepoScanner; scan: ScanRecord }[] = [];
+  const scansByScanner =
+    await fetchRecentScansByScanner();
+
+  const matchedScans: {
+    scanner: RepoScanner;
+    scan: ScanRecord;
+  }[] = [];
+
   for (const scanner of REPO_SCANNERS) {
     for (const scan of scansByScanner[scanner]) {
-      if (scanMatchesRepo(scan, decoded.fullName) && scan.status === 'completed') matchedScans.push({ scanner, scan });
+      if (
+        scan.status === 'completed' &&
+        scanMatchesRepo(scan, decoded.fullName)
+      ) {
+        matchedScans.push({
+          scanner,
+          scan,
+        });
+      }
     }
   }
 
-  const resultsPerScan = await Promise.all(matchedScans.map(({ scanner, scan }) =>
-    api.getScanResults(scanner, scan.scan_id, { limit: 100 }).then(res => res.items).catch(() => [] as ScannerFinding[]),
-  ));
+  const resultsPerScan = await Promise.all(
+    matchedScans.map(
+      async ({ scanner, scan }) => {
+        try {
+          const response = await api.getScanResults(
+            scanner,
+            scan.scan_id,
+            { limit: DETAIL_RESULTS_LIMIT },
+          );
+
+          return Array.isArray(response.items)
+            ? response.items
+            : [];
+        } catch {
+          /**
+           * One unavailable scanner result should not erase all other real
+           * scanner results for this repository.
+           */
+          return [];
+        }
+      },
+    ),
+  );
+
   const allFindings = resultsPerScan.flat();
 
-  const withCve = allFindings.filter((f): f is ScannerFinding & { cve: string } => !!f.cve);
-  const withoutCve = allFindings.filter(f => !f.cve);
+  const withCve = allFindings.filter(
+    (
+      finding,
+    ): finding is ScannerFinding & { cve: string } =>
+      typeof finding.cve === 'string' &&
+      finding.cve.trim().length > 0,
+  );
 
-  const cveGroups = new Map<string, ScannerFinding[]>();
-  for (const f of withCve) {
-    if (!cveGroups.has(f.cve)) cveGroups.set(f.cve, []);
-    cveGroups.get(f.cve)!.push(f);
+  const withoutCve = allFindings.filter(
+    (finding) =>
+      typeof finding.cve !== 'string' ||
+      finding.cve.trim().length === 0,
+  );
+
+  const cveGroups = new Map<
+    string,
+    ScannerFinding[]
+  >();
+
+  for (const finding of withCve) {
+    const cve = finding.cve.trim().toUpperCase();
+    const existing = cveGroups.get(cve);
+
+    if (existing) {
+      existing.push(finding);
+    } else {
+      cveGroups.set(cve, [finding]);
+    }
   }
 
-  const grouped: AggregatedFinding[] = [...cveGroups.values()].map(group => {
-    const top = [...group].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])[0];
-    const detectionSources = [...new Set(group.map(f => SCANNER_LABEL[f.scanner as RepoScanner] ?? f.scanner))];
-    return { id: top.finding_id, cve: top.cve, title: top.title, severity: top.severity, detectionSources, status: top.status === 'accepted_risk' ? 'suppressed' : top.status };
-  });
+  const grouped: AggregatedFinding[] = [
+    ...cveGroups.entries(),
+  ]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, group]) => {
+      const top = [...group].sort(
+        (a, b) =>
+          SEVERITY_RANK[b.severity] -
+          SEVERITY_RANK[a.severity],
+      )[0];
 
-  const ungrouped: AggregatedFinding[] = withoutCve.map(f => ({
-    id: f.finding_id, cve: null, title: f.title, severity: f.severity,
-    detectionSources: [SCANNER_LABEL[f.scanner as RepoScanner] ?? f.scanner],
-    status: f.status === 'accepted_risk' ? 'suppressed' : f.status,
-  }));
+      const detectionSources = [
+        ...new Set(
+          group.map(
+            (finding) =>
+              SCANNER_LABEL[
+                finding.scanner as RepoScanner
+              ] ?? finding.scanner,
+          ),
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+
+      return {
+        id: top.finding_id,
+        cve: top.cve,
+        title: top.title,
+        severity: top.severity,
+        detectionSources,
+        status:
+          top.status === 'accepted_risk'
+            ? 'suppressed'
+            : top.status,
+      };
+    });
+
+  const ungrouped: AggregatedFinding[] = withoutCve
+    .slice()
+    .sort((a, b) => a.finding_id.localeCompare(b.finding_id))
+    .map((finding) => ({
+      id: finding.finding_id,
+      cve: null,
+      title: finding.title,
+      severity: finding.severity,
+      detectionSources: [
+        SCANNER_LABEL[
+          finding.scanner as RepoScanner
+        ] ?? finding.scanner,
+      ],
+      status:
+        finding.status === 'accepted_risk'
+          ? 'suppressed'
+          : finding.status,
+    }));
 
   return [...grouped, ...ungrouped];
 }

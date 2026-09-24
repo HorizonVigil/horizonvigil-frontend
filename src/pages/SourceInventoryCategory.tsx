@@ -167,7 +167,7 @@ export function SourceInventoryCategory() {
 
       {tab === 'Asset List' && (
         <div>
-          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={subTypeLabels} scanners={config.scannerPool} />
+          <SourceInventoryFilters filters={filters} onChange={setFilters} subTypes={subTypeLabels} scanners={config.scannerPool} assets={assets} />
           <DataTable
             columns={columns}
             rows={assets}

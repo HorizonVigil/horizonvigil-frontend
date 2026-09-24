@@ -61,7 +61,7 @@ const ASSET_TYPES = ['EC2 Instance', 'S3 Bucket', 'Lambda Function', 'EKS Pod', 
 const ENVIRONMENTS = ['production', 'staging', 'dev', 'sandbox'];
 const SCANNERS = ['Security Hub', 'GuardDuty', 'Inspector', 'Trivy', 'Semgrep', 'Prowler', 'Checkov', 'Gitleaks', 'Grype', 'Nuclei'];
 const OWNERS = ['Platform Team', 'AppSec Team', 'Cloud Infra Team', 'Unassigned', 'DevSecOps'];
-const REMEDIATION_STATUSES = ['not_started', 'in_progress', 'fixed', 'wont_fix'] as const;
+
 const FINDING_SOURCE_VALUES: VulnerabilityFinding['finding_source'][] = [
   'security_hub', 'guardduty', 'inspector', 'iam_access_analyzer', 'aws_config', 'gcp_scc', 'trivy',
 ];
@@ -83,7 +83,7 @@ export interface DemoFinding extends VulnerabilityFinding {
   scanner: string;
   owner: string;
   slaDueAt: string | null;
-  remediationStatus: typeof REMEDIATION_STATUSES[number];
+  remediationStatus: 'not_started' | 'in_progress' | 'fixed' | 'wont_fix';
 }
 
 export interface FindingsPresetFilter {

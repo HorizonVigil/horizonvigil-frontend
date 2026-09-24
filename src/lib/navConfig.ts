@@ -131,6 +131,7 @@ export interface NavModule {
 }
 
 const OVERVIEW = '/overview';
+const INTELLIGENCE = '/ai-copilot';
 const ACCOUNTS = '/cloud-accounts';
 const RESOURCES = '/resources';
 const FINOPS = '/finops';
@@ -138,6 +139,7 @@ const VULN = '/vulnerability-management';
 const SOURCE_INV = '/source-inventory';
 const SCANNING = '/security-scanning';
 const CLOUD_SEC = '/cloud-security';
+const CLOUD_COMPLIANCE = '/cloud-compliance';
 const APP_SEC = '/application-security';
 const CODE_SEC = '/code-security';
 const CONTAINER_SEC = '/container-security';
@@ -177,6 +179,13 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'overview',
     section: 'Get Started',
     to: OVERVIEW,
+    children: [],
+  },
+  {
+    label: 'Intelligence',
+    icon: 'ai',
+    section: 'Get Started',
+    to: INTELLIGENCE,
     children: [],
   },
   {
@@ -240,7 +249,12 @@ export const NAV_MODULES: NavModule[] = [
       // RBAC-configurable, since nothing in this app renders
       // NavChild.group as an actual visible sidebar today (only
       // CommandPalette/MenuAccessTree/useCanSeeSubmenu consume it).
-      { label: 'Cloud Scans', to: tabLink(CLOUD_SEC, 'Overview'), real: true, group: 'Scan Categories' },
+      // NO 'Cloud Scans' entry here. Cloud Security became its own top-level
+      // module in the Phase 10 split, so it already owns /cloud-security. A
+      // relabel entry pointing at the same route puts TWO nav entries on one
+      // destination, which is precisely the defect that split fixed -- both
+      // marked themselves aria-current. The other Scan Categories entries
+      // below stay, because the routes they relabel are owned by this module.
       { label: 'Repository Scans', to: tabLink(CODE_SEC, 'Overview'), real: true, group: 'Scan Categories' },
       { label: 'URL & API Scans', to: tabLink(APP_SEC, 'Overview'), real: true, group: 'Scan Categories' },
       { label: 'Container Image Scans', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Scan Categories' },
@@ -332,21 +346,18 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Cloud Security Scanning', to: tabLink(SCANNING, 'Cloud Posture'), real: true, group: 'Security Scanning' },
 
       // ── Cloud Security ────────────────────────────────────────────────
-      // Multi-cloud security posture pillar -- distinct from Cloud Accounts
-      // (connection management/ops) and from the AWS-native tool tabs
-      // above, which this pillar re-presents through a posture/risk lens.
-      { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
-      // AWS's own posture lives in Misconfigurations/Exposed Resources below
-      // (real, AWS Config + IAM Access Analyzer); Azure/GCP are real too as
-      // of the gcp-scc/defender source routes -- all three now point at the
-      // real Multi-Cloud Coverage tab's per-provider breakdown rather than
-      // being separate unbuilt tabs. OCI has no connector at all yet.
-      { label: 'AWS', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'Azure', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'GCP', to: tabLink(CLOUD_SEC, 'Multi-Cloud Coverage'), real: true, group: 'Cloud Security' },
-      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
-      { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
-      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
+      // MOVED to the Cloud Security module (see its `children` below).
+      //
+      // These seven entries pointed at /cloud-security* routes while
+      // declared under Vulnerability Management, so every one of them lit up
+      // a different module than the one it belonged to. Three of them --
+      // 'AWS', 'Azure' and 'GCP' -- were additionally the SAME destination
+      // (?tab=Source Coverage) under three labels, so a search for any
+      // provider offered three results that opened one identical page.
+      //
+      // They now live on the module that owns the route, which also gives
+      // them `cloud-security:*` RBAC keys instead of borrowing
+      // Vulnerability Management's `security:*` namespace.
 
       // ── Application Security ─────────────────────────────────────────
       { label: 'Application Security Overview', to: APP_SEC, real: true, group: 'Application Security' },
@@ -362,14 +373,23 @@ export const NAV_MODULES: NavModule[] = [
       // Real -- api.getGitInstallations()/getInstallationRepos() already
       // back Settings > Git Integration's Auto-PR feature with real,
       // persisted repo rows.
-      { label: 'Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
+      // Labelled 'Code Repositories', not 'Repositories'. The submenu key
+      // that drives RBAC is derived from the LABEL alone, so this entry and
+      // Source Inventory's 'Repositories' above both collapsed to
+      // `security:repositories` -- one stored permission silently governed
+      // two different destinations, and navConfig's own integrity check was
+      // already reporting the collision at import time.
+      { label: 'Code Repositories', to: tabLink(CODE_SEC, 'Repositories'), real: true, group: 'Code Security' },
       // Real -- each backed by its own scanner's persisted GET /v1/scans
       // history (Semgrep / Dependency-Check+Grype / Gitleaks+TruffleHog).
+      // FIXED 2026-09-08 (user-reported nav duplication): "Code
+      // Vulnerabilities" and "Dependencies" used to sit here too, as exact
+      // duplicates of SAST's and SCA's own `to` respectively -- four labels
+      // for two destinations in one group. Kept the scanner-type names
+      // (SAST/SCA), which read consistently with Secrets right below them.
       { label: 'SAST', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
       { label: 'SCA', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
-      { label: 'Dependencies', to: tabLink(CODE_SEC, 'Dependency Vulnerabilities'), real: true, group: 'Code Security' },
       { label: 'Secrets', to: tabLink(CODE_SEC, 'Secrets Detected'), real: true, group: 'Code Security' },
-      { label: 'Code Vulnerabilities', to: tabLink(CODE_SEC, 'Code Vulnerabilities'), real: true, group: 'Code Security' },
 
       // ── Container & Kubernetes ────────────────────────────────────────
       // Distinct from the operational Clusters module (pods/deployments/
@@ -382,9 +402,15 @@ export const NAV_MODULES: NavModule[] = [
       // here (not "Container Images") since that exact label is already
       // used by the AWS-native tab below -- same label-uniqueness
       // constraint as the Assets/Security Scanning renames above.
-      { label: 'Docker', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
+      // FIXED 2026-09-08 (user-reported nav duplication): this used to also
+      // carry "Docker" and "Container Vulnerabilities" as two more sibling
+      // entries in this same group, both pointing at this identical `to` --
+      // three links in a row landing on the exact same tab, unlike this
+      // module's other same-destination cases (AWS/Azure/GCP, Repository
+      // Inventory/Repositories, All Scans/Scanners), which are each spread
+      // across *different* groups as deliberate alternate entry points, not
+      // stacked three-deep in one. Consolidated to the one label.
       { label: 'Container Image Inventory', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
-      { label: 'Container Vulnerabilities', to: tabLink(CONTAINER_SEC, 'Docker & Container Images'), real: true, group: 'Container & Kubernetes' },
 
       // ── Infrastructure ────────────────────────────────────────────────
       { label: 'Infrastructure Overview', to: INFRA_SEC, real: true, group: 'Infrastructure' },
@@ -432,7 +458,11 @@ export const NAV_MODULES: NavModule[] = [
     children: [
       { label: 'Resource Inventory', to: RESOURCES, real: true },
       { label: 'Global Search', to: tabLink(`${RESOURCES}/all`, 'Global Search'), real: true },
-      { label: 'Dependency Graph', to: `${RESOURCES}/all`, real: true },
+      // NO 'Dependency Graph' entry. There is no Dependency Graph tab on this
+      // page (see Resources.tsx's TABS) -- the graph opens from an individual
+      // resource's drawer. The entry pointed at `/resources/all`, so it
+      // promised a dependency graph and delivered the default resource list.
+      // 'Resource Relationships' below is the real, reachable equivalent.
       { label: 'Resource Relationships', to: tabLink(`${RESOURCES}/all`, 'Resource Relationships'), real: true },
       { label: 'Tags Explorer', to: tabLink(`${RESOURCES}/all`, 'Tags Explorer'), real: true },
       { label: 'Resource Timeline', to: tabLink(`${RESOURCES}/all`, 'Resource Timeline'), real: true },
@@ -500,30 +530,33 @@ export const NAV_MODULES: NavModule[] = [
     ],
   },
   // ── Cloud-only go-live shortcuts ──────────────────────────────────────
-  // Three thin top-level entries added for the cloud-only release so its
-  // nav can show "Cost Optimization"/"Cloud Security"/"Cloud Compliance" as
-  // their own items (per that release's spec) without duplicating any real
-  // page or restructuring the modules that already own this content. Each
-  // `to` points at content that already exists and is already reachable via
-  // FinOps/Vulnerability Management above -- these are extra doors into the
-  // same rooms, not new rooms. `real: false`-style hiding doesn't apply to
-  // modules (only NavChild) so there's nothing to flip once real; there's
-  // nothing unbuilt here to begin with. Not tagged hiddenInCloudOnlyMode --
-  // the whole point of these three is to be visible when that mode is on;
-  // outside cloud-only mode they're simply redundant with the entries their
-  // "home" module (FinOps / Vulnerability Management) already has, which is
-  // harmless (same destination either way). Cost Optimization shares
-  // FinOps's icon/RBAC key (FinOps is never hidden, so no leak risk); Cloud
-  // Security/Cloud Compliance deliberately do NOT share Vulnerability
-  // Management's -- see the comment on Cloud Security below for why that
-  // was tried first and caused a real Overview-widget leak.
-  {
-    label: 'Cost Optimization',
-    icon: 'cost', // shares FinOps's RBAC menu_key -- same page, same permission concern (see NavModule.icon doc).
-    section: 'Cloud Operations',
-    to: sectionTabLink(FINOPS, 'Cost Optimization', 'Recommendations'),
-    children: [],
-  },
+  // Two thin top-level entries added for the cloud-only release so its nav
+  // can show "Cloud Security"/"Cloud Compliance" as their own items (per
+  // that release's spec) without duplicating any real page or restructuring
+  // the module that actually owns this content (Vulnerability Management).
+  // Each `to` points at content that already exists -- these are extra
+  // doors into the same rooms, not new rooms. `real: false`-style hiding
+  // doesn't apply to modules (only NavChild) so there's nothing to flip once
+  // real; there's nothing unbuilt here to begin with. Not tagged
+  // hiddenInCloudOnlyMode -- the whole point of these two is to be visible
+  // when that mode is on, which is exactly when Vulnerability Management
+  // (their "home" module) is hidden, making them the sole door in rather
+  // than a duplicate. Deliberately do NOT share Vulnerability Management's
+  // icon -- see the comment on Cloud Security below for why that was tried
+  // first and caused a real Overview-widget leak.
+  //
+  // A third shortcut, "Cost Optimization" (sharing FinOps's icon, pointing
+  // at FinOps's own Cost Optimization > Recommendations tab), used to live
+  // here too -- removed 2026-09-08 (user-reported nav duplication) because
+  // FinOps, unlike Vulnerability Management, is never hidden in cloud-only
+  // mode. That made it a *permanent* duplicate rather than a stand-in for a
+  // hidden module: every real user in production (cloud-only mode is always
+  // on there) saw both a "FinOps" AND a "Cost Optimization" icon on the
+  // AppRail, landing on the exact same recommendations tab, with no state in
+  // which the shortcut was ever the only door in. FinOps's own sidebar
+  // already has a "Cost Optimization" group header plus every real tab
+  // underneath it (Savings Opportunities, Rightsizing, Idle Resources, ...)
+  // -- nothing was lost by removing the redundant top-level entry.
   {
     // Deliberately its OWN icon/RBAC key, NOT 'security' -- sharing
     // Vulnerability Management's icon here was tried first and caused a
@@ -543,14 +576,33 @@ export const NAV_MODULES: NavModule[] = [
     icon: 'cloud-security',
     section: 'Cloud Operations',
     to: CLOUD_SEC,
-    children: [],
+    children: [
+      { label: 'Cloud Overview', to: CLOUD_SEC, real: true, group: 'Cloud Security' },
+      // One entry, not one per provider. This tab IS the per-provider
+      // breakdown, so 'AWS', 'Azure' and 'GCP' were three labels resolving to
+      // this single URL -- three search results that opened the same page and
+      // three RBAC keys that could not actually be set independently.
+      { label: 'Source Coverage', to: tabLink(CLOUD_SEC, 'Source Coverage'), real: true, group: 'Cloud Security' },
+      { label: 'Misconfigurations', to: tabLink(CLOUD_SEC, 'Misconfigurations'), real: true, group: 'Cloud Security' },
+      { label: 'Identity & Access', to: tabLink(CLOUD_SEC, 'Identity & Access Risk'), real: true, group: 'Cloud Security' },
+      { label: 'Exposed Resources', to: tabLink(CLOUD_SEC, 'Exposed Resources'), real: true, group: 'Cloud Security' },
+    ],
   },
   {
     // Same reasoning and same fix as Cloud Security immediately above.
     label: 'Cloud Compliance',
     icon: 'cloud-compliance',
     section: 'Cloud Operations',
-    to: tabLink(VULN, 'Compliance'),
+    // Phase 10 (§10.2/§10.3): now its own canonical route.
+    //
+    // History of this one line: it pointed at
+    // /vulnerability-management?tab=Compliance; when that route began
+    // redirecting to the V2 notice the tab param was dropped and the entry
+    // became a dead end, so it was repointed at Cloud Security's Compliance
+    // TAB. That fixed the dead end but left two nav entries resolving to
+    // /cloud-security, which is why both marked themselves aria-current.
+    // A query param cannot distinguish two modules; a route can.
+    to: CLOUD_COMPLIANCE,
     children: [],
   },
   {
@@ -636,7 +688,9 @@ export const NAV_MODULES: NavModule[] = [
       { label: 'Compliance Reports', to: tabLink(REPORTS, 'Compliance Reports'), real: true },
       { label: 'Inventory Reports', to: tabLink(REPORTS, 'Inventory Reports'), real: true },
       { label: 'Savings Reports', to: tabLink(REPORTS, 'Savings Reports'), real: true },
-      { label: 'Scheduled Reports', to: tabLink(REPORTS, 'Scheduled Reports'), real: true, minRole: 'editor' },
+      // Phase 11 (§15.4): removed. There is no scheduler and no delivery
+      // worker behind it, and the server now refuses to save a schedule --
+      // leaving the nav entry would route users to a 403.
       { label: 'Export Center', to: tabLink(REPORTS, 'Export Center'), real: true },
     ],
   },
@@ -730,6 +784,85 @@ export const NAV_MODULES: NavModule[] = [
 ];
 
 /**
+ * Validates navigation invariants without mutating the live configuration.
+ *
+ * Intended for unit tests and development diagnostics. It deliberately does
+ * not throw during production startup.
+ */
+export function validateNavConfig(
+  modules: readonly NavModule[] = NAV_MODULES,
+): string[] {
+  const errors: string[] = [];
+  const moduleLabels = new Set<string>();
+  const moduleIcons = new Set<string>();
+
+  for (const module of modules) {
+    if (!module.label.trim()) {
+      errors.push('A module has an empty label.');
+    }
+
+    if (!module.icon.trim()) {
+      errors.push(`Module "${module.label}" has an empty icon/menu_key.`);
+    }
+
+    if (moduleLabels.has(module.label)) {
+      errors.push(`Duplicate module label: "${module.label}".`);
+    }
+    moduleLabels.add(module.label);
+
+    if (moduleIcons.has(module.icon)) {
+      errors.push(`Duplicate module icon/menu_key: "${module.icon}".`);
+    }
+    moduleIcons.add(module.icon);
+
+    const childLabels = new Set<string>();
+    const submenuKeys = new Set<string>();
+
+    for (const child of module.children) {
+      if (!child.label.trim()) {
+        errors.push(`Module "${module.label}" contains an empty child label.`);
+      }
+
+      if (childLabels.has(child.label)) {
+        errors.push(
+          `Module "${module.label}" contains duplicate child label "${child.label}".`,
+        );
+      }
+      childLabels.add(child.label);
+
+      const key = submenuKey(module.icon, child.label);
+      if (submenuKeys.has(key)) {
+        errors.push(
+          `Module "${module.label}" contains a colliding submenu key "${key}".`,
+        );
+      }
+      submenuKeys.add(key);
+
+      if (child.real && !child.to && !child.action) {
+        errors.push(
+          `Real child "${module.label} > ${child.label}" has neither "to" nor "action".`,
+        );
+      }
+
+      if (child.action && child.to) {
+        errors.push(
+          `Child "${module.label} > ${child.label}" defines both "action" and "to".`,
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+if (import.meta.env?.DEV) {
+  const navErrors = validateNavConfig();
+  if (navErrors.length > 0) {
+    console.error('[navConfig] integrity errors', navErrors);
+  }
+}
+
+/**
  * Checks whether a role meets a module/child's permission requirement.
  * - If neither `minRole` nor `roles` is set, item is visible to all.
  * - `minRole` = minimum role threshold (e.g. 'editor' means editor+).
@@ -811,25 +944,72 @@ export function getVisibleModules(role: Role, permissions?: Record<string, MenuP
 }
 
 function pathOnly(to: string): string {
-  const i = to.indexOf('?');
-  return i === -1 ? to : to.slice(0, i);
+  const beforeHash = to.split('#', 1)[0];
+  const i = beforeHash.indexOf('?');
+  return i === -1 ? beforeHash : beforeHash.slice(0, i);
 }
 
-/** True if `pathname` belongs to this module — its own landing page or any real child route (query strings ignored). */
-export function moduleMatchesPath(mod: NavModule, pathname: string): boolean {
-  if (mod.to && pathname.startsWith(mod.to)) return true;
-  return mod.children.some(c => c.to && pathname.startsWith(pathOnly(c.to)));
+function normalizePathname(pathname: string): string {
+  if (typeof pathname !== 'string' || pathname.trim() === '') return '/';
+
+  const normalized = pathname.trim().split('#', 1)[0].split('?', 1)[0];
+  if (!normalized || normalized === '/') return '/';
+
+  const withLeadingSlash = normalized.startsWith('/')
+    ? normalized
+    : `/${normalized}`;
+
+  return withLeadingSlash.replace(/\/+$/, '') || '/';
 }
 
 /**
- * Which of the 15 domain apps the current route belongs to — the single
- * source of truth for both AppRail (which icon is "active") and Sidebar
- * (which module's own sub-nav to render). Falls back to Overview so the
- * shell never renders with no module selected (e.g. on a route no module
- * claims, though App.tsx's catch-all already sends unknown paths to /overview).
+ * Boundary-safe route matching.
+ *
+ * A prefix match such as `/resources`.startsWith('/resources') also matches
+ * `/resources-archive`. A route therefore owns only its exact pathname and
+ * descendants below a `/` boundary.
+ */
+function routeMatches(pathname: string, route: string): boolean {
+  const current = normalizePathname(pathname);
+  const target = normalizePathname(pathOnly(route));
+
+  return current === target || current.startsWith(`${target}/`);
+}
+
+/**
+ * True if `pathname` belongs to this module — its own landing page or any
+ * real child route. Query strings and hashes do not affect ownership.
+ */
+export function moduleMatchesPath(mod: NavModule, pathname: string): boolean {
+  if (mod.to && routeMatches(pathname, mod.to)) return true;
+
+  return mod.children.some(
+    child => child.real && !!child.to && routeMatches(pathname, child.to),
+  );
+}
+
+/**
+ * Which domain module owns the current route.
+ *
+ * Direct module landing routes take precedence over cross-links from another
+ * module. This prevents a shortcut such as Vulnerability Management ->
+ * `/cloud-security` from stealing the active AppRail/Sidebar state from the
+ * dedicated Cloud Security module.
  */
 export function findActiveModule(pathname: string): NavModule {
-  return NAV_MODULES.find(m => moduleMatchesPath(m, pathname)) ?? NAV_MODULES[0];
+  const directOwner = NAV_MODULES.find(
+    mod => !!mod.to && routeMatches(pathname, mod.to),
+  );
+
+  if (directOwner) return directOwner;
+
+  return (
+    NAV_MODULES.find(mod =>
+      mod.children.some(
+        child => child.real && !!child.to && routeMatches(pathname, child.to),
+      ),
+    ) ?? NAV_MODULES[0]
+  );
 }
 
 /** path + tab + hash identity a child's `to` resolves to — the unit isChildActive dedupes/compares on, not the raw `to` string (two children can carry different `to` values that land on the exact same page+tab, e.g. Resources' Dependency Graph and Bulk Operations both resolving to /resources/all with no distinguishing tab). */
@@ -856,16 +1036,36 @@ function childIdentity(child: NavChild): string | null {
  * Favorites) match simultaneously, since the hash was stripped before any
  * comparison happened at all.
  */
-export function isChildActive(child: NavChild, siblings: NavChild[], pathname: string, search: string, hash: string): boolean {
-  if (!child.to) return false;
-  const [beforeHash, childHash = ''] = child.to.split('#');
-  const [childPath, childQuery] = beforeHash.split('?');
-  if (pathname !== childPath) return false;
+export function isChildActive(
+  child: NavChild,
+  siblings: NavChild[],
+  pathname: string,
+  search: string,
+  hash: string,
+): boolean {
+  if (!child.to || !child.real) return false;
+
+  const [beforeHash, childHash = ''] = child.to.split('#', 2);
+  const [childPath, childQuery] = beforeHash.split('?', 2);
+
+  if (normalizePathname(pathname) !== normalizePathname(childPath)) {
+    return false;
+  }
+
   const currentTab = new URLSearchParams(search).get('tab');
-  const childTab = childQuery ? new URLSearchParams(childQuery).get('tab') : null;
+  const childTab = childQuery
+    ? new URLSearchParams(childQuery).get('tab')
+    : null;
+
   if ((currentTab ?? null) !== (childTab ?? null)) return false;
   if (childHash && hash.replace(/^#/, '') !== childHash) return false;
+
   const thisIdentity = childIdentity(child);
-  const sharedBy = siblings.filter(s => childIdentity(s) === thisIdentity).length;
+  if (!thisIdentity) return false;
+
+  const sharedBy = siblings.filter(
+    sibling => sibling.real && childIdentity(sibling) === thisIdentity,
+  ).length;
+
   return sharedBy === 1;
 }

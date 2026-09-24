@@ -22,6 +22,8 @@ import {
 } from '../lib/api';
 import { money } from '../lib/format';
 import { useResourceFilters } from '../lib/useResourceFilters';
+import { ScanCoverageBanner, countQualifier } from '../components/cloudAccounts/ScanCoverageBanner';
+import type { ScanHealth } from '../lib/api';
 
 /** Which of the six supported remediation actions (if any) this resource is currently eligible for, from cached inventory — the authoritative check happens live against AWS at dry-run time. */
 function eligibleRemediationAction(r: CloudResource): RemediationActionType | null {
@@ -80,6 +82,11 @@ export function AwsAccountDetail() {
   const [remediating, setRemediating] = useState<string | null>(null);
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
   const [connection, setConnection] = useState<CloudConnection | null>(null);
+  /**
+   * Coverage behind the counts. Null means it could not be read, which the
+   * banner reports rather than treating as healthy.
+   */
+  const [scanHealth, setScanHealth] = useState<ScanHealth | null>(null);
   const [resources, setResources] = useState<CloudResource[]>([]);
   const [costSnapshots, setCostSnapshots] = useState<CostSnapshot[]>([]);
   const [credentials, setCredentials] = useState<AccountCredentials | null>(null);
@@ -99,7 +106,6 @@ export function AwsAccountDetail() {
   const [favorite, setFavorite] = useState<Favorite | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
-  const [validationBusy, setValidationBusy] = useState(false);
   // from overwriting state after navigation or a retry.
   const loadRequestRef = useRef(0);
   const tabRequestRef = useRef(0);
@@ -179,35 +185,58 @@ export function AwsAccountDetail() {
     const requestId = ++loadRequestRef.current;
     setLoadError(null);
 
-    try {
-      const [conn, resourcesRes, costRes, creds] = await Promise.all([
-        api.getAccount(accountId),
-        api.getResourceInventory({ connectionId: accountId, limit: 200 }),
-        api.getCostExplorer({ connectionId: accountId, limit: 200 }),
-        api.getAccountCredentials(accountId),
-      ]);
+    /**
+     * AWS-P1-06: this was one `Promise.all` across four services, so a
+     * single failing dependency blanked the entire page -- a cost-service
+     * blip hid the resource inventory, the permissions tab and the
+     * connection itself. The identical defect was fixed in CloudSecurity.tsx
+     * by switching to allSettled; this is the same fix in the place the
+     * audit actually named.
+     *
+     * The account itself is the exception: without it there is no page to
+     * render, so its failure is still fatal. Everything else degrades to its
+     * own section rather than taking the page down, and the sections that
+     * did fail are NAMED -- "couldn't load" with no subject leaves the
+     * reader unable to tell an empty inventory from a failed one.
+     */
+    const [connRes, resourcesRes, costRes, credsRes, healthRes] = await Promise.allSettled([
+      api.getAccount(accountId),
+      api.getResourceInventory({ connectionId: accountId, limit: 200 }),
+      api.getCostExplorer({ connectionId: accountId, limit: 200 }),
+      api.getAccountCredentials(accountId),
+      api.getScanHealth(accountId),
+    ]);
 
-      if (requestId !== loadRequestRef.current) return;
+    if (requestId !== loadRequestRef.current) return;
 
-      setConnection(conn);
-      setResources(resourcesRes.items);
-      setCostSnapshots(costRes.items);
-      setCredentials(creds);
-    } catch (err) {
-      if (requestId !== loadRequestRef.current) return;
+    if (connRes.status === 'rejected') {
+      const err = connRes.reason;
       setLoadError(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Failed to load the AWS account.',
+        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load the AWS account.',
       );
+      return;
     }
+    setConnection(connRes.value);
+
+    const failed: string[] = [];
+    if (resourcesRes.status === 'fulfilled') setResources(resourcesRes.value.items); else failed.push('resource inventory');
+    if (costRes.status === 'fulfilled') setCostSnapshots(costRes.value.items); else failed.push('cost data');
+    if (credsRes.status === 'fulfilled') setCredentials(credsRes.value); else failed.push('credential summary');
+    // Deliberately NOT added to `failed`: the banner states its own
+    // unavailability, and saying it twice would read as two problems.
+    setScanHealth(healthRes.status === 'fulfilled' ? healthRes.value : null);
+
+    setLoadError(
+      failed.length > 0
+        ? `Couldn't load: ${failed.join(', ')}. Everything else on this page is real, loaded data.`
+        : null,
+    );
   }, [id]);
 
 
   useEffect(() => {
     setConnection(null);
+    setScanHealth(null);
     setResources([]);
     setCostSnapshots([]);
     setCredentials(null);
@@ -319,26 +348,61 @@ export function AwsAccountDetail() {
     if (!id) return;
     setCurSyncing(true);
     try {
-      setCurProgress('Finding your Cost & Usage Report…');
-      await api.discoverCur(id);
-      setCurProgress('Fetching this month\'s manifest…');
-      const { reportKeys } = await api.getCurManifest(id);
-      if (reportKeys.length === 0) {
-        toast('CUR report found, but no data files are published yet for this billing period.', 'error');
+      /**
+       * Server-owned now (Phase 7, §3.4). This used to run a `for` over every
+       * report file with an unbounded `while` over row chunks inside it,
+       * carrying the row offset in a local variable -- so closing the tab
+       * mid-ingest left the billing period partially ingested with nothing
+       * recording where it stopped. Partial cost data is worse than none,
+       * because it still renders as a number.
+       */
+      /**
+       * Discover FIRST.
+       *
+       * The button's own tooltip promised "Discovers your AWS Cost & Usage
+       * Report... and ingests it", and the code only ingested. Nothing in the
+       * product ever called cur/discover, so `cur_s3_bucket` was never set and
+       * every run refused with 409 cur_not_configured -- the entire durable
+       * CUR pipeline was unreachable, and the button that claimed to reach it
+       * dead-ended.
+       *
+       * Discovery is idempotent (it re-reads the report definition and
+       * re-saves it), so running it every time keeps a moved or renamed report
+       * working without a separate "re-discover" action.
+       */
+      setCurProgress('Looking for your Cost & Usage Report…');
+      try {
+        const found = await api.discoverCur(id);
+        setCurProgress(`Found ${found.reportName} in ${found.bucket}. Queueing ingestion…`);
+      } catch (err) {
+        // A 404 here means AWS has no CUR defined for this account. That is a
+        // setup step in the AWS console, not a failure of this product, and
+        // saying so is more useful than "sync failed".
+        const message = err instanceof ApiError && err.status === 404
+          ? 'No Cost & Usage Report is defined in this AWS account. Create one in the AWS Billing console with "Include resource IDs" enabled, then run this again.'
+          : err instanceof ApiError ? err.message : 'Could not look up the Cost & Usage Report.';
+        toast(message, 'error');
         return;
       }
-      for (let i = 0; i < reportKeys.length; i++) {
-        let skipRows = 0;
-        let done = false;
-        while (!done) {
-          setCurProgress(`Ingesting file ${i + 1} of ${reportKeys.length} — ${skipRows.toLocaleString()} rows so far…`);
-          const result = await api.ingestCurStep(id, reportKeys[i], skipRows);
-          skipRows = result.rowsProcessed;
-          done = result.done;
+
+      const run = await api.startCurRun(id);
+
+      for (;;) {
+        const state = await api.getCollectionRun(run.id);
+        if (['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELED'].includes(state.status)) {
+          if (state.status === 'SUCCEEDED') {
+            toast('Cost & Usage Report ingested — Cost Allocation, Chargeback and Showback now have real per-resource data.', 'success');
+          } else {
+            // PARTIALLY_SUCCEEDED is surfaced as a failure on purpose: a
+            // billing period missing files is incomplete cost data, and
+            // presenting it as done is the defect this phase removes.
+            toast(state.errorSummary ?? state.explanation, 'error');
+          }
+          break;
         }
+        setCurProgress(`${state.explanation} (${state.progress.completedSteps}/${state.progress.totalSteps} files)`);
+        await new Promise((r) => setTimeout(r, 5000));
       }
-      await api.finalizeCur(id);
-      toast('Cost & Usage Report synced — Cost Allocation, Chargeback, and Showback now have real per-resource data.', 'success');
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Cost & Usage Report sync failed', 'error');
     } finally {
@@ -508,8 +572,13 @@ export function AwsAccountDetail() {
 
       {tab === 'Overview' && (
         <>
+          <ScanCoverageBanner health={scanHealth} />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <StatCard label="Total Resources" value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()} />
+            <StatCard
+              label="Total Resources"
+              value={(connection.resource_summary?.totalResources ?? resources.length).toLocaleString()}
+              caption={countQualifier(scanHealth) ?? undefined}
+            />
             <StatCard label="IAM Users / Roles / Policies" value={`${iamCounts.users} / ${iamCounts.roles} / ${iamCounts.policies}`} />
             <StatCard label="Last Sync" value={connection.last_sync_at ? formatDate(connection.last_sync_at, 'Never').split(',')[0] : 'Never'} />
             <StatCard label="Cost Explorer total" value={money(totalCost)} />

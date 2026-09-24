@@ -46,7 +46,7 @@ export function MenuAccessTree({ overrides, effective, onLevelChange, onReset }:
         <span className="text-slate-600 dark:text-slate-300 truncate">{label}</span>
         <div className="flex items-center gap-1.5 shrink-0">
           {override && (
-            <button
+            <button type="button"
               onClick={() => onReset(menuKey, override.id)}
               title={isGroupMode ? 'Remove this group grant' : 'Revert to role default'}
               className="text-[10px] text-slate-400 hover:text-brand-600 dark:hover:text-brand-400"
@@ -76,7 +76,7 @@ export function MenuAccessTree({ overrides, effective, onLevelChange, onReset }:
           <div key={mod.icon} className="border-b border-slate-50 dark:border-slate-800/60 last:border-0 py-0.5">
             <div className="flex items-center gap-1">
               {realChildren.length > 0 ? (
-                <button
+                <button type="button"
                   onClick={() => toggle(mod.icon)}
                   title={isExpanded ? 'Collapse submenus' : 'Expand submenus'}
                   className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0 p-0.5"

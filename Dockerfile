@@ -17,13 +17,37 @@ COPY . .
 # environment variables take precedence over .env files in Vite, so an empty
 # ENV would blank out the real URLs from .env.production.
 #
-# npx vite build directly, not `npm run build` (= tsc -b && vite build) --
-# matches the original monorepo's Cloudflare pipeline, see deploy.yml for why.
-RUN npx vite build --mode production
+# The package build script runs the TypeScript gate before bundling. Keep the
+# image build on the exact same release path as CI so an image can never ship
+# code that CI would reject.
+RUN npm run build
 
 FROM node:22-slim
 WORKDIR /app
-RUN npm install -g serve@14
+# Pin the runtime server so the image is reproducible and never resolves a
+# package when Cloud Run starts it.
+#
+# npm is then removed from the final image. The base image's bundled npm
+# vendors its own `tar`, which is where Trivy found CVE-2026-59873 (CRITICAL,
+# gzip-bomb DoS) plus two HIGH advisories -- reported against "tar
+# (package.json)", i.e. npm's copy, not an application dependency. This
+# container only serves static files: once `serve` is installed there is
+# nothing left for a package manager to do at runtime, so deleting npm both
+# clears those advisories and removes an installer from a production image.
+# serve is pinned at 14.2.6, not 14.2.4: 14.2.4 pulls serve-handler 6.1.6,
+# which pins minimatch 3.1.2 -- CVE-2026-26996 / -27903 / -27904 (three HIGH
+# ReDoS/DoS advisories). 14.2.6 pulls serve-handler 6.1.7 with minimatch 3.1.5,
+# past the fixed versions for all three.
+#
+# The OS upgrade clears libpcre2-8-0 CVE-2026-86145 / -89161 (out-of-bounds
+# write and memory corruption), fixed in the Debian package but not yet in the
+# base image tag.
+RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global --no-audit --no-fund serve@14.2.6 \
+  && npm uninstall --global npm \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /root/.npm
 COPY --from=build /app/dist ./dist
 # Run as an unprivileged user — the container only serves static files, so it
 # never needs root. This is a production hardening step, not cosmetic.

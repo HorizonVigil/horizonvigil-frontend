@@ -16,9 +16,10 @@ import { useFilters } from '../lib/filterContext';
 import { useResourcesUrlFilters } from '../lib/useResourcesUrlFilters';
 import { useSubmenuAccess } from '../lib/useCanSeeSubmenu';
 import { api, type CloudResource, type ResourceCatalogEntry, type ResourceLifecycleEvent } from '../lib/api';
+import { OwnershipPanel } from '../components/resources/OwnershipPanel';
 
 const CORE_CATEGORIES = ['Compute', 'Storage', 'Database', 'Networking'] as const;
-const TABS = ['All Resources', 'Global Search', 'Resource Relationships', 'Tags Explorer', 'Resource Timeline'] as const;
+const TABS = ['All Resources', 'Global Search', 'Resource Relationships', 'Ownership', 'Tags Explorer', 'Resource Timeline'] as const;
 type Tab = typeof TABS[number];
 
 /** Best-effort human label for a catalog `service` key (e.g. "ec2" -> "EC2") —
@@ -707,11 +708,6 @@ export function Resources() {
 
   // Provider-filtered connections — used to pass the right connection IDs
   // to the API when a provider filter is active.
-  const providerConnectionIds = useMemo(() => {
-    if (providerFilter === 'all') return null;
-    return connections.filter(c => c.provider === providerFilter).map(c => c.id);
-  }, [connections, providerFilter]);
-
   // Provider-filtered dashboard data — when a provider filter is active,
   // derive all dashboard aggregates from providerFilteredResources instead
   // of the org-wide dashboard. This ensures charts, KPIs, and donuts only
@@ -817,11 +813,6 @@ export function Resources() {
     for (const r of resources) if (r.region) counts[r.region] = (counts[r.region] ?? 0) + 1;
     return counts;
   }, [resources]);
-  const workspaceRecentEvents = useMemo(() => {
-    if (!isWorkspaceView) return recentEvents;
-    return recentEvents.filter(e => catalogByKey.get(e.resource_type_key)?.service === presetService).slice(0, 20);
-  }, [recentEvents, isWorkspaceView, catalogByKey, presetService]);
-
   const trend = dashboard?.trend30d ?? [];
   const trendAdded = trend.reduce((s, p) => s + p.created, 0);
   const trendDeleted = trend.reduce((s, p) => s + p.deleted, 0);
@@ -1048,7 +1039,7 @@ export function Resources() {
             </p>
           )}
 
-          <DataTable columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
+          <DataTable tableId="resources.inventory" columns={columns} rows={providerFilteredResources} rowKey={r => r.id} onRowClick={setSelected} emptyMessage={providerFilter !== 'all' ? `No ${providerFilter === 'gcp' ? 'GCP' : providerFilter === 'azure' ? 'Azure' : 'AWS'} resources discovered yet. Connect ${providerFilter === 'gcp' ? 'a GCP' : providerFilter === 'azure' ? 'an Azure' : 'an AWS'} account and run a sync from Cloud Accounts.` : "No resources discovered yet — connect an AWS, GCP, or Azure account and run a sync from Cloud Accounts."} />
         </>
       )}
 
@@ -1102,6 +1093,15 @@ export function Resources() {
           </div>
         </div>
       )}
+
+      {/*
+        Ownership sits beside Tags Explorer deliberately. Tag rules are the
+        path for customers who already tag; on this estate 9 of 1,799
+        resources carry any tag at all, so direct assignment is the one that
+        works today and the panel leads with coverage rather than a list of
+        "Unassigned".
+      */}
+      {tab === 'Ownership' && <OwnershipPanel />}
 
       {tab === 'Tags Explorer' && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">

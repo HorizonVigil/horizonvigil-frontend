@@ -9,7 +9,83 @@ interface Props {
   connections: UnifiedAccountRow[];
 }
 
-interface ScanCountState { repo: number; container: number; urlApi: number }
+/**
+ * Each count carries whether the read that produced it failed, so a zero can
+ * be reported as "nothing recorded" or "could not be read" rather than both
+ * collapsing into the same sentence.
+ */
+interface ScanCountState {
+  repo: number;
+  repoFailed: boolean;
+  container: number;
+  containerFailed: boolean;
+  urlApi: number;
+  urlApiFailed: boolean;
+}
+
+interface RepoCountState {
+  value: number;
+  /** Installations whose repository list could not be read. */
+  unreadable: number;
+  /** The installation list itself could not be read. */
+  failed: boolean;
+}
+
+interface ClusterInventoryState {
+  pods: number;
+  nodes: number;
+  failed: boolean;
+}
+
+/**
+ * Each of these keeps three outcomes apart that a single "0" cannot:
+ * still loading, read successfully and empty, and could not be read.
+ */
+function describeRepositories(
+  repos: RepoCountState | null,
+  scans: ScanCountState | null,
+): string {
+  if (repos === null) return 'Loading…';
+  if (repos.failed) return 'Connected repositories could not be read';
+
+  const scanText =
+    scans === null
+      ? 'scan totals loading'
+      : scans.repoFailed
+        ? 'scan totals could not be read'
+        : `${scans.repo} SAST/SCA/Secrets scans recorded`;
+
+  if (repos.unreadable > 0) {
+    return `at least ${repos.value} connected · ${repos.unreadable} installation(s) could not be read · ${scanText}`;
+  }
+
+  return repos.value === 0
+    ? 'No repositories connected'
+    : `${repos.value} connected · ${scanText}`;
+}
+
+function describeScans(
+  scans: ScanCountState | null,
+  key: 'container' | 'urlApi',
+  scanner: string,
+): string {
+  if (scans === null) return 'Loading…';
+
+  const failed = key === 'container' ? scans.containerFailed : scans.urlApiFailed;
+  if (failed) return `${scanner} scan history could not be read`;
+
+  const count = scans[key];
+  return count > 0 ? `${count} ${scanner} scans recorded` : `No ${scanner} scans recorded yet`;
+}
+
+function describeCluster(cluster: ClusterInventoryState | null): string {
+  if (cluster === null) return 'Loading…';
+  if (cluster.failed) return 'Cluster inventory could not be read';
+
+  return cluster.pods > 0
+    ? `${cluster.pods} pods / ${cluster.nodes} nodes discovered live — no vulnerability scanner connected yet`
+    : 'No cluster connected';
+}
 
 /**
  * Never a fabricated scanned/total fraction -- real descriptive text per
@@ -21,16 +97,36 @@ interface ScanCountState { repo: number; container: number; urlApi: number }
  * nothing in the schema actually tracks.
  */
 export function ScanCoverage({ connections }: Props) {
-  const [repoCount, setRepoCount] = useState<number | null>(null);
-  const [scanCounts, setScanCounts] = useState<ScanCountState>({ repo: 0, container: 0, urlApi: 0 });
-  const [clusterInventory, setClusterInventory] = useState<{ pods: number; nodes: number } | null>(null);
+  const [repoCount, setRepoCount] = useState<RepoCountState | null>(null);
+  const [scanCounts, setScanCounts] = useState<ScanCountState | null>(null);
+  const [clusterInventory, setClusterInventory] = useState<ClusterInventoryState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    /*
+     * Every count here used to fall back to 0 on failure -- a per-installation
+     * `.catch(() => ({ items: [] }))`, a `setRepoCount(0)` on a total failure,
+     * and a `: 0` for each rejected scan/cluster query. The panel then said
+     * "No repositories connected" and "No Trivy scans recorded yet" for an
+     * estate whose APIs simply could not be read.
+     *
+     * A read that failed is tracked separately from a read that returned
+     * nothing, so the row can say which happened.
+     */
     void api.getGitInstallations().then(async ({ items: installations }) => {
-      const repoLists = await Promise.all(installations.map(inst => api.getInstallationRepos(inst.id).catch(() => ({ items: [] }))));
-      if (!cancelled) setRepoCount(repoLists.reduce((sum, r) => sum + r.items.length, 0));
-    }).catch(() => { if (!cancelled) setRepoCount(0); });
+      const repoLists = await Promise.allSettled(installations.map(inst => api.getInstallationRepos(inst.id)));
+      if (cancelled) return;
+
+      const unreadable = repoLists.filter(r => r.status === 'rejected').length;
+      const counted = repoLists.reduce(
+        (sum, r) => (r.status === 'fulfilled' ? sum + r.value.items.length : sum),
+        0,
+      );
+
+      setRepoCount({ value: counted, unreadable, failed: false });
+    }).catch(() => {
+      if (!cancelled) setRepoCount({ value: 0, unreadable: 0, failed: true });
+    });
 
     void Promise.allSettled([
       api.listScans('semgrep', { limit: 1 }), api.listScans('gitleaks', { limit: 1 }), api.listScans('trufflehog', { limit: 1 }),
@@ -40,17 +136,27 @@ export function ScanCoverage({ connections }: Props) {
     ]).then(results => {
       if (cancelled) return;
       const total = (idx: number) => (results[idx].status === 'fulfilled' ? (results[idx] as PromiseFulfilledResult<{ total: number }>).value.total : 0);
+      const failed = (...idx: number[]) => idx.some(i => results[i].status === 'rejected');
+
       setScanCounts({
         repo: total(0) + total(1) + total(2) + total(3) + total(4),
+        repoFailed: failed(0, 1, 2, 3, 4),
         container: total(5),
+        containerFailed: failed(5),
         urlApi: total(6),
+        urlApiFailed: failed(6),
       });
     });
 
     void Promise.allSettled([api.getEksPods({ limit: 1 }), api.getGkePods({ limit: 1 }), api.getEksNodes({ limit: 1 })]).then(results => {
       if (cancelled) return;
       const total = (r: PromiseSettledResult<{ pagination: { total: number } }>) => (r.status === 'fulfilled' ? r.value.pagination.total : 0);
-      setClusterInventory({ pods: total(results[0]) + total(results[1]), nodes: total(results[2]) });
+
+      setClusterInventory({
+        pods: total(results[0]) + total(results[1]),
+        nodes: total(results[2]),
+        failed: results.some(r => r.status === 'rejected'),
+      });
     });
 
     return () => { cancelled = true; };
@@ -75,11 +181,11 @@ export function ScanCoverage({ connections }: Props) {
         </div>
       ),
     },
-    { label: 'Repositories', body: <span className="text-xs text-slate-500 dark:text-slate-400">{repoCount === null ? 'Loading…' : repoCount === 0 ? 'No repositories connected' : `${repoCount} connected · ${scanCounts.repo} SAST/SCA/Secrets scans recorded`}</span> },
-    { label: 'Container Images', body: <span className="text-xs text-slate-500 dark:text-slate-400">{scanCounts.container > 0 ? `${scanCounts.container} Trivy scans recorded` : 'No Trivy scans recorded yet'}</span> },
-    { label: 'URL & API', body: <span className="text-xs text-slate-500 dark:text-slate-400">{scanCounts.urlApi > 0 ? `${scanCounts.urlApi} Nuclei scans recorded` : 'No Nuclei scans recorded yet'}</span> },
+    { label: 'Repositories', body: <span className="text-xs text-slate-500 dark:text-slate-400">{describeRepositories(repoCount, scanCounts)}</span> },
+    { label: 'Container Images', body: <span className="text-xs text-slate-500 dark:text-slate-400">{describeScans(scanCounts, 'container', 'Trivy')}</span> },
+    { label: 'URL & API', body: <span className="text-xs text-slate-500 dark:text-slate-400">{describeScans(scanCounts, 'urlApi', 'Nuclei')}</span> },
     { label: 'Server & VM', body: <Badge tone="neutral">No scanner connected</Badge> },
-    { label: 'Cluster & Runtime', body: <span className="text-xs text-slate-500 dark:text-slate-400">{clusterInventory === null ? 'Loading…' : clusterInventory.pods > 0 ? `${clusterInventory.pods} pods / ${clusterInventory.nodes} nodes discovered live — no vulnerability scanner connected yet` : 'No cluster connected'}</span> },
+    { label: 'Cluster & Runtime', body: <span className="text-xs text-slate-500 dark:text-slate-400">{describeCluster(clusterInventory)}</span> },
   ];
 
   return (

@@ -34,7 +34,7 @@ const CONNECTION_METHOD_LABELS: Record<string, string> = {
   service_principal: 'Service principal',
 };
 
-const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0 };
+const DEFAULT_RECOMMENDATION_RULES: RecommendationRules = { idleDetectionEnabled: true, rightsizingEnabled: true, rightsizingCpuThresholdPct: 20, minMonthlySavingsToFlag: 0, minCpuDataPointsToFlag: 3 };
 
 function formatSafeDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -272,6 +272,10 @@ export function Settings() {
           typeof value.minMonthlySavingsToFlag === 'number'
             ? value.minMonthlySavingsToFlag
             : DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
+        minCpuDataPointsToFlag:
+          typeof value.minCpuDataPointsToFlag === 'number'
+            ? value.minCpuDataPointsToFlag
+            : DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag,
       });
     }
 
@@ -486,6 +490,12 @@ export function Settings() {
         1_000_000_000,
         DEFAULT_RECOMMENDATION_RULES.minMonthlySavingsToFlag,
       ),
+      minCpuDataPointsToFlag: Math.round(parseBoundedNumber(
+        String(rules.minCpuDataPointsToFlag),
+        1,
+        30,
+        DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag,
+      )),
     };
 
     try {
@@ -860,6 +870,13 @@ export function Settings() {
                 onChange={e => setRules(r => ({ ...r, rightsizingCpuThresholdPct: Number(e.target.value) || DEFAULT_RECOMMENDATION_RULES.rightsizingCpuThresholdPct }))}
                 className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
             </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-500 dark:text-slate-400">Minimum days of CPU data required before flagging</span>
+              <input type="number" min={1} max={30} value={rules.minCpuDataPointsToFlag} disabled={!rules.rightsizingEnabled}
+                onChange={e => setRules(r => ({ ...r, minCpuDataPointsToFlag: Number(e.target.value) || DEFAULT_RECOMMENDATION_RULES.minCpuDataPointsToFlag }))}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white disabled:opacity-50" />
+              <span className="text-xs text-slate-400 dark:text-slate-500">A single CPU sample isn't enough evidence to recommend a resize — this sets the floor.</span>
+            </label>
 
             <label className="flex flex-col gap-1 text-sm pt-1">
               <span className="text-slate-500 dark:text-slate-400">Minimum $/month savings to flag (reduces noise)</span>
@@ -887,7 +904,7 @@ export function Settings() {
         <div className="flex flex-col gap-4 max-w-2xl">
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-3">
             <h3 className="text-sm font-medium text-slate-600 dark:text-slate-300">Connect a GitHub repository</h3>
-            <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the CloudOps360 GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
+            <p className="text-xs text-slate-400">Powers Auto-PR on Guided Fix — install the HorizonVigil GitHub App on the repo(s) you want it to open pull requests against, then paste the numeric Installation ID from the URL GitHub redirects you to (the number after <span className="font-mono">/installations/</span>) below.</p>
             <div className="flex gap-2">
               <input aria-label="GitHub installation ID" value={connectInstallationId} inputMode="numeric" maxLength={20} onChange={e => setConnectInstallationId(e.target.value)} placeholder="Installation ID, e.g. 12345678" className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white" />
               <button type="button" onClick={() => void handleConnectGit()} disabled={gitConnecting} className="rounded-md bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 disabled:opacity-50">{gitConnecting ? 'Connecting…' : 'Connect'}</button>

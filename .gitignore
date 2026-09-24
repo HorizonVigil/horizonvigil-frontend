@@ -8,3 +8,4 @@ vite.config.js
 /e2e/.auth/
 /playwright-report/
 /test-results/
+lint-report.json

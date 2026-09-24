@@ -3,43 +3,77 @@ import { useSearchParams } from 'react-router-dom';
 import { useFilters } from './filterContext';
 
 /**
- * Two-way syncs the global region/account filters to the current page's
- * ?region=/?account= query params, scoped to the Resources section (the
- * global FilterBar context itself stays page-local everywhere else in the
- * app -- this doesn't change that, it just mirrors it into the URL on the
- * pages that call it).
+ * Synchronizes the global Resources filters with the page URL:
  *
- * Reads once on arrival, so a bookmarked or shared filtered link restores
- * the filter instead of silently landing on "All Accounts" / "All Regions".
- * Writes on every change after that, so the current view stays
- * bookmarkable/shareable as the user adjusts filters -- including right
- * after navigating to a fresh Resources page whose own link didn't happen
- * to carry the query string forward itself.
+ *   ?region=<region>&account=<account>
+ *
+ * URL state is restored once when this hook is mounted, then filter changes
+ * are reflected back into the URL using history replacement so filtering does
+ * not create a browser-history entry for every click.
+ *
+ * The hook intentionally only owns the Resources page's URL representation.
+ * It does not change the global FilterBar's broader page-local behavior.
  */
-export function useResourcesUrlFilters() {
+export function useResourcesUrlFilters(): void {
   const { region, account, setRegion, setAccount } = useFilters();
   const [searchParams, setSearchParams] = useSearchParams();
+
   const appliedFromUrl = useRef(false);
+  const writeGeneration = useRef(0);
 
   useEffect(() => {
     if (appliedFromUrl.current) return;
+
     appliedFromUrl.current = true;
+
     const urlRegion = searchParams.get('region');
     const urlAccount = searchParams.get('account');
-    if (urlRegion) setRegion(urlRegion);
-    if (urlAccount) setAccount(urlAccount);
+
+    if (urlRegion) {
+      setRegion(urlRegion);
+    }
+
+    if (urlAccount) {
+      setAccount(urlAccount);
+    }
   }, [searchParams, setRegion, setAccount]);
 
   useEffect(() => {
     if (!appliedFromUrl.current) return;
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (region === 'all') next.delete('region');
-      else next.set('region', region);
-      if (account === 'all') next.delete('account');
-      else next.set('account', account);
-      return next;
-    }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [region, account]);
+
+    const generation = ++writeGeneration.current;
+
+    setSearchParams(
+      previous => {
+        // If another effect cycle has superseded this update, avoid applying
+        // stale URL state.
+        if (generation !== writeGeneration.current) {
+          return previous;
+        }
+
+        const next = new URLSearchParams(previous);
+
+        setOrDeleteFilter(next, 'region', region);
+        setOrDeleteFilter(next, 'account', account);
+
+        return next;
+      },
+      { replace: true },
+    );
+  }, [region, account, setSearchParams]);
+}
+
+function setOrDeleteFilter(
+  params: URLSearchParams,
+  key: 'region' | 'account',
+  value: string,
+): void {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+
+  if (!normalized || normalized === 'all') {
+    params.delete(key);
+    return;
+  }
+
+  params.set(key, normalized);
 }

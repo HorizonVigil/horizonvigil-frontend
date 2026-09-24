@@ -1,9 +1,15 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
 const DEMO_DATA_KEY = 'horizonvigil_demo_data';
+export const demoDataAvailable = import.meta.env.MODE !== 'production';
 
 function getInitialEnabled(): boolean {
-  return localStorage.getItem(DEMO_DATA_KEY) === 'on';
+  if (!demoDataAvailable) return false;
+  try {
+    return localStorage.getItem(DEMO_DATA_KEY) === 'on';
+  } catch {
+    return false;
+  }
 }
 
 interface DemoDataContextType {
@@ -26,11 +32,23 @@ export function DemoDataProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabledState] = useState<boolean>(getInitialEnabled);
 
   useEffect(() => {
-    localStorage.setItem(DEMO_DATA_KEY, enabled ? 'on' : 'off');
+    try {
+      if (!demoDataAvailable) {
+        localStorage.removeItem(DEMO_DATA_KEY);
+        return;
+      }
+      localStorage.setItem(DEMO_DATA_KEY, enabled ? 'on' : 'off');
+    } catch {
+      // Demo mode remains active until this tab is closed.
+    }
   }, [enabled]);
 
-  const setEnabled = useCallback((next: boolean) => setEnabledState(next), []);
-  const toggle = useCallback(() => setEnabledState(e => !e), []);
+  const setEnabled = useCallback((next: boolean) => {
+    if (demoDataAvailable) setEnabledState(next);
+  }, []);
+  const toggle = useCallback(() => {
+    if (demoDataAvailable) setEnabledState(e => !e);
+  }, []);
 
   return <DemoDataContext.Provider value={{ enabled, setEnabled, toggle }}>{children}</DemoDataContext.Provider>;
 }

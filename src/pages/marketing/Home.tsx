@@ -1,453 +1,183 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { MarketingNav } from '../../components/marketing/MarketingNav';
 import { MarketingFooter } from '../../components/marketing/MarketingFooter';
-import { MARKETING_PLANS, formatPrice, CONTACT_SALES_HREF, BOOK_DEMO_HREF } from '../../lib/marketingContent';
+import { BOOK_DEMO_HREF, CONTACT_SALES_HREF, MARKETING_PLANS, formatPrice } from '../../lib/marketingContent';
 import { scrollToSection } from '../../lib/scrollToSection';
 
-const MODULES = [
-  { name: 'Cloud Accounts', desc: 'Connect AWS accounts and GCP projects once — access-key, cross-account role, or service-account impersonation, your choice.' },
-  { name: 'Resources & Containers', desc: 'A live, searchable inventory across EC2, S3, RDS, Compute Engine, Cloud Storage, Cloud SQL, Cloud Run, and Artifact Registry.' },
-  { name: 'Cost Management', desc: 'Real spend data with anomaly detection, broken down by account and service — not just a bill you scroll through.' },
-  { name: 'Cost Optimization', desc: 'Specific savings recommendations with an exclusion workflow for what\'s intentional, plus one-click and Auto-PR remediation via your connected GitHub repos.' },
-  { name: 'Vulnerability Management', desc: 'Findings from across your fleet, deduplicated and triaged by real severity, not just a raw scanner feed.' },
-  { name: 'Issues', desc: 'Cost, security, and alert items that need attention, unified into one severity-sorted list — instead of checking three modules to know what\'s actually urgent.' },
-  { name: 'Clusters', desc: 'EKS and GKE in one view — workloads, node health, and cluster-level issues alongside everything else.' },
-  { name: 'Monitoring & Alerts', desc: 'Resource-level metrics and alerting that already knows which account and org a resource belongs to.' },
-  { name: 'Automation', desc: 'One-click and scheduled remediation — stop/start, right-sizing, and policy-driven fixes with a full audit trail.' },
-  { name: 'AI Copilot', desc: 'Ask about your environment in plain language and get answers grounded in your actual connected-account data, with cited sources — not a generic chatbot bolted on the side.' },
-  { name: 'Reports & Dashboards', desc: 'Custom dashboards and scheduled reports built from the same data your team already sees day to day.' },
-  { name: 'Users & RBAC', desc: 'Org-scoped roles down to the individual account — the same access model backing every module above.' },
+const DECISION_STAGES = [
+  { number: '01', title: 'Explain', description: 'Turn a cost spike, exposure, or operational change into a plain-language explanation with the affected resources and likely cause.' },
+  { number: '02', title: 'Verify', description: 'Check the recommendation against live inventory, provider evidence, ownership, and the scope your role is allowed to see.' },
+  { number: '03', title: 'Advise', description: 'Compare practical next steps, expected impact, and risk before your team chooses what should happen.' },
+  { number: '04', title: 'Record', description: 'Keep the evidence, human decision, owner, and outcome together so the reasoning remains reviewable later.' },
+];
+
+const PLATFORM_PILLARS = [
+  { title: 'FinOps', metric: 'Spend → decision', description: 'Explain anomalies, identify the resources behind them, and turn savings opportunities into owned decisions.', bullets: ['Cost allocation and trends', 'Anomaly investigation', 'Evidence-backed optimization'] },
+  { title: 'Security', metric: 'Finding → priority', description: 'Connect posture, exposure, identity, and provider-native evidence so teams can prioritize what is actually risky.', bullets: ['Cloud posture and exposure', 'Resource-level evidence', 'Provider-native signals'] },
+  { title: 'Operations', metric: 'Signal → owner', description: 'See resources, clusters, monitoring, alerts, and change context in the same operating picture.', bullets: ['Multi-account inventory', 'Cluster and workload health', 'Monitoring and alert context'] },
+  { title: 'Governance', metric: 'Decision → record', description: 'Keep access scoped, changes deliberate, and every product write attributable to a person and time.', bullets: ['Organization-scoped RBAC', 'Human approval by design', 'Auditable decision history'] },
 ];
 
 const PROVIDERS = [
-  { name: 'AWS', services: ['EC2', 'S3', 'RDS', 'EKS', 'IAM', 'CloudTrail', 'Cost Explorer'] },
-  { name: 'Google Cloud', services: ['Compute Engine', 'Cloud Storage', 'Cloud SQL', 'GKE', 'Cloud Run', 'Artifact Registry'] },
-];
-
-const BENEFITS = [
-  { stat: 'One', label: 'login for every cloud account you manage, instead of N separate consoles.' },
-  { stat: 'Minutes', label: 'from connecting an account to seeing its full resource inventory.' },
-  { stat: 'Automatic', label: 'cost anomaly detection and savings recommendations, surfaced without a query.' },
-  { stat: 'Every action', label: 'audit-logged — who ran what remediation, on which resource, and when.' },
-];
-
-const AI_FEATURES = [
-  { title: 'Cost anomaly detection', desc: 'Spend that breaks from an account\'s own baseline is flagged automatically, before it shows up as a surprise on the bill.' },
-  { title: 'Savings recommendations', desc: 'Idle and oversized resources are surfaced with a specific, actionable fix — not a generic "reduce costs" tip.' },
-  { title: 'Finding prioritization', desc: 'Vulnerability and misconfiguration findings are ranked by real exposure, so triage starts with what actually matters.' },
-  { title: 'Remediation suggestions', desc: 'Common fixes (stop an idle instance, tighten a security group) are proposed inline, one click from being applied.' },
-  { title: 'AI Copilot chat', desc: 'A conversational assistant that answers questions using your live account data — not a static model with no idea what you\'ve actually got connected.' },
-];
-
-const COMPLIANCE_BENCHMARKS = [
-  { name: 'CIS AWS Foundations', desc: 'Automated checks against the CIS benchmark, scored per account with a live pass rate.' },
-  { name: 'PCI DSS', desc: 'Continuous evaluation against PCI DSS controls — not a once-a-year manual questionnaire.' },
-  { name: 'ISO 27001', desc: 'ISO 27001 control checks run on the same schedule as everything else, no separate audit tool required.' },
-];
-
-const SECURITY_FEATURES = [
-  { title: 'Credentials encrypted at rest', desc: 'AWS keys and GCP service-account keys are AES-GCM encrypted before they ever touch storage, with a fresh IV per record.' },
-  { title: 'Org-scoped RBAC', desc: 'Every role grant is scoped to an organization and, where it matters, to a single cloud account — not a blanket admin toggle.' },
-  { title: 'Full audit log', desc: 'Every write — connecting an account, running a remediation, changing a role — is recorded with who, what, and when.' },
-  { title: 'Rate-limited by design', desc: 'API abuse protection is enforced atomically at the database layer, consistent across every instance of every service.' },
-  { title: 'Compliance mappings', desc: 'SOC 2 and CIS benchmark mappings on Business plans and above; ISO 27001 and HIPAA-ready posture on Enterprise.' },
-  { title: 'SSO / SAML', desc: 'Single sign-on on Professional and above; full SAML SSO on Business and Enterprise.' },
+  { name: 'AWS', detail: 'Inventory, cost, security, clusters, monitoring, and provider-native evidence.' },
+  { name: 'Google Cloud', detail: 'Projects, resources, cost, GKE, Cloud Run, Artifact Registry, and operational context.' },
+  { name: 'Azure', detail: 'A dedicated connector and workspace are rolling out through the V1 delivery plan.' },
 ];
 
 const FAQS = [
-  { q: 'Which clouds does HorizonVigil support today?', a: 'AWS and Google Cloud, both with real, live scanning — not a roadmap promise. Azure support is planned but not yet built; we\'d rather ship two clouds well than three clouds half-finished.' },
-  { q: 'How does account access work?', a: 'For AWS, connect via a scoped access key or a cross-account IAM role — no long-lived key required if you use the role. For GCP, connect via a service-account key or service-account impersonation.' },
-  { q: 'Is there a free plan?', a: 'Yes. Free connects one cloud account for two users, with 7-day data retention — enough to see real value before you pay anything.' },
-  { q: 'Can I cancel or change plans anytime?', a: 'Yes, from the in-app billing portal. Downgrades and cancellations take effect at the end of your current billing period; there\'s no lock-in contract below Enterprise.' },
-  { q: 'What happens to my data if I downgrade?', a: 'Nothing is deleted. Your resource inventory and history stay intact — only your data-retention window and included limits change to match the new plan.' },
-  { q: 'Do you offer annual billing?', a: 'Yes — every paid plan has an annual price roughly 20% below paying monthly, shown on the pricing page.' },
+  { question: 'What is Horizon Intelligence?', answer: 'It is the decision layer inside HorizonVigil. It brings together cloud evidence, explains what changed, verifies the supporting data, advises the next step, and keeps the human decision attached to the outcome.' },
+  { question: 'Does HorizonVigil make changes in my cloud?', answer: 'No. V1 connects read-only and keeps a human in control. It can prepare guidance, commands, or a reviewable handoff, but it does not silently mutate cloud resources.' },
+  { question: 'Which providers are available?', answer: 'AWS and Google Cloud are the established production paths. Azure has its own connector and workspace and is being rolled out through the V1 plan. Provider coverage remains explicit so a configured integration is never mistaken for collected evidence.' },
+  { question: 'Can I start without a sales call?', answer: 'Yes. The Free plan connects one cloud account for two users. Paid plans add account scale, users, automation capacity, retention, and support.' },
 ];
 
 function Section({ id, className = '', children }: { id?: string; className?: string; children: React.ReactNode }) {
-  return <section id={id} className={`max-w-6xl mx-auto px-5 py-20 ${className}`}>{children}</section>;
+  return <section id={id} className={`mx-auto max-w-6xl px-5 py-20 sm:px-6 lg:px-8 ${className}`}>{children}</section>;
 }
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-3">{children}</div>;
+  return <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-brand-600 dark:text-brand-400">{children}</p>;
 }
 
 export function MarketingHome() {
   const { hash } = useLocation();
 
-  // Covers loading /#security directly, and navigating in from a different
-  // page (e.g. the footer's Security link while on /pricing) -- Home mounts
-  // fresh with the hash already present. Does NOT handle a click while
-  // already on "/": MarketingNav/MarketingFooter intercept that case
-  // directly via scrollToSection, since relying on this hash-watching
-  // effect for a same-pathname hash-only change turned out to be exactly
-  // the case that didn't reliably fire.
+  useEffect(() => {
+    document.title = 'HorizonVigil — AI Cloud Decision Intelligence';
+    const description = 'HorizonVigil turns cloud cost, security, and operational signals into explained, verified, human-governed decisions across AWS, Google Cloud, and Azure.';
+    let meta = document.querySelector<HTMLMetaElement>('meta[name=description]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'description';
+      document.head.appendChild(meta);
+    }
+    meta.content = description;
+  }, []);
+
   useEffect(() => {
     if (!hash) return;
-    const id = hash.slice(1);
-    const raf = requestAnimationFrame(() => { scrollToSection(id); });
-    return () => cancelAnimationFrame(raf);
+    const id = decodeURIComponent(hash.slice(1));
+    window.setTimeout(() => scrollToSection(id), 0);
   }, [hash]);
 
   return (
-    <div className="bg-white dark:bg-slate-950">
+    <div className="min-h-screen overflow-x-hidden bg-white text-slate-900 dark:bg-slate-950 dark:text-white">
       <MarketingNav />
-      <Hero />
-      <TrustBar />
-      <ProductOverview />
-      <PlatformCapabilities />
-      <CloudProviders />
-      <ArchitectureOverview />
-      <AICapabilities />
-      <SecurityCompliance />
-      <ComplianceBenchmarks />
-      <ProductPreview />
-      <PricingTeaser />
-      <CustomerBenefits />
-      <FAQ />
-      <FinalCTA />
+      <main id="main-content">
+        <Hero />
+        <TrustBar />
+        <DecisionIntelligence />
+        <Platform />
+        <DecisionWorkspace />
+        <Coverage />
+        <Security />
+        <PricingTeaser />
+        <FAQ />
+        <FinalCTA />
+      </main>
       <MarketingFooter />
     </div>
   );
 }
 
 function Hero() {
+  const decisions = [
+    ['Critical', 'Public access changed on production storage', 'Security · AWS · 8 min ago', 'bg-rose-400'],
+    ['High', 'Compute spend is 34% above its baseline', 'FinOps · Google Cloud · 21 min ago', 'bg-amber-400'],
+    ['Medium', 'Production alarm has no assigned owner', 'Operations · AWS · 1 hr ago', 'bg-sky-400'],
+  ];
   return (
-    <Section className="pt-20 pb-16">
-      <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400 mb-4">
-          AWS + Google Cloud, one login
-        </p>
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
-          One control plane for every AWS and GCP account you run.
-        </h1>
-        <p className="text-lg text-slate-600 dark:text-slate-300 mt-6 max-w-xl text-balance">
-          Inventory, cost, security, and automated remediation — unified across every cloud account your team owns, without stitching together five different consoles.
-        </p>
-        <div className="flex items-center gap-3 mt-8 flex-wrap">
-          <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">
-            Start free — no credit card
-          </Link>
-          <a href={BOOK_DEMO_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">
-            Book a demo
-          </a>
+    <section className="relative isolate overflow-hidden border-b border-slate-200 bg-slate-950 text-white dark:border-slate-800">
+      <div className="absolute inset-0 -z-10 opacity-70" aria-hidden="true">
+        <div className="absolute left-[-12rem] top-[-8rem] h-[32rem] w-[32rem] rounded-full bg-brand-600/25 blur-3xl" />
+        <div className="absolute bottom-[-14rem] right-[-8rem] h-[30rem] w-[30rem] rounded-full bg-cyan-500/15 blur-3xl" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(148,163,184,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.06)_1px,transparent_1px)] bg-[size:48px_48px]" />
+      </div>
+      <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-20 sm:px-6 lg:grid-cols-[1.05fr_.95fr] lg:px-8 lg:py-28">
+        <div>
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-400/30 bg-brand-500/10 px-3 py-1.5 text-xs font-medium text-brand-100">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />AI cloud decision intelligence
+          </div>
+          <h1 className="max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">Turn cloud signals into governed decisions.</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">HorizonVigil unifies cost, security, operations, and change evidence. Horizon Intelligence explains what changed, verifies the evidence, and advises the next step. Your team decides.</p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link to="/signup" className="rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-900/30 transition hover:bg-brand-500">Start free</Link>
+            <a href="/#intelligence" className="rounded-lg border border-slate-600 bg-slate-900/60 px-5 py-3 text-sm font-semibold text-white transition hover:border-slate-400 hover:bg-slate-800">See how Intelligence works</a>
+            <a href={BOOK_DEMO_HREF} className="px-3 py-3 text-sm font-semibold text-slate-300 transition hover:text-white">Book a demo →</a>
+          </div>
+          <p className="mt-5 text-xs text-slate-500">Read-only by default · Human approval · Decision history</p>
+        </div>
+        <div className="relative" aria-label="Illustrative Horizon Intelligence decision queue">
+          <div className="absolute -inset-5 rounded-[2rem] bg-brand-500/10 blur-2xl" aria-hidden="true" />
+          <div className="relative overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl shadow-black/40">
+            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+              <div><p className="text-xs font-semibold text-white">Decision queue</p><p className="mt-0.5 text-[11px] text-slate-500">Prioritized across your cloud estate</p></div>
+              <span className="rounded-full bg-emerald-400/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">Evidence current</span>
+            </div>
+            <div className="space-y-3 p-4">
+              {decisions.map(([severity, title, meta, color]) => (
+                <div key={title} className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400"><span className={`h-1.5 w-1.5 rounded-full ${color}`} />{severity}</p><p className="mt-2 text-sm font-medium leading-5 text-slate-100">{title}</p><p className="mt-1 text-[11px] text-slate-500">{meta}</p></div>
+                    <span className="shrink-0 rounded-md border border-slate-700 px-2 py-1 text-[10px] font-medium text-slate-300">Review</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-slate-800 bg-slate-950/50 px-5 py-3 text-[10px] text-slate-500">Illustrative product view</div>
+          </div>
         </div>
       </div>
-    </Section>
+    </section>
   );
 }
 
 function TrustBar() {
-  const items = ['AWS', 'Google Cloud', 'EKS', 'GKE', 'AES-256 encryption', 'SOC 2 mapped'];
-  return (
-    <div className="border-y border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
-      <div className="max-w-6xl mx-auto px-5 py-6 flex items-center justify-center gap-x-8 gap-y-3 flex-wrap text-sm font-medium text-slate-500 dark:text-slate-400">
-        {items.map(i => <span key={i}>{i}</span>)}
-      </div>
-    </div>
-  );
+  return <div id="coverage" className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50"><div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-y divide-slate-200 px-5 sm:px-6 md:grid-cols-4 md:divide-y-0 lg:px-8 dark:divide-slate-800">
+    {[
+      ['AWS + GCP', 'Production cloud paths'], ['Azure', 'Dedicated V1 connector'], ['101', 'Registered AWS service scanners'], ['Read-only', 'Default connection model'],
+    ].map(([value, label]) => <div key={value} className="px-5 py-6 text-center"><p className="text-lg font-semibold text-slate-900 dark:text-white">{value}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{label}</p></div>)}
+  </div></div>;
 }
 
-function ProductOverview() {
-  return (
-    <Section>
-      <div className="grid lg:grid-cols-[minmax(0,22rem)_1fr] gap-10 items-start">
-        <div>
-          <Eyebrow>Product overview</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Everything your cloud ops team checks daily, in one place.</h2>
-          <p className="text-slate-600 dark:text-slate-300 mt-4">
-            HorizonVigil connects directly to your AWS accounts and GCP projects, builds a live inventory, and layers cost, security, and automation on top — so the answer to "what's running, what does it cost, and is it safe" is always one login away.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-6 content-start">
-          {BENEFITS.map(b => (
-            <div key={b.label}>
-              <div className="text-3xl font-bold text-brand-600 dark:text-brand-400 mb-2">{b.stat}</div>
-              <div className="text-sm text-slate-600 dark:text-slate-300">{b.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Section>
-  );
+function DecisionIntelligence() {
+  return <Section id="intelligence"><div className="mx-auto max-w-3xl text-center"><Eyebrow>Horizon Intelligence</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A decision system, not another stream of findings.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Every recommendation follows the same reviewable path. Teams get the context to act with confidence while people retain control of the decision.</p></div>
+    <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">{DECISION_STAGES.map(stage => <article key={stage.title} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-brand-600 dark:text-brand-400">{stage.number}</span><span className="h-px w-10 bg-slate-200 transition-all group-hover:w-16 group-hover:bg-brand-400 dark:bg-slate-700" /></div><h3 className="mt-8 text-xl font-semibold">{stage.title}</h3><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{stage.description}</p></article>)}</div>
+  </Section>;
 }
 
-function PlatformCapabilities() {
-  return (
-    <Section id="platform" className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
-      <div className="max-w-6xl mx-auto px-5">
-        <div className="text-center max-w-2xl mx-auto mb-14">
-          <Eyebrow>Platform capabilities</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Twelve modules. One data model.</h2>
-          <p className="text-slate-600 dark:text-slate-300 mt-4">Every module reads from the same connected accounts and the same org-scoped permissions — connect once, see everything.</p>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {MODULES.map(m => (
-            <div key={m.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{m.name}</div>
-              <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{m.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Section>
-  );
+function Platform() {
+  return <div className="border-y border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40"><Section id="platform"><div className="grid gap-8 lg:grid-cols-[.75fr_1.25fr] lg:items-end"><div><Eyebrow>One operating picture</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Four disciplines. One evidence model.</h2></div><p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 lg:justify-self-end">HorizonVigil connects the cost, risk, operational health, and ownership of the same resource. The advisor can reason across that context instead of treating every signal as an isolated alert.</p></div>
+    <div className="mt-12 grid gap-4 md:grid-cols-2">{PLATFORM_PILLARS.map(pillar => <article key={pillar.title} className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-950"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-semibold">{pillar.title}</h3><span className="rounded-full bg-brand-50 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">{pillar.metric}</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{pillar.description}</p><ul className="mt-5 grid gap-2 sm:grid-cols-3">{pillar.bullets.map(bullet => <li key={bullet} className="flex items-start gap-2 text-xs leading-5 text-slate-500 dark:text-slate-400"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-brand-500" />{bullet}</li>)}</ul></article>)}</div>
+  </Section></div>;
 }
 
-function CloudProviders() {
-  return (
-    <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
-        <Eyebrow>Supported cloud providers</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Real scanners, not a roadmap slide.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Azure support is planned; we're not listing it here until it's actually built.</p>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-6">
-        {PROVIDERS.map(p => (
-          <div key={p.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
-            <div className="text-lg font-semibold text-slate-900 dark:text-white mb-4">{p.name}</div>
-            <div className="flex flex-wrap gap-2">
-              {p.services.map(s => (
-                <span key={s} className="text-xs font-medium px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{s}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
+function DecisionWorkspace() {
+  const steps = [['Explain', 'Policy changed outside the expected deployment window.'], ['Verify', 'Public read is active; owner and change event identified.'], ['Advise', 'Restrict access after confirming the public endpoint dependency.']];
+  return <Section><div className="grid gap-12 lg:grid-cols-2 lg:items-center"><div><Eyebrow>Built into daily work</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Start with the queue. Ask the advisor. Keep the evidence.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">The signed-in workspace prioritizes decisions across the cloud estate. Open any item to review evidence, discuss it with the advisor, assign an owner, and retain the decision record. Supported changes can be handed off as exact commands or a reviewable Auto-PR.</p><div className="mt-7 flex flex-wrap gap-3"><Link to="/signup" className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900">Open your workspace</Link><Link to="/docs" className="rounded-lg border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200">Read the docs</Link></div></div>
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-950"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-semibold uppercase tracking-wider text-rose-500">Security decision</p><h3 className="mt-2 font-semibold">Restrict public access to production storage?</h3></div><span className="rounded-md bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">Critical</span></div><div className="mt-5 grid gap-3 sm:grid-cols-3">{steps.map(([label, copy]) => <div key={label} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-900"><p className="text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">{label}</p><p className="mt-2 text-xs leading-5 text-slate-600 dark:text-slate-400">{copy}</p></div>)}</div><div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800"><p className="text-xs text-slate-500">Owner: Platform Security · Evidence: 6 sources</p><span className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">Review decision</span></div></div></div>
+  </div></Section>;
 }
 
-function ArchitectureOverview() {
-  const stages = [
-    { title: 'Your cloud accounts', desc: 'AWS accounts & GCP projects' },
-    { title: 'Scoped connectors', desc: 'Access key, IAM role, or service-account impersonation — least privilege' },
-    { title: 'Unified data layer', desc: 'Org-scoped, RLS-protected Postgres' },
-    { title: 'Dashboards, alerts & automation', desc: 'What you actually interact with' },
-  ];
-  return (
-    <Section className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
-      <div className="max-w-6xl mx-auto px-5">
-        <div className="max-w-2xl mb-14">
-          <Eyebrow>Architecture overview</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">How data gets from your accounts to your screen.</h2>
-        </div>
-        <div className="flex flex-col md:flex-row items-stretch gap-3">
-          {stages.map((s, i) => (
-            <div key={s.title} className="flex items-center gap-3 flex-1">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 flex-1 h-full">
-                <div className="text-xs font-semibold text-brand-600 dark:text-brand-400 mb-1">Step {i + 1}</div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">{s.title}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">{s.desc}</div>
-              </div>
-              {i < stages.length - 1 && (
-                <div className="hidden md:block text-slate-300 dark:text-slate-700 text-xl shrink-0">→</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </Section>
-  );
+function Coverage() {
+  return <div className="border-y border-slate-200 bg-slate-950 text-white dark:border-slate-800"><Section><div className="grid gap-10 lg:grid-cols-[.8fr_1.2fr]"><div><Eyebrow>Cloud coverage</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A separate provider path. A shared decision layer.</h2><p className="mt-4 text-sm leading-6 text-slate-400">Each cloud keeps its native account, resource, cost, and security model. Horizon Intelligence normalizes the evidence needed to explain and govern a decision.</p></div><div className="grid gap-3">{PROVIDERS.map((provider, index) => <div key={provider.name} className="flex gap-4 rounded-xl border border-slate-800 bg-slate-900/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-xs font-bold text-brand-300">0{index + 1}</span><div><h3 className="font-semibold">{provider.name}</h3><p className="mt-1 text-sm leading-6 text-slate-400">{provider.detail}</p></div></div>)}</div></div></Section></div>;
 }
 
-function AICapabilities() {
-  return (
-    <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
-        <Eyebrow>AI capabilities</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Automated intelligence, not just automation.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">A rules-and-signal engine runs continuously across your connected accounts, turning raw resource and cost data into specific, actionable findings.</p>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-5">
-        {AI_FEATURES.map(f => (
-          <div key={f.title} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-            <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{f.title}</div>
-            <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{f.desc}</div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function SecurityCompliance() {
-  return (
-    <Section id="security" className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
-      <div className="max-w-6xl mx-auto px-5">
-        <div className="text-center max-w-2xl mx-auto mb-14">
-          <Eyebrow>Security & compliance</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Built to be trusted with account access.</h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {SECURITY_FEATURES.map(f => (
-            <div key={f.title} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{f.title}</div>
-              <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{f.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-/**
- * Distinct from SecurityCompliance above: that section covers plan-gated
- * compliance *mappings* (SOC 2, HIPAA-ready posture). This is the live,
- * automated benchmark scanning every connected account gets — real API
- * (getComplianceBenchmarks), real frameworks (see the ComplianceBenchmark
- * type in lib/api.ts), not the same claim restated.
- */
-function ComplianceBenchmarks() {
-  return (
-    <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
-        <Eyebrow>Compliance</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Live benchmark scoring, not a once-a-year checklist.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Every connected account is checked against real compliance frameworks on an ongoing basis, with a pass rate you can see at any time — under Vulnerability Management › Compliance.</p>
-      </div>
-      <div className="grid sm:grid-cols-3 gap-5">
-        {COMPLIANCE_BENCHMARKS.map(b => (
-          <div key={b.name} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-            <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1.5">{b.name}</div>
-            <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{b.desc}</div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function ProductPreview() {
-  const panels = [
-    { label: 'Cost Management', rows: ['Monthly spend by account', 'Anomaly: +34% in us-east-1', '3 savings recommendations'] },
-    { label: 'Vulnerability Management', rows: ['12 critical findings', 'Deduped from 4 accounts', 'Prioritized by exposure'] },
-    { label: 'Resources', rows: ['1,204 resources tracked', 'Across 8 connected accounts', 'AWS + GCP, one view'] },
-  ];
-  return (
-    <Section>
-      <div className="text-center max-w-2xl mx-auto mb-14">
-        <Eyebrow>See it in action</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">A look at the real interface.</h2>
-        <p className="text-slate-600 dark:text-slate-300 mt-4">Illustrative previews of live modules — connect an account to see your own data in the same views.</p>
-      </div>
-      <div className="grid md:grid-cols-3 gap-6">
-        {panels.map(p => (
-          <div key={p.label} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-            <div className="h-9 flex items-center gap-1.5 px-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
-              <span className="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
-              <span className="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
-              <span className="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700" />
-              <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{p.label}</span>
-            </div>
-            <div className="p-4 flex flex-col gap-2.5">
-              {p.rows.map(r => (
-                <div key={r} className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 rounded-md px-3 py-2.5">{r}</div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
+function Security() {
+  return <Section id="security"><div className="mx-auto max-w-3xl text-center"><Eyebrow>Control stays with your team</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Intelligence your team can inspect.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Recommendations are grounded in the evidence available to the signed-in user. Missing coverage stays visible, and the final action remains a human decision.</p></div><div className="mt-12 grid gap-4 md:grid-cols-3">{[
+    ['Read-only by default', 'Connect cloud evidence without giving HorizonVigil broad mutation rights.'], ['Role-scoped context', 'Organization and account permissions determine what each person and advisor session can access.'], ['Reviewable history', 'Keep administrative writes and decision context attributable for later review.'],
+  ].map(([title, copy]) => <article key={title} className="rounded-2xl border border-slate-200 p-6 dark:border-slate-800"><div className="mb-5 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-lg text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">✓</div><h3 className="font-semibold">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">{copy}</p></article>)}</div></Section>;
 }
 
 function PricingTeaser() {
-  return (
-    <Section className="bg-slate-50 dark:bg-slate-900/30 !max-w-none">
-      <div className="max-w-6xl mx-auto px-5">
-        <div className="text-center max-w-2xl mx-auto mb-14">
-          <Eyebrow>Pricing</Eyebrow>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Simple, transparent, and includes a real free plan.</h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {MARKETING_PLANS.map(p => (
-            <div key={p.key} className={`rounded-xl border p-5 flex flex-col bg-white dark:bg-slate-900 ${p.highlighted ? 'border-brand-600 ring-1 ring-brand-600' : 'border-slate-200 dark:border-slate-800'}`}>
-              <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">{p.name}</div>
-              <div className="text-2xl font-bold text-slate-900 dark:text-white mb-1">
-                {formatPrice(p.monthlyCents, p.key)}
-                {p.key !== 'enterprise' && <span className="text-xs font-normal text-slate-400">/mo</span>}
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 flex-grow">{p.cloudAccounts} accounts · {p.users} users</div>
-            </div>
-          ))}
-        </div>
-        <div className="text-center mt-8">
-          <Link to="/pricing" className="text-sm font-semibold text-brand-600 dark:text-brand-400 hover:underline">See full plan comparison →</Link>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-function CustomerBenefits() {
-  const items = [
-    { title: 'Stop tab-switching between consoles', desc: 'One login replaces separate logins to the AWS console, GCP console, and whatever spreadsheet was tracking cost.' },
-    { title: 'Catch cost problems same-day', desc: 'Anomaly detection flags unusual spend before it becomes an unpleasant surprise at month-end.' },
-    { title: 'Faster security triage', desc: 'Findings arrive deduplicated and prioritized, not as a raw feed someone has to manually sort.' },
-    { title: 'Audit-ready by default', desc: 'Every remediation and role change is logged automatically — no separate compliance tooling to bolt on.' },
-  ];
-  return (
-    <Section>
-      <div className="max-w-2xl mb-14">
-        <Eyebrow>Why teams switch</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Fewer tools, faster answers.</h2>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-6">
-        {items.map(i => (
-          <div key={i.title} className="flex gap-4">
-            <div className="h-8 w-8 rounded-lg bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 flex items-center justify-center font-bold text-sm shrink-0">✓</div>
-            <div>
-              <div className="text-sm font-semibold text-slate-900 dark:text-white mb-1">{i.title}</div>
-              <div className="text-sm text-slate-500 dark:text-slate-400">{i.desc}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
+  return <div className="border-y border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40"><Section id="pricing"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><Eyebrow>Pricing</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Start with visibility. Scale with your team.</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">Choose by cloud-account scale, users, automation capacity, retention, and support. Annual billing saves roughly 20%.</p></div><Link to="/pricing" className="text-sm font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400">Compare every plan →</Link></div><div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{MARKETING_PLANS.map(plan => <article key={plan.key} className={`flex flex-col rounded-2xl border bg-white p-5 dark:bg-slate-950 ${plan.highlighted ? 'border-brand-500 ring-1 ring-brand-500' : 'border-slate-200 dark:border-slate-800'}`}>{plan.highlighted && <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400">Most popular</p>}<h3 className="font-semibold">{plan.name}</h3><p className="mt-3 text-3xl font-bold tabular-nums">{formatPrice(plan.monthlyCents, plan.key)}{plan.key !== 'enterprise' && <span className="text-xs font-normal text-slate-400">/mo</span>}</p><p className="mt-3 flex-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{plan.tagline}</p><p className="mt-5 text-xs font-medium text-slate-700 dark:text-slate-300">{plan.cloudAccounts} cloud account{plan.cloudAccounts === '1' ? '' : 's'} · {plan.users} users</p></article>)}</div></Section></div>;
 }
 
 function FAQ() {
-  const [openIdx, setOpenIdx] = useState<number | null>(0);
-  return (
-    <Section className="max-w-3xl">
-      <div className="text-center mb-14">
-        <Eyebrow>FAQ</Eyebrow>
-        <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Questions people actually ask</h2>
-      </div>
-      <div className="flex flex-col gap-3">
-        {FAQS.map((f, i) => {
-          const isOpen = openIdx === i;
-          return (
-            <div key={f.q} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-              <button
-                onClick={() => setOpenIdx(isOpen ? null : i)}
-                className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left"
-                aria-expanded={isOpen}
-              >
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">{f.q}</span>
-                <span className={`text-slate-400 transition-transform shrink-0 ${isOpen ? 'rotate-45' : ''}`}>+</span>
-              </button>
-              {isOpen && <div className="px-5 pb-4 text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{f.a}</div>}
-            </div>
-          );
-        })}
-      </div>
-    </Section>
-  );
+  return <Section><div className="grid gap-10 lg:grid-cols-[.55fr_1.45fr]"><div><Eyebrow>Questions</Eyebrow><h2 className="text-3xl font-bold tracking-tight">Understand the operating model.</h2></div><div className="divide-y divide-slate-200 border-y border-slate-200 dark:divide-slate-800 dark:border-slate-800">{FAQS.map(faq => <details key={faq.question} className="group py-5"><summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">{faq.question}<span className="text-brand-600 transition group-open:rotate-45 dark:text-brand-400">+</span></summary><p className="mt-3 max-w-3xl pr-8 text-sm leading-6 text-slate-600 dark:text-slate-400">{faq.answer}</p></details>)}</div></div></Section>;
 }
 
 function FinalCTA() {
-  return (
-    <Section className="text-center pb-24">
-      <h2 className="text-3xl font-bold text-slate-900 dark:text-white text-balance">Connect your first account in the next five minutes.</h2>
-      <p className="text-slate-600 dark:text-slate-300 mt-4 max-w-lg mx-auto">Free plan, no credit card. Cancel anytime.</p>
-      <div className="flex items-center justify-center gap-3 mt-8 flex-wrap">
-        <Link to="/signup" className="text-sm font-semibold px-6 py-3 rounded-md bg-brand-600 hover:bg-brand-700 text-white">Start free</Link>
-        <a href={CONTACT_SALES_HREF} className="text-sm font-semibold px-6 py-3 rounded-md border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900">Talk to sales</a>
-      </div>
-    </Section>
-  );
+  return <Section className="pt-0"><div className="overflow-hidden rounded-3xl bg-brand-600 px-6 py-12 text-center text-white shadow-xl shadow-brand-900/20 sm:px-12"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-100">Your next cloud decision starts here</p><h2 className="mx-auto mt-3 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">See what changed, why it matters, and what to do next.</h2><div className="mt-8 flex flex-wrap justify-center gap-3"><Link to="/signup" className="rounded-lg bg-white px-5 py-3 text-sm font-semibold text-brand-700 hover:bg-brand-50">Start free</Link><a href={CONTACT_SALES_HREF} className="rounded-lg border border-brand-300/70 px-5 py-3 text-sm font-semibold text-white hover:bg-brand-500">Talk to sales</a></div></div></Section>;
 }

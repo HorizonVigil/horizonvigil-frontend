@@ -4,25 +4,16 @@ import { api, type ProjectRow, type Environment } from '../lib/api';
 import { LEAST_PRIVILEGE_POLICY, CUR_S3_READ_POLICY_STATEMENT } from '../lib/leastPrivilegePolicy';
 import { useSync } from '../lib/syncContext';
 import { useToast } from '../lib/toast';
+import { AWS_REGION_GROUPS, DEFAULT_SCAN_REGIONS, partitionForRegion } from '../lib/awsRegions';
 
-// Every AWS region enabled by default (no opt-in required) — this list
-// previously had only 9 of these 17, silently missing ap-south-1 (Mumbai)
-// among others, so a connected account's real EC2 instances there never
-// showed up anywhere in discovery. The backend also independently confirms
-// a new connection's real enabled regions via ec2:DescribeRegions at
-// connect time (including any opt-in regions), so this list just needs to
-// cover the common case for the checklist UI, not be exhaustive.
-const REGIONS = [
-  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-  'ca-central-1', 'sa-east-1',
-  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
-  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
-  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
-];
+// Region lists now live in lib/awsRegions.ts, grouped by partition -- see
+// the note there on why the scan path was never limited by this list.
 const ENVIRONMENTS: Environment[] = ['production', 'staging', 'dev', 'sandbox', 'qa', 'security', 'dr', 'legacy'];
 
 export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }: { open: boolean; onClose: () => void; onConnected: () => void; projects: ProjectRow[] }) {
-  const [method, setMethod] = useState<'access_key' | 'cross_account_role'>('cross_account_role');
+  // Defaults to access keys because that is the only certified path today.
+  // Cross-account role stays visible but disabled -- see the option below.
+  const [method, setMethod] = useState<'access_key' | 'cross_account_role'>('access_key');
   const [showPolicy, setShowPolicy] = useState(false);
   const [form, setForm] = useState({
     awsAccountId: '', accessKeyId: '', secretAccessKey: '', roleArn: '', externalId: '',
@@ -32,8 +23,24 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   // Lambda, ...) — defaults to all standard regions so an account isn't
   // silently limited to just its primary region with no indication anything
   // else was skipped.
-  const [scanRegions, setScanRegions] = useState<string[]>(REGIONS);
+  const [scanRegions, setScanRegions] = useState<string[]>([...DEFAULT_SCAN_REGIONS]);
+
+  /**
+   * Scan regions are limited to the partition the chosen default region
+   * belongs to.
+   *
+   * AWS credentials are issued within one partition -- a commercial access
+   * key cannot reach `cn-north-1`, and a GovCloud key cannot reach
+   * `us-east-1`. Offering every region in one flat list would offer choices
+   * guaranteed to produce permission errors on every scan, and a wall of
+   * those is its own false signal about the account's health.
+   */
+  const selectedPartition = partitionForRegion(form.defaultRegion);
+  const selectableRegions = AWS_REGION_GROUPS.find(g => g.partition === selectedPartition)?.regions ?? [];
+  const partitionNote = AWS_REGION_GROUPS.find(g => g.partition === selectedPartition)?.note ?? null;
   const [error, setError] = useState<string | null>(null);
+  /** Set when the server reports 409 connection_already_exists — the wizard shows the existing connection instead of mutating it. */
+  const [duplicate, setDuplicate] = useState<{ id: string; name: string; status: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const { startDiscovery } = useSync();
   const { toast } = useToast();
@@ -51,6 +58,7 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setDuplicate(null);
     if (scanRegions.length === 0) { setError('Select at least one region to scan.'); return; }
     setLoading(true);
     try {
@@ -72,46 +80,33 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
       onConnected();
       onClose();
     } catch (err) {
-      const message = (err as Error).message;
-      const isDuplicateAccount = message.includes('cloud_connections_org_id_aws_account_id_key');
-      if (!isDuplicateAccount) {
-        setError(message);
+      /**
+       * A duplicate is a conflict to REPORT, never a credential rotation to
+       * perform.
+       *
+       * 2026-09-08 AWS connector audit, AWS-P0-03: this used to match on the
+       * raw database constraint name and then call
+       * updateAccountCredentials/updateAccountRole -- so submitting "Add
+       * account" twice silently replaced the credentials of an existing
+       * connection. Creating and rotating have different blast radius and
+       * different authorization stories; one must never become the other by
+       * accident. Rotation now only happens where the user asked for it, in
+       * the credential-update flow.
+       *
+       * The server owns this decision now (409 connection_already_exists),
+       * so the client no longer parses error strings to infer intent.
+       */
+      const apiErr = err as { status?: number; body?: { code?: string; existingConnection?: { id: string; name: string; status: string } } };
+      const conflict = apiErr.status === 409 && apiErr.body?.code === 'connection_already_exists' ? apiErr.body.existingConnection : null;
+      if (conflict) {
+        setDuplicate(conflict);
+        setError(null);
         setLoading(false);
         return;
       }
-
-      // A row for this AWS account already exists (disconnect is a soft
-      // status-flip, not a row delete, so it collides with the org+account
-      // unique constraint on re-add regardless of status). Look it up and
-      // update it in place instead of making the user find a separate flow —
-      // but the update shape (credentials vs. role) depends on the EXISTING
-      // connection's method, not whichever toggle happened to be selected
-      // here, since this wizard defaults to cross-account-role.
-      try {
-        const { items } = await api.getAccounts({ search: form.awsAccountId.trim(), limit: 5 });
-        const existing = items.find((c) => c.aws_account_id === form.awsAccountId.trim());
-        if (!existing) {
-          setError(`AWS account ${form.awsAccountId.trim()} is already connected to this org, but its existing connection couldn't be found to update automatically.`);
-          return;
-        }
-        if (existing.connection_method !== method) {
-          setMethod(existing.connection_method);
-          setError(
-            `This AWS account is already connected using ${existing.connection_method === 'access_key' ? 'IAM access keys' : 'a cross-account role'} — switched the form to match. Fill in ${existing.connection_method === 'access_key' ? 'the access keys' : 'the role ARN and external ID'} above and submit again to update it.`,
-          );
-          return;
-        }
-        if (method === 'access_key') {
-          await api.updateAccountCredentials(existing.id, { accessKeyId: form.accessKeyId.trim(), secretAccessKey: form.secretAccessKey.trim() });
-        } else {
-          await api.updateAccountRole(existing.id, { roleArn: form.roleArn.trim(), externalId: form.externalId.trim() });
-        }
-        autoSync(existing.id);
-        onConnected();
-        onClose();
-      } catch (fallbackErr) {
-        setError(`This AWS account is already connected, and updating it also failed: ${(fallbackErr as Error).message}`);
-      }
+      setError((err as Error).message);
+      setLoading(false);
+      return;
     } finally {
       setLoading(false);
     }
@@ -120,13 +115,30 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   return (
     <Modal open={open} onClose={onClose} title="Add AWS Account" wide>
       <div className="flex gap-2 mb-4">
-        <button onClick={() => setMethod('cross_account_role')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'cross_account_role' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
-          <div className="text-sm font-medium text-slate-800 dark:text-slate-100">Cross-Account Role <span className="text-emerald-600 dark:text-emerald-400 text-xs font-normal">Recommended</span></div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">STS AssumeRole, 1-hour temp credentials, nothing to rotate or leak (§7.2)</div>
+        {/*
+          AWS-P0-02 (2026-09-08 connector audit): this option was default-
+          selected, badged "Recommended", and submittable, on the same screen
+          that admitted live sts:AssumeRole scanning was not wired up -- so a
+          customer could finish onboarding into a connection that could never
+          collect anything. It is disabled until the AssumeRole acceptance
+          suite passes, and the server refuses the method too, so this is a
+          real gate rather than a hidden button.
+        */}
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          title="Cross-account role onboarding is not available in this build."
+          className="flex-1 text-left rounded-lg border p-3 border-slate-200 dark:border-slate-700 opacity-60 cursor-not-allowed"
+        >
+          <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+            Cross-Account Role <span className="text-slate-500 dark:text-slate-400 text-xs font-normal">Not available yet</span>
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">STS AssumeRole onboarding is not enabled in this build. Use IAM access keys below.</div>
         </button>
-        <button onClick={() => setMethod('access_key')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'access_key' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
+        <button type="button" onClick={() => setMethod('access_key')} className={`flex-1 text-left rounded-lg border p-3 ${method === 'access_key' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-slate-200 dark:border-slate-700'}`}>
           <div className="text-sm font-medium text-slate-800 dark:text-slate-100">IAM User + Access Keys</div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Quickest path — long-lived keys, rotate every 90 days (§7.1)</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Long-lived keys — rotate every 90 days</div>
         </button>
       </div>
 
@@ -179,7 +191,11 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-slate-600 dark:text-slate-300">Default Region</span>
           <select value={form.defaultRegion} onChange={e => setForm(f => ({ ...f, defaultRegion: e.target.value }))} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white">
-            {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+            {AWS_REGION_GROUPS.map(g => (
+              <optgroup key={g.partition} label={g.label}>
+                {g.regions.map(r => <option key={r} value={r}>{r}</option>)}
+              </optgroup>
+            ))}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -192,12 +208,15 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm text-slate-600 dark:text-slate-300">Regions to Scan</span>
             <div className="flex gap-2 text-xs">
-              <button type="button" onClick={() => setScanRegions(REGIONS)} className="text-brand-600 dark:text-brand-400 hover:underline">All</button>
+              <button type="button" onClick={() => setScanRegions([...selectableRegions])} className="text-brand-600 dark:text-brand-400 hover:underline">All</button>
               <button type="button" onClick={() => setScanRegions([])} className="text-brand-600 dark:text-brand-400 hover:underline">None</button>
             </div>
           </div>
+          {partitionNote && (
+            <p className="mb-1 text-xs text-amber-700 dark:text-amber-400">{partitionNote}</p>
+          )}
           <div className="grid grid-cols-3 gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 p-2">
-            {REGIONS.map(r => (
+            {selectableRegions.map(r => (
               <label key={r} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
                 <input type="checkbox" checked={scanRegions.includes(r)} onChange={() => toggleRegion(r)} />
                 {r}
@@ -216,6 +235,31 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
         </label>
 
         {error && <p className="col-span-2 text-sm text-red-500">{error}</p>}
+
+        {/*
+          A duplicate is reported, never silently resolved by mutating the
+          existing connection's credentials (AWS-P0-03). The user is told what
+          already exists and taken to it; rotating a credential stays an
+          explicit, separately-authorized action.
+        */}
+        {duplicate && (
+          <div className="col-span-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3">
+            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+              {duplicate.status === 'disconnected'
+                ? 'This AWS account already has a disconnected connection'
+                : 'This AWS account is already connected'}
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+              {duplicate.name} — nothing was created or changed. To replace its credentials, open the connection and use Update Credentials.
+            </p>
+            <a
+              href={`/cloud-accounts/${duplicate.id}`}
+              className="inline-block mt-2 text-xs font-medium text-brand-700 dark:text-brand-300 underline"
+            >
+              Open existing connection
+            </a>
+          </div>
+        )}
         <button type="submit" disabled={loading} className="col-span-2 rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium py-2 mt-1">
           {loading ? 'Validating & connecting…' : 'Connect AWS Account'}
         </button>
@@ -224,11 +268,24 @@ export function ConnectAwsAccountWizard({ open, onClose, onConnected, projects }
   );
 }
 
+/**
+ * `autoComplete="off"` and `spellCheck={false}` are defaults, not decoration.
+ *
+ * Every field on this form is a cloud credential or a cloud identifier. With
+ * autocomplete left at its default the browser offers to save an AWS secret
+ * access key into the password manager as if it were a website login, and can
+ * autofill a previously saved value into a different account's connection
+ * form -- which would point this connection at another estate. Spellcheck is
+ * off for the same reason it is off for passwords: some implementations send
+ * field contents to a remote service.
+ *
+ * Both are spread before `...props`, so an individual field can still opt in.
+ */
 function Field({ label, onChange, ...props }: { label: string; onChange: (v: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-slate-600 dark:text-slate-300">{label}</span>
-      <input {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
+      <input autoComplete="off" spellCheck={false} {...props} onChange={e => onChange(e.target.value)} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400" />
     </label>
   );
 }

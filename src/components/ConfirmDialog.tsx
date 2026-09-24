@@ -26,8 +26,8 @@ export function useConfirm() {
     <Modal open={!!state} onClose={() => resolveWith(false)} title="Please confirm">
       <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">{state?.message}</p>
       <div className="flex justify-end gap-2">
-        <button onClick={() => resolveWith(false)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
-        <button onClick={() => resolveWith(true)} className="text-sm rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Confirm</button>
+        <button type="button" onClick={() => resolveWith(false)} className="text-sm rounded-md border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Cancel</button>
+        <button type="button" onClick={() => resolveWith(true)} className="text-sm rounded-md bg-red-600 hover:bg-red-700 text-white px-3 py-1.5">Confirm</button>
       </div>
     </Modal>
   );

@@ -1,16 +1,13 @@
 import { useFilters, type DateRangePreset } from '../lib/filterContext';
 import { Icon } from './icons';
+import { ALL_AWS_REGIONS } from '../lib/awsRegions';
 
-// Kept in sync with cloud-api's DEFAULT_SCAN_REGIONS (scanners/types.ts) —
-// this previously omitted ap-south-1 and others, so even after a region was
-// actually scanned there was no way to filter down to it here.
-const REGIONS = [
-  'all', 'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
-  'ca-central-1', 'sa-east-1',
-  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-central-1', 'eu-north-1',
-  'ap-south-1', 'ap-southeast-1', 'ap-southeast-2',
-  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
-];
+// A FILTER narrows data that has already been collected, so every region is
+// a legitimate choice here regardless of partition -- unlike the connect
+// wizard, where offering a region the credentials cannot reach would be
+// offering a choice guaranteed to fail. Sourced from lib/awsRegions.ts so
+// this list cannot drift from the wizard's again.
+const REGIONS = ['all', ...ALL_AWS_REGIONS];
 
 const RANGE_LABELS: Record<DateRangePreset, string> = {
   '1h': 'Last 1 Hour', '7d': 'Last 7 Days', '30d': 'Last 30 Days', mtd: 'Month to Date',
@@ -73,7 +70,7 @@ export function FilterBar({ title, subtitle, breadcrumb, showAccountFilter = tru
             </select>
           </label>
         )}
-        <button onClick={refresh} title="Refresh" className="flex items-center gap-1.5 text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+        <button type="button" onClick={refresh} title="Refresh" className="flex items-center gap-1.5 text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 px-2.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
           <Icon name="refresh-cw" size={14} />
           Refresh
         </button>
