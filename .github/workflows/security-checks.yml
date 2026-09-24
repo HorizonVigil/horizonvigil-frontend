@@ -21,21 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
 
-      - name: Install dependencies
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::GH_PAT secret is required to install private HorizonVigil dependencies."
-            exit 1
-          fi
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          export GIT_CONFIG_COUNT=2
-          export GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_0=ssh://git@github.com/
-          export GIT_CONFIG_KEY_1=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
-          export GIT_CONFIG_VALUE_1=git@github.com:
-          npm ci
+      - run: npm ci
 
       - name: Type check
         run: npm run typecheck --if-present
@@ -56,13 +42,7 @@ jobs:
           curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           tar -xzf gitleaks.tar.gz gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
-          gitleaks detect --source . --redact --verbose          # gitleaks-action v2 requires a licence for ORGANISATION repos and
-          # reads it from this env var. The GITLEAKS_LICENSE secret has existed
-          # since 2026-09-11, but the step never passed it through, so every
-          # run failed with "missing gitleaks license" and the secret scan has
-          # never actually executed on this repo.
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-
+          gitleaks detect --source . --redact --verbose
       # Container scan only applies to services with a Dockerfile.
       - name: Check for a Dockerfile
         id: has-dockerfile
@@ -70,14 +50,8 @@ jobs:
 
       - name: Build image for scanning
         if: steps.has-dockerfile.outputs.exists == 'true'
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -z "$GH_PAT" ]; then
-            echo "::error::GH_PAT secret is required to build images that install private HorizonVigil dependencies."
-            exit 1
-          fi
-          DOCKER_BUILDKIT=1 docker build --secret id=gh_pat,env=GH_PAT -t local-scan-target:${{ github.sha }} .
+        run: docker build -t local-scan-target:${{ github.sha }} .
+
       # scanners: vuln only -- secret detection is gitleaks' job (above).
       # Running both here flagged UI placeholder copy (a GCP-key JSON
       # example in an account-connect form) as a "leaked" credential
