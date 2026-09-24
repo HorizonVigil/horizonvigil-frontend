@@ -1,36 +1,46 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRightIcon } from '@heroicons/react/20/solid'; // Or '/24/solid' depending on desired size
 
-export function LandingPage() {
+const LandingPage: React.FC = () => {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
-      <div className="text-center max-w-4xl">
-        <img
-          className="mx-auto h-48 w-auto mb-8 animate-fade-in-down"
-          src="/architecture-placeholder.svg" // Ensure this file exists in your public folder
-          alt="HorizonVigil Architecture Placeholder"
-        />
-        <h1 className="text-5xl font-extrabold tracking-tight text-gray-900 sm:text-6xl animate-fade-in">
-          HorizonVigil
-        </h1>
-        <p className="mt-6 text-xl text-gray-600 leading-8 animate-fade-in-up">
-          Unlock actionable insights and proactive security for your cloud infrastructure.
-          Monitor, analyze, and protect your digital assets with unparalleled clarity and control.
+    <div className="text-center py-20 px-4">
+      <h1 className="text-6xl font-extrabold text-blue-400 mb-6 leading-tight">
+        Welcome to HorizonVigil
+      </h1>
+      <p className="text-xl text-gray-300 max-w-3xl mx-auto mb-10">
+        Empowering your projects with intelligent monitoring and actionable insights.
+        HorizonVigil keeps an watchful eye, so you can focus on building.
+      </p>
+      <div className="mb-16">
+        <Link
+          to="/auth"
+          className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-10 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+        >
+          Get Started
+        </Link>
+      </div>
+
+      <div className="max-w-5xl mx-auto">
+        <h2 className="text-4xl font-bold text-gray-200 mb-8">Our Vision</h2>
+        <p className="text-lg text-gray-400 mb-12 leading-relaxed">
+          HorizonVigil provides a comprehensive platform for real-time system health checks,
+          performance metrics, and alert management. Our goal is to simplify complex
+          monitoring tasks, offering clarity and control over your digital infrastructure.
+          We believe that proactive monitoring is key to maintaining robust and reliable applications.
         </p>
-        <div className="mt-10 flex items-center justify-center gap-x-6 animate-fade-in-up delay-200">
-          <Link
-            to="/auth"
-            className="rounded-md bg-indigo-600 px-6 py-3 text-lg font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-colors duration-200"
-          >
-            Get started <ArrowRightIcon className="inline-block h-6 w-6 ml-2 -mr-1" aria-hidden="true" />
-          </Link>
-          <Link to="#"
-                className="text-lg font-semibold leading-6 text-gray-900 hover:text-indigo-600 transition-colors duration-200">
-            Learn more <span aria-hidden="true">→</span>
-          </Link>
+
+        <h2 className="text-4xl font-bold text-gray-200 mb-8">How It Works (Architecture Placeholder)</h2>
+        <div className="bg-gray-800 p-10 rounded-lg shadow-inner border border-gray-700 flex flex-col items-center justify-center h-80 text-gray-500 italic">
+          <p className="text-xl mb-4">
+            [Placeholder for an Architecture Diagram / Key Features Graphic]
+          </p>
+          <p className="text-md">
+            Imagine a flow from your services, through our intelligent analysis engine, to your personalized dashboard and notification channels.
+          </p>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default LandingPage;

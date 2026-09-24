@@ -1,25 +1,40 @@
-import { AuthForm } from '../components/AuthForm';
-import { useSupabaseAuth } from '../lib/supabaseAuth';
-import { Navigate, useLocation } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import AuthForm from '../components/AuthForm';
+import { useAuth } from '../layout/RootLayout';
 
-export function AuthPage() {
-  const { session, isLoading } = useSupabaseAuth();
-  const location = useLocation();
+const AuthPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { session, loading } = useAuth();
 
-  const from = location.state?.from?.pathname || '/dashboard';
+  useEffect(() => {
+    if (!loading && session) {
+      // If user is already authenticated and session exists, redirect to dashboard
+      navigate('/dashboard', { replace: true });
+    }
+  }, [session, loading, navigate]);
 
-  if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
+  const handleAuthSuccess = () => {
+    // This function is called by AuthForm on successful sign-in/sign-up that results in a session.
+    // The useEffect hook above will handle the navigation automatically when the session state updates.
+    // For sign-up where email confirmation is required, session might not be immediate.
+    // In that case, the message from AuthForm will guide the user.
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-[calc(100vh-80px)] flex items-center justify-center">
+        <p className="text-xl text-gray-400">Loading authentication status...</p>
+      </div>
+    );
   }
 
-  if (session) {
-    // If the user is already authenticated, redirect them away from the auth page.
-    return <Navigate to={from} replace />;
-  }
-
+  // If not loading and no session, show the AuthForm
   return (
-    <div className="min-h-screen bg-gray-50">
-      <AuthForm />
+    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)]">
+      <AuthForm onAuthSuccess={handleAuthSuccess} />
     </div>
   );
-}
+};
+
+export default AuthPage;
