@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Configure git for private GitHub dependencies
+      - name: Install dependencies
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -32,9 +32,12 @@ jobs:
             exit 1
           fi
           git config --local --unset-all http.https://github.com/.extraheader || true
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "git@github.com:"
-      - run: npm ci
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
+          export GIT_CONFIG_VALUE_0=ssh://git@github.com/
+          export GIT_CONFIG_KEY_1=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
+          export GIT_CONFIG_VALUE_1=git@github.com:
+          npm ci
 
       - name: Typecheck
         run: npm run typecheck
@@ -166,7 +169,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm ci
+      - name: Install dependencies
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then
+            echo "::error::GH_PAT secret is required to install private HorizonVigil dependencies."
+            exit 1
+          fi
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
+          export GIT_CONFIG_VALUE_0=ssh://git@github.com/
+          export GIT_CONFIG_KEY_1=url.https://x-access-token:${GH_PAT}@github.com/.insteadOf
+          export GIT_CONFIG_VALUE_1=git@github.com:
+          npm ci
       - run: npx playwright install --with-deps chromium
 
       - name: Verify smoke-test credentials are configured
