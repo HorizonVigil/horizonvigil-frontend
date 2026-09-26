@@ -1498,9 +1498,6 @@ class ApiClient {
     return this.postIdempotent<{ subscription: BillingSubscription | null; checkoutUrl: string | null }>('billing', '/api/billing/subscriptions', data, idempotencyKey);
   }
   getBillingPortalUrl(returnPath?: string) { return this.post<{ portalUrl: string }>('billing', '/api/billing/subscriptions/portal', { returnPath }); }
-  mockCompleteCheckout(data: { planKey: string; billingInterval: 'monthly' | 'annual'; outcome: 'success' | 'failure' }, idempotencyKey = crypto.randomUUID()) {
-    return this.postIdempotent<{ subscription: BillingSubscription | null; activated: boolean }>('billing', '/api/billing/subscriptions/mock-complete', data, idempotencyKey);
-  }
   getBillingInvoices(params: { page?: number; limit?: number } = {}) { return this.get<Paginated<BillingInvoice>>('billing', `/api/billing/invoices${qs(params)}`); }
   getBillingUsage() { return this.get<{ metrics: Record<string, BillingUsageMetric>; planKey: string | null }>('billing', '/api/billing/usage'); }
   validateCoupon(code: string, planKey?: string) { return this.post<{ valid: true; coupon: BillingCoupon }>('billing', '/api/billing/coupons/validate', { code, planKey }); }

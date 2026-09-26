@@ -60,15 +60,6 @@ export function isBillingEnabled(): boolean {
 }
 
 /**
- * Mock hosted checkout is an explicitly opt-in test/staging feature.
- *
- * Never enable this implicitly based on environment naming alone.
- */
-export function isMockCheckoutEnabled(): boolean {
-  return readBooleanEnv('VITE_MOCK_CHECKOUT_ENABLED');
-}
-
-/**
  * Cloud-only V1 presentation mode.
  *
  * This flag may hide modules from navigation/command surfaces. It must not be
