@@ -50,7 +50,6 @@ import {
   Incidents,
   Issues,
   MfaChallenge,
-  MockCheckout,
   Monitoring,
   OrganizationManagement,
   Overview,
@@ -70,10 +69,7 @@ import {
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
-import {
-  isBillingEnabled,
-  isMockCheckoutEnabled,
-} from './lib/featureFlags';
+import { isBillingEnabled } from './lib/featureFlags';
 
 /**
  * "/" is the public marketing homepage for logged-out visitors and redirects
@@ -114,16 +110,6 @@ function RequireBilling({ children }: { children: ReactNode }) {
   return isBillingEnabled()
     ? <>{children}</>
     : <Navigate to="/overview" replace />;
-}
-
-/**
- * Mock checkout is a development/test-only pathway and is independently gated
- * from normal billing availability.
- */
-function RequireMockCheckout({ children }: { children: ReactNode }) {
-  return isMockCheckoutEnabled()
-    ? <>{children}</>
-    : <Navigate to="/subscription" replace />;
 }
 
 /**
@@ -659,16 +645,6 @@ export default function App() {
                                 element={
                                   <RequireBilling>
                                     <BillingCanceled />
-                                  </RequireBilling>
-                                }
-                              />
-                              <Route
-                                path="/billing/mock-checkout"
-                                element={
-                                  <RequireBilling>
-                                    <RequireMockCheckout>
-                                      <MockCheckout />
-                                    </RequireMockCheckout>
                                   </RequireBilling>
                                 }
                               />

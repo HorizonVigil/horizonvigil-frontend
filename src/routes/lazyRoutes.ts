@@ -103,10 +103,6 @@ export const MfaChallenge = lazy(() =>
   import('../pages/auth/MfaChallenge').then((m) => ({ default: m.MfaChallenge })),
 );
 
-export const MockCheckout = lazy(() =>
-  import('../pages/MockCheckout').then((m) => ({ default: m.MockCheckout })),
-);
-
 export const Monitoring = lazy(() =>
   import('../pages/Monitoring').then((m) => ({ default: m.Monitoring })),
 );

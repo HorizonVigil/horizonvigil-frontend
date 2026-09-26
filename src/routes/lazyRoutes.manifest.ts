@@ -21,7 +21,6 @@ export const LAZY_ROUTE_MODULES: ReadonlyArray<readonly [string, string]> = [
   ['Incidents', '../pages/Incidents'],
   ['Issues', '../pages/Issues'],
   ['MfaChallenge', '../pages/auth/MfaChallenge'],
-  ['MockCheckout', '../pages/MockCheckout'],
   ['Monitoring', '../pages/Monitoring'],
   ['OrganizationManagement', '../pages/OrganizationManagement'],
   ['Overview', '../pages/Overview'],
