@@ -60,7 +60,7 @@ test.describe('go-live smoke test', () => {
     await expect(page.getByText(/(?:Retrieved AWS evidence for \d+ permitted connection|No AWS connections are available in the selected scope|selected scope contains no AWS connections)/i)).toBeVisible();
 
     await expectPageRendersCleanly(page, '/ai-copilot?view=governance');
-    await expect(page.getByRole('heading', { name: 'AWS production governance is active' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'AWS production governance controls are active' })).toBeVisible();
     await expect(page.getByText('Human approval')).toBeVisible();
     await expect(page.getByText('Required')).toBeVisible();
   });
