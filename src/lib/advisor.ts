@@ -28,7 +28,7 @@ export interface AdvisorGovernance {
 export interface AdvisorWorkspace {
   version: '1'; provider: 'AWS'; signals: AdvisorSignal[]; evidence: AdvisorEvidence[]; decisions: AdvisorDecision[];
   retrievedAt: string; decisionsAvailable: boolean; canDecide: boolean;
-  model: { available: boolean; label: string }; governance: AdvisorGovernance; coverageNote: string;
+  model: { state: 'ready' | 'loading' | 'unavailable' | 'not_configured'; available: boolean; label: string; checkedAt: string; latencyMs: number | null }; governance: AdvisorGovernance; coverageNote: string;
 }
 export interface AdvisorAnswer {
   mode: AdvisorMode; answer: string; evidenceIds: string[]; limitations: string[];

@@ -5,7 +5,7 @@ export function sampleAdvisorWorkspace(): AdvisorWorkspace {
   const now = new Date().toISOString();
   return {
     version: '1', provider: 'AWS', retrievedAt: now, decisionsAvailable: true, canDecide: true,
-    model: { available: false, label: 'Illustrative preview' },
+    model: { state: 'not_configured', available: false, label: 'Illustrative preview', checkedAt: '2026-09-22T10:00:00Z', latencyMs: null },
     governance: { provider: 'AWS', humanApprovalRequired: true, cloudMutationEnabled: false, promptVersion: 'sample', modelId: 'sample', evaluationSuite: 'sample', inferenceAuditEnabled: true, appendOnlyDecisions: true, outcomeTrackingEnabled: true },
     coverageNote: 'Sample AWS scenario: three signals across two illustrative accounts. No customer data or cloud actions.',
     decisions: [],
