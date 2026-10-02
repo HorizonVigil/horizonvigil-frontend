@@ -1049,8 +1049,12 @@ class ApiClient {
   notifyOwner(id: string, data: { recipientUserId?: string; additionalEmails?: string[] }) {
     return this.patch<CostRecommendation & { emailSent: boolean; emailError: string | null }>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/notify-owner`, data);
   }
-  /** Real end-to-end: reads the actual file from the connected repo, finds the current instance_type/instanceType by exact literal match, commits the change on a new branch, opens a real PR. Fails honestly (400) if the match isn't found exactly once — see lib/github.ts's openResizeAutoPr server-side. */
-  openAutoPr(id: string, data: { installationRowId: string; repoFullName: string; filePath: string }) {
+  /** Verifies that one exact Terraform/Pulumi declaration controls the selected live resource and persists its immutable source blob. */
+  verifyIaCLink(id: string, data: { installationRowId: string; repoFullName: string; filePath: string; provider: 'terraform' | 'pulumi'; resourceAddress: string }) {
+    return this.put<{ link: { id: string; verification_state: 'verified'; source_blob_sha: string; line_number: number } }>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/iac-link`, data);
+  }
+  /** Opens a PR only from a server-side, tenant-scoped, verified IaC link. The backend rechecks the source blob and exact resource declaration before writing. */
+  openAutoPr(id: string, data: { linkId: string }) {
     return this.patch<{ prUrl: string }>('costOptimization', `/api/cost-optimization/savings-opportunities/${pathSegment(id)}/auto-pr`, data);
   }
   // Re-derives idle/unattached recommendations from cloud_resources — called automatically after a Discover Resources scan finishes (see syncContext.tsx).
