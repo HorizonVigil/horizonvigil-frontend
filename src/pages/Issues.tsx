@@ -6,9 +6,11 @@ import { StatCard } from '../components/StatCard';
 import { DataTable, type Column } from '../components/DataTable';
 import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters } from '../lib/filterContext';
-import { api, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
+import { api, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type RemediationRequest, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
 import { isVulnerabilityDataEnabled } from '../lib/featureFlags';
+import { remediationActionLabel, remediationEligibility, remediationForIssue } from '../lib/issuesRemediation';
 import { safeExternalUrl } from '../lib/safeUrl';
 import { useToast } from '../lib/toast';
 
@@ -49,12 +51,14 @@ function normalize(cost: CostRecommendation[], security: VulnerabilityFinding[],
 export function Issues() {
   const { account, refreshToken } = useFilters();
   const { toast } = useToast();
+  const { confirm, dialog } = useConfirm();
   const [url, setUrl] = useSearchParams();
   const [cost, setCost] = useState<CostRecommendation[]>([]), [security, setSecurity] = useState<VulnerabilityFinding[]>([]), [alerts, setAlerts] = useState<AlertRow[]>([]), [accountRows, setAccountRows] = useState<CloudConnection[]>([]);
   const [totals, setTotals] = useState({ cost: 0, security: 0, alert: 0 });
   const [loading, setLoading] = useState(true), [refreshing, setRefreshing] = useState(false), [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set()), [selected, setSelected] = useState<Issue | null>(null), [tab, setTab] = useState<Tab>('Overview');
   const [resource, setResource] = useState<CloudResource | null>(null), [metrics, setMetrics] = useState<ResourceMetric[]>([]), [activity, setActivity] = useState<ResourceLifecycleEvent[]>([]), [detailLoading, setDetailLoading] = useState(false), [activityType, setActivityType] = useState('all');
+  const [remediation, setRemediation] = useState<RemediationRequest[]>([]);
   const request = useRef(0), loaded = useRef(false);
   const get = (key: string, fallback = 'all') => url.get(key) ?? fallback;
   const set = useCallback((key: string, value: string, fallback = 'all') => setUrl(previous => { const next = new URLSearchParams(previous); if (!value || value === fallback) next.delete(key); else next.set(key, value); return next; }, { replace: true }), [setUrl]);
@@ -85,15 +89,16 @@ export function Issues() {
   const environments = [...new Set(all.map(i => i.environment))].sort(), types = [...new Set(all.map(i => i.resourceType))].sort();
 
   const loadDetail = useCallback(async (issue: Issue) => {
-    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]);
+    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]); setRemediation([]);
     await Promise.all([
       issue.resourceId ? api.getResource(issue.resourceId).then(setResource).catch(() => undefined) : Promise.resolve(),
       issue.resourceId ? api.getMetrics({ resourceId: issue.resourceId, limit: 200 }).then(r => setMetrics(r.items)).catch(() => undefined) : Promise.resolve(),
       issue.connectionId ? api.getResourceTimeline({ connectionId: issue.connectionId, limit: 200 }).then(r => setActivity(r.items.filter(e => !issue.resourceId || e.resource_id === issue.resourceId || e.aws_resource_id === issue.resourceId))).catch(() => undefined) : Promise.resolve(),
+      issue.source === 'cost' && issue.connectionId ? api.listRemediation({ connectionId: issue.connectionId }).then(r => setRemediation(r.items)).catch(() => undefined) : Promise.resolve(),
     ]); setDetailLoading(false);
   }, []);
   const open = useCallback((issue: Issue) => { setSelected(issue); setTab('Overview'); setActivityType('all'); set('id', issue.id, ''); void loadDetail(issue); }, [loadDetail, set]);
-  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); set('id', '', ''); };
+  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); set('id', '', ''); };
   useEffect(() => { const id = url.get('id'); const issue = id ? all.find(i => i.id === id) : null; if (issue && selected?.id !== issue.id) open(issue); }, [all, open, selected?.id, url]);
 
   async function mutate(issue: Issue, action: 'resolve' | 'progress' | 'suppress' | 'apply' | 'dismiss' | 'exclude') {
@@ -114,6 +119,34 @@ export function Issues() {
     try { await Promise.all([sec.length ? api.bulkUpdateFindingStatus(sec.map(i => i.nativeId), 'resolved', 'Bulk resolved from unified Issues.') : Promise.resolve(), ...al.map(i => api.updateAlertStatus(i.nativeId, 'resolved'))]); const skipped = rows.length - sec.length - al.length; toast(`${sec.length + al.length} resolved.${skipped ? ` ${skipped} cost decision(s) left unchanged.` : ''}`, skipped ? 'info' : 'success'); setSelectedKeys(new Set()); await load(); } catch (e) { toast(e instanceof Error ? e.message : 'Bulk update failed.', 'error'); } finally { setBusy(false); }
   }
 
+  async function refreshRemediation(connectionId: string) {
+    const result = await api.listRemediation({ connectionId });
+    setRemediation(result.items);
+  }
+
+  async function remediationAction(action: 'request' | 'approve' | 'reject' | 'dry-run' | 'execute' | 'rollback', row?: RemediationRequest) {
+    if (!selected || !costItem || !selected.connectionId) return;
+    if (action === 'request' && (!resource || !eligibility.action)) return;
+    if ((action === 'execute' || action === 'rollback') && !(await confirm(action === 'execute'
+      ? 'Execute this approved action against the connected AWS account? The live AWS state and permissions will be checked again. Only a stopped EC2 instance can be automatically rolled back.'
+      : 'Request rollback of this completed action? Rollback is supported only for eligible stop-instance actions.'))) return;
+    setBusy(true);
+    try {
+      if (action === 'request' && resource && eligibility.action) {
+        await api.requestRemediation({ connectionId: selected.connectionId, resourceId: resource.id, actionType: eligibility.action, recommendationId: costItem.id, targetConfig: eligibility.targetConfig });
+      } else if (row) {
+        if (action === 'approve') await api.approveRemediation(row.id);
+        else if (action === 'reject') await api.rejectRemediation(row.id);
+        else if (action === 'dry-run') await api.dryRunRemediation(row.id);
+        else if (action === 'execute') await api.executeRemediation(row.id);
+        else if (action === 'rollback') await api.rollbackRemediation(row.id);
+      }
+      await refreshRemediation(selected.connectionId);
+      toast(action === 'request' ? 'Governed remediation requested. Approval and a successful live dry-run are required before execution.' : `Remediation ${action} completed.`, 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : `Could not ${action} remediation.`, 'error'); }
+    finally { setBusy(false); }
+  }
+
   const columns: Column<Issue>[] = [
     { key: 'source', header: 'Source', render: i => <Badge tone="neutral">{labels[i.source]}</Badge>, sortValue: i => i.source },
     { key: 'issue', header: 'Issue', sticky: true, render: i => <span className="inline-block max-w-md truncate font-medium">{i.title}</span>, sortValue: i => i.title },
@@ -126,6 +159,10 @@ export function Issues() {
   const high = all.filter(i => i.severity === 'critical' || i.severity === 'high').length, savings = all.reduce((sum, i) => sum + (i.annualSavings ?? 0), 0);
   const related = selected ? all.filter(i => i.id !== selected.id && ((selected.resourceId && i.resourceId === selected.resourceId) || (selected.connectionId && i.connectionId === selected.connectionId))).slice(0, 20) : [];
   const costItem = selected?.source === 'cost' ? selected.raw as CostRecommendation : null, finding = selected?.source === 'security' ? selected.raw as VulnerabilityFinding : null, alert = selected?.source === 'alert' ? selected.raw as AlertRow : null;
+  const eligibility = costItem ? remediationEligibility(costItem, resource) : { action: null, reason: 'Not a cost recommendation.' };
+  const issueRemediation = costItem ? remediationForIssue(remediation, costItem.id, resource?.id ?? selected?.resourceId ?? null) : [];
+  const remediationRequest = issueRemediation[0] ?? null;
+  const canRequestRemediation = !remediationRequest || ['rejected', 'dry_run_failed', 'failed', 'rolled_back'].includes(remediationRequest.status);
   const activityTypes = [...new Set(activity.map(a => a.event_type))].sort(), visibleActivity = activityType === 'all' ? activity : activity.filter(a => a.event_type === activityType);
   const metricSummary = [...new Set(metrics.map(m => m.metric_name))].map(name => { const values = metrics.filter(m => m.metric_name === name).map(m => m.value); return { name, avg: values.reduce((a, b) => a + b, 0) / values.length, max: Math.max(...values), count: values.length }; });
 
@@ -147,12 +184,12 @@ export function Issues() {
       <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void loadDetail(selected)} className="btn-secondary text-xs">{detailLoading ? 'Refreshing…' : 'Refresh evidence'}</button><button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => toast('Link copied.', 'success'))} className="btn-secondary text-xs">Copy link</button><Link target="_blank" to={`/issues?id=${encodeURIComponent(selected.id)}`} className="btn-secondary text-xs">Open new tab</Link><Link to={links[selected.source]} className="btn-secondary text-xs">Source module</Link></div>
       <div className="flex overflow-x-auto border-b" role="tablist">{tabs.map(t => <button key={t} type="button" onClick={() => setTab(t)} aria-selected={tab === t} className={`whitespace-nowrap border-b-2 px-2 py-2 text-xs ${tab === t ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-500'}`}>{t}{t === 'Related issues' && related.length ? ` (${related.length})` : ''}</button>)}</div>
       {tab === 'Overview' && <><p className="whitespace-pre-wrap">{selected.detail || 'No description supplied by the source.'}</p><Grid rows={[["Account", selected.account], ['Environment', selected.environment], ['Resource type', resource?.resource_type_key || selected.resourceType], ['Resource', resource?.resource_id || selected.resourceId || 'Unavailable'], ['Region', resource?.region || finding?.region || text(alert?.metadata.region) || 'Unavailable'], ['Detected', date(selected.occurredAt, true)], ['Last observed', resource?.last_seen_at ? date(resource.last_seen_at, true) : finding?.last_seen_at ? date(finding.last_seen_at, true) : 'Unavailable'], ['Evidence', detailLoading ? 'Loading' : resource || metrics.length || activity.length ? 'Available' : 'No additional evidence returned']]} /></>}
-      {tab === 'Remediation' && <div className="space-y-3">{costItem && <><Callout title="Recommended action">{costItem.recommended_action}</Callout><Grid rows={[["Validity", human(costItem.validity)], ['Reason', costItem.validity_reason || 'Unavailable'], ['Confidence', costItem.confidence == null ? 'Unavailable' : `${Math.round(costItem.confidence * 100)}%`], ['Evidence window', costItem.evidence_window_days == null ? 'Unavailable' : `${costItem.evidence_window_days} days`]]} /><Unavailable>Cloud changes run only through the governed source workflow with dry-run, approval, execution, and rollback evidence.</Unavailable><div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'apply')} className="btn-primary text-xs">Mark applied</button><button disabled={busy} onClick={() => void mutate(selected, 'dismiss')} className="btn-secondary text-xs">Dismiss</button><button disabled={busy} onClick={() => void mutate(selected, 'exclude')} className="btn-secondary text-xs">Exclude 30 days</button></div></>}{finding && <><Callout title="Security solution">{finding.remediation_link ? 'Follow the source guidance, re-scan, and resolve only after fresh evidence confirms the finding is absent.' : 'No remediation link was supplied. Review source evidence before changing the resource.'}</Callout>{safeExternalUrl(finding.remediation_link) && <a href={safeExternalUrl(finding.remediation_link)!} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Open remediation guidance ↗</a>}<div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button><button disabled={busy} onClick={() => void mutate(selected, 'suppress')} className="btn-secondary text-xs">Suppress</button></div></>}{alert && <><Callout title="Operational response">Investigate the alarm and affected resource, mark work in progress, and resolve after recovery.</Callout><div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'progress')} className="btn-secondary text-xs">Mark in progress</button><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button></div></>}</div>}
+      {tab === 'Remediation' && <div className="space-y-3">{costItem && <><Callout title="Recommended action">{costItem.recommended_action}</Callout><Grid rows={[["Validity", human(costItem.validity)], ['Reason', costItem.validity_reason || 'Unavailable'], ['Confidence', costItem.confidence == null ? 'Unavailable' : `${Math.round(costItem.confidence * 100)}%`], ['Evidence window', costItem.evidence_window_days == null ? 'Unavailable' : `${costItem.evidence_window_days} days`]]} /><Callout title="Governed AWS action">{eligibility.reason}</Callout>{canRequestRemediation && eligibility.action && <button disabled={busy || detailLoading} onClick={() => void remediationAction('request')} className="btn-primary text-xs">Request {remediationActionLabel[eligibility.action]}</button>}{remediationRequest && <RemediationLifecycle row={remediationRequest} busy={busy} act={remediationAction} />}{issueRemediation.length > 1 && <p className="text-xs text-slate-500">{issueRemediation.length - 1} earlier remediation request(s) remain in the immutable history.</p>}<div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'apply')} className="btn-secondary text-xs">Mark applied</button><button disabled={busy} onClick={() => void mutate(selected, 'dismiss')} className="btn-secondary text-xs">Dismiss</button><button disabled={busy} onClick={() => void mutate(selected, 'exclude')} className="btn-secondary text-xs">Exclude 30 days</button></div></>}{finding && <><Callout title="Security solution">{finding.remediation_link ? 'Follow the source guidance, re-scan, and resolve only after fresh evidence confirms the finding is absent.' : 'No remediation link was supplied. Review source evidence before changing the resource.'}</Callout>{safeExternalUrl(finding.remediation_link) && <a href={safeExternalUrl(finding.remediation_link)!} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Open remediation guidance ↗</a>}<div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button><button disabled={busy} onClick={() => void mutate(selected, 'suppress')} className="btn-secondary text-xs">Suppress</button></div></>}{alert && <><Callout title="Operational response">Investigate the alarm and affected resource, mark work in progress, and resolve after recovery.</Callout><div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'progress')} className="btn-secondary text-xs">Mark in progress</button><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button></div></>}</div>}
       {tab === 'Costs & metrics' && <div className="space-y-3"><Grid rows={[["Monthly resource cost", resource?.cost_monthly == null ? 'Unavailable' : `$${resource.cost_monthly.toLocaleString()}`], ['Potential monthly savings', costItem ? `$${costItem.potential_monthly_savings.toLocaleString()}` : 'Unavailable'], ['Potential annual savings', selected.annualSavings == null ? 'Unavailable' : `$${Math.round(selected.annualSavings).toLocaleString()}`], ['Savings verification', costItem ? human(costItem.savings_state) : 'Unavailable']]} /><h3 className="font-medium">Live metric evidence</h3>{metricSummary.length ? <div className="grid gap-2 sm:grid-cols-2">{metricSummary.map(m => <div key={m.name} className="rounded-lg border p-3"><span className="text-xs text-slate-500">{m.name}</span><div>Avg {m.avg.toFixed(2)} · Peak {m.max.toFixed(2)}</div><small>{m.count} samples</small></div>)}</div> : <Unavailable>Metrics are unavailable or have not been collected.</Unavailable>}</div>}
       {tab === 'Owner & evidence' && <div className="space-y-3"><Grid rows={[["Owner", costItem?.ownership?.owner?.value || 'Unassigned / unavailable'], ['Team', costItem?.ownership?.team?.value || 'Unassigned / unavailable'], ['Application', costItem?.ownership?.application?.value || 'Unavailable'], ['Evidence source', selected.source === 'cost' ? human(costItem?.source) : selected.source === 'security' ? human(finding?.finding_source) : 'Monitoring alert']]} /><pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{JSON.stringify(selected.raw, null, 2)}</pre><Unavailable>Infrastructure code appears only when an exact linked repository file is known. Guessed Terraform is never generated.</Unavailable></div>}
       {tab === 'Activities' && <div className="space-y-3"><Select label="Activity type" value={activityType} set={setActivityType} options={[['all', 'All activity'], ...activityTypes.map(v => [v, human(v)] as [string, string])]} />{visibleActivity.length ? visibleActivity.map(a => <div key={a.id} className="rounded-lg border p-3"><div className="flex justify-between"><strong>{human(a.event_type)}</strong><time className="text-xs text-slate-400">{date(a.occurred_at, true)}</time></div><pre className="mt-2 overflow-auto text-[11px]">{JSON.stringify(a.detail, null, 2)}</pre></div>) : <Unavailable>No lifecycle activity was returned.</Unavailable>}<Unavailable>Comments require an append-only decision-event API. Local-only comments are not presented as persisted.</Unavailable></div>}
       {tab === 'Related issues' && (related.length ? related.map(i => <button key={i.id} onClick={() => open(i)} className="block w-full rounded-lg border p-3 text-left"><Badge tone="neutral">{labels[i.source]}</Badge><strong className="mt-2 block">{i.title}</strong>{i.annualSavings != null && <span className="text-xs text-emerald-600">${Math.round(i.annualSavings).toLocaleString()}/yr</span>}</button>) : <Unavailable>No related issue shares this resource or account in the loaded evidence.</Unavailable>)}
-    </div>}</Drawer>
+    </div>}</Drawer>{dialog}
   </div>;
 }
 
@@ -161,3 +198,11 @@ function Card({ issue, selected, select, open }: { issue: Issue; selected: boole
 function Grid({ rows }: { rows: [string, string][] }) { return <dl className="grid gap-3 sm:grid-cols-2">{rows.map(([k, v]) => <div key={k} className="rounded-lg border p-3"><dt className="text-xs text-slate-400">{k}</dt><dd className="mt-1 break-words">{v}</dd></div>)}</dl>; }
 function Callout({ title, children }: { title: string; children: ReactNode }) { return <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-900 dark:bg-brand-950/20"><strong className="text-xs text-brand-700">{title}</strong><div className="mt-1">{children}</div></div>; }
 function Unavailable({ children }: { children: ReactNode }) { return <div className="rounded-lg border border-dashed p-3 text-xs text-slate-500">{children}</div>; }
+function RemediationLifecycle({ row, busy, act }: { row: RemediationRequest; busy: boolean; act: (action: 'request' | 'approve' | 'reject' | 'dry-run' | 'execute' | 'rollback', row?: RemediationRequest) => Promise<void> }) {
+  return <div className="space-y-3 rounded-lg border p-3"><Grid rows={[["Action", remediationActionLabel[row.action_type]], ['Status', human(row.status)], ['Requested', date(row.created_at, true)], ['Approved', row.approved_at ? date(row.approved_at, true) : 'Pending'], ['Executed', row.executed_at ? date(row.executed_at, true) : 'Not executed']]} />
+    {row.dry_run_result && <Evidence title="Dry-run evidence" value={row.dry_run_result} />}{row.execution_result && <Evidence title="Execution evidence" value={row.execution_result} />}
+    <div className="flex flex-wrap gap-2">{row.status === 'pending_approval' && <><button disabled={busy} onClick={() => void act('approve', row)} className="btn-primary text-xs">Approve</button><button disabled={busy} onClick={() => void act('reject', row)} className="btn-secondary text-xs">Reject</button></>}{row.status === 'approved' && <button disabled={busy} onClick={() => void act('dry-run', row)} className="btn-primary text-xs">Run live dry-run</button>}{row.status === 'dry_run_passed' && <button disabled={busy} onClick={() => void act('execute', row)} className="btn-primary text-xs">Execute in AWS</button>}{row.status === 'completed' && row.action_type === 'stop_instance' && <button disabled={busy} onClick={() => void act('rollback', row)} className="btn-secondary text-xs">Rollback by starting instance</button>}</div>
+    {row.status === 'awaiting_stop' && <Unavailable>A resize is waiting for AWS to report the instance as stopped. Continue it from Automation → Remediation.</Unavailable>}
+  </div>;
+}
+function Evidence({ title, value }: { title: string; value: object }) { return <div><h4 className="mb-1 text-xs font-medium">{title}</h4><pre className="max-h-48 overflow-auto rounded bg-slate-950 p-2 text-[11px] text-slate-200">{JSON.stringify(value, null, 2)}</pre></div>; }
