@@ -8,7 +8,7 @@ import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters } from '../lib/filterContext';
-import { api, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type RemediationRequest, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
+import { api, type AdvisorWorkItem, type AdvisorWorkItemEvent, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type RemediationRequest, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
 import { isVulnerabilityDataEnabled } from '../lib/featureFlags';
 import { remediationActionLabel, remediationEligibility, remediationForIssue } from '../lib/issuesRemediation';
 import { safeExternalUrl } from '../lib/safeUrl';
@@ -36,6 +36,7 @@ const tabs: Tab[] = ['Overview', 'Remediation', 'Costs & metrics', 'Owner & evid
 const text = (v: unknown) => typeof v === 'string' && v.trim() ? v.trim() : null;
 const human = (v: string | null | undefined) => v ? v.replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unavailable';
 const date = (v: string, time = false) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? 'Unavailable' : time ? d.toLocaleString() : d.toLocaleDateString(); };
+const governedSignalId = (issue: Issue) => issue.source === 'cost' ? `recommendation:${issue.nativeId}` : issue.source === 'alert' ? `alarm:${issue.nativeId}` : `security:${issue.nativeId}`;
 
 function normalize(cost: CostRecommendation[], security: VulnerabilityFinding[], alerts: AlertRow[], accountRows: CloudConnection[]): Issue[] {
   const accountMap = new Map(accountRows.map(a => [a.id, a]));
@@ -59,6 +60,8 @@ export function Issues() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set()), [selected, setSelected] = useState<Issue | null>(null), [tab, setTab] = useState<Tab>('Overview');
   const [resource, setResource] = useState<CloudResource | null>(null), [metrics, setMetrics] = useState<ResourceMetric[]>([]), [activity, setActivity] = useState<ResourceLifecycleEvent[]>([]), [detailLoading, setDetailLoading] = useState(false), [activityType, setActivityType] = useState('all');
   const [remediation, setRemediation] = useState<RemediationRequest[]>([]);
+  const [workItem, setWorkItem] = useState<AdvisorWorkItem | null>(null), [workEvents, setWorkEvents] = useState<AdvisorWorkItemEvent[]>([]);
+  const [ownerDraft, setOwnerDraft] = useState(''), [ownerUserId, setOwnerUserId] = useState(''), [commentDraft, setCommentDraft] = useState(''), [mentionIds, setMentionIds] = useState('');
   const request = useRef(0), loaded = useRef(false);
   const get = (key: string, fallback = 'all') => url.get(key) ?? fallback;
   const set = useCallback((key: string, value: string, fallback = 'all') => setUrl(previous => { const next = new URLSearchParams(previous); if (!value || value === fallback) next.delete(key); else next.set(key, value); return next; }, { replace: true }), [setUrl]);
@@ -89,16 +92,21 @@ export function Issues() {
   const environments = [...new Set(all.map(i => i.environment))].sort(), types = [...new Set(all.map(i => i.resourceType))].sort();
 
   const loadDetail = useCallback(async (issue: Issue) => {
-    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]); setRemediation([]);
+    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); setOwnerDraft(''); setOwnerUserId(''); setCommentDraft(''); setMentionIds('');
     await Promise.all([
       issue.resourceId ? api.getResource(issue.resourceId).then(setResource).catch(() => undefined) : Promise.resolve(),
       issue.resourceId ? api.getMetrics({ resourceId: issue.resourceId, limit: 200 }).then(r => setMetrics(r.items)).catch(() => undefined) : Promise.resolve(),
       issue.connectionId ? api.getResourceTimeline({ connectionId: issue.connectionId, limit: 200 }).then(r => setActivity(r.items.filter(e => !issue.resourceId || e.resource_id === issue.resourceId || e.aws_resource_id === issue.resourceId))).catch(() => undefined) : Promise.resolve(),
       issue.source === 'cost' && issue.connectionId ? api.listRemediation({ connectionId: issue.connectionId }).then(r => setRemediation(r.items)).catch(() => undefined) : Promise.resolve(),
+      api.getAdvisorWorkItems().then(async result => {
+        const item = result.items.find(candidate => candidate.signal_id === governedSignalId(issue)) ?? null;
+        setWorkItem(item); setOwnerDraft(item?.owner === 'unassigned' ? '' : item?.owner ?? '');
+        if (item) setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events);
+      }).catch(() => undefined),
     ]); setDetailLoading(false);
   }, []);
   const open = useCallback((issue: Issue) => { setSelected(issue); setTab('Overview'); setActivityType('all'); set('id', issue.id, ''); void loadDetail(issue); }, [loadDetail, set]);
-  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); set('id', '', ''); };
+  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); set('id', '', ''); };
   useEffect(() => { const id = url.get('id'); const issue = id ? all.find(i => i.id === id) : null; if (issue && selected?.id !== issue.id) open(issue); }, [all, open, selected?.id, url]);
 
   async function mutate(issue: Issue, action: 'resolve' | 'progress' | 'suppress' | 'apply' | 'dismiss' | 'exclude') {
@@ -147,6 +155,35 @@ export function Issues() {
     finally { setBusy(false); }
   }
 
+  async function startGovernance() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const item = await api.createAdvisorWorkItem({ signalId: governedSignalId(selected), owner: ownerDraft || undefined });
+      setWorkItem(item); setOwnerDraft(item.owner === 'unassigned' ? '' : item.owner); setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events);
+      toast('Governed workflow started with an accountable deadline and append-only history.', 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not start governance.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function saveOwner() {
+    if (!workItem || !ownerDraft.trim()) return;
+    setBusy(true);
+    try {
+      const item = await api.assignAdvisorWorkItem(workItem.id, { owner: ownerDraft.trim(), ownerUserId: ownerUserId.trim() || null });
+      setWorkItem(item); setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events); toast('Accountable owner updated and audited.', 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not assign owner.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function addComment() {
+    if (!workItem || !commentDraft.trim()) return;
+    setBusy(true);
+    try {
+      const ids = mentionIds.split(',').map(value => value.trim()).filter(Boolean);
+      await api.addAdvisorWorkItemComment(workItem.id, { comment: commentDraft.trim(), mentionUserIds: ids });
+      setCommentDraft(''); setMentionIds(''); setWorkEvents((await api.getAdvisorWorkItemEvents(workItem.id)).events); toast('Comment added to append-only history.', 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not add comment.', 'error'); } finally { setBusy(false); }
+  }
+
   const columns: Column<Issue>[] = [
     { key: 'source', header: 'Source', render: i => <Badge tone="neutral">{labels[i.source]}</Badge>, sortValue: i => i.source },
     { key: 'issue', header: 'Issue', sticky: true, render: i => <span className="inline-block max-w-md truncate font-medium">{i.title}</span>, sortValue: i => i.title },
@@ -186,8 +223,8 @@ export function Issues() {
       {tab === 'Overview' && <><p className="whitespace-pre-wrap">{selected.detail || 'No description supplied by the source.'}</p><Grid rows={[["Account", selected.account], ['Environment', selected.environment], ['Resource type', resource?.resource_type_key || selected.resourceType], ['Resource', resource?.resource_id || selected.resourceId || 'Unavailable'], ['Region', resource?.region || finding?.region || text(alert?.metadata.region) || 'Unavailable'], ['Detected', date(selected.occurredAt, true)], ['Last observed', resource?.last_seen_at ? date(resource.last_seen_at, true) : finding?.last_seen_at ? date(finding.last_seen_at, true) : 'Unavailable'], ['Evidence', detailLoading ? 'Loading' : resource || metrics.length || activity.length ? 'Available' : 'No additional evidence returned']]} /></>}
       {tab === 'Remediation' && <div className="space-y-3">{costItem && <><Callout title="Recommended action">{costItem.recommended_action}</Callout><Grid rows={[["Validity", human(costItem.validity)], ['Reason', costItem.validity_reason || 'Unavailable'], ['Confidence', costItem.confidence == null ? 'Unavailable' : `${Math.round(costItem.confidence * 100)}%`], ['Evidence window', costItem.evidence_window_days == null ? 'Unavailable' : `${costItem.evidence_window_days} days`]]} /><Callout title="Governed AWS action">{eligibility.reason}</Callout>{canRequestRemediation && eligibility.action && <button disabled={busy || detailLoading} onClick={() => void remediationAction('request')} className="btn-primary text-xs">Request {remediationActionLabel[eligibility.action]}</button>}{remediationRequest && <RemediationLifecycle row={remediationRequest} busy={busy} act={remediationAction} />}{issueRemediation.length > 1 && <p className="text-xs text-slate-500">{issueRemediation.length - 1} earlier remediation request(s) remain in the immutable history.</p>}<div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'apply')} className="btn-secondary text-xs">Mark applied</button><button disabled={busy} onClick={() => void mutate(selected, 'dismiss')} className="btn-secondary text-xs">Dismiss</button><button disabled={busy} onClick={() => void mutate(selected, 'exclude')} className="btn-secondary text-xs">Exclude 30 days</button></div></>}{finding && <><Callout title="Security solution">{finding.remediation_link ? 'Follow the source guidance, re-scan, and resolve only after fresh evidence confirms the finding is absent.' : 'No remediation link was supplied. Review source evidence before changing the resource.'}</Callout>{safeExternalUrl(finding.remediation_link) && <a href={safeExternalUrl(finding.remediation_link)!} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Open remediation guidance ↗</a>}<div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button><button disabled={busy} onClick={() => void mutate(selected, 'suppress')} className="btn-secondary text-xs">Suppress</button></div></>}{alert && <><Callout title="Operational response">Investigate the alarm and affected resource, mark work in progress, and resolve after recovery.</Callout><div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'progress')} className="btn-secondary text-xs">Mark in progress</button><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button></div></>}</div>}
       {tab === 'Costs & metrics' && <div className="space-y-3"><Grid rows={[["Monthly resource cost", resource?.cost_monthly == null ? 'Unavailable' : `$${resource.cost_monthly.toLocaleString()}`], ['Potential monthly savings', costItem ? `$${costItem.potential_monthly_savings.toLocaleString()}` : 'Unavailable'], ['Potential annual savings', selected.annualSavings == null ? 'Unavailable' : `$${Math.round(selected.annualSavings).toLocaleString()}`], ['Savings verification', costItem ? human(costItem.savings_state) : 'Unavailable']]} /><h3 className="font-medium">Live metric evidence</h3>{metricSummary.length ? <div className="grid gap-2 sm:grid-cols-2">{metricSummary.map(m => <div key={m.name} className="rounded-lg border p-3"><span className="text-xs text-slate-500">{m.name}</span><div>Avg {m.avg.toFixed(2)} · Peak {m.max.toFixed(2)}</div><small>{m.count} samples</small></div>)}</div> : <Unavailable>Metrics are unavailable or have not been collected.</Unavailable>}</div>}
-      {tab === 'Owner & evidence' && <div className="space-y-3"><Grid rows={[["Owner", costItem?.ownership?.owner?.value || 'Unassigned / unavailable'], ['Team', costItem?.ownership?.team?.value || 'Unassigned / unavailable'], ['Application', costItem?.ownership?.application?.value || 'Unavailable'], ['Evidence source', selected.source === 'cost' ? human(costItem?.source) : selected.source === 'security' ? human(finding?.finding_source) : 'Monitoring alert']]} /><pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{JSON.stringify(selected.raw, null, 2)}</pre><Unavailable>Infrastructure code appears only when an exact linked repository file is known. Guessed Terraform is never generated.</Unavailable></div>}
-      {tab === 'Activities' && <div className="space-y-3"><Select label="Activity type" value={activityType} set={setActivityType} options={[['all', 'All activity'], ...activityTypes.map(v => [v, human(v)] as [string, string])]} />{visibleActivity.length ? visibleActivity.map(a => <div key={a.id} className="rounded-lg border p-3"><div className="flex justify-between"><strong>{human(a.event_type)}</strong><time className="text-xs text-slate-400">{date(a.occurred_at, true)}</time></div><pre className="mt-2 overflow-auto text-[11px]">{JSON.stringify(a.detail, null, 2)}</pre></div>) : <Unavailable>No lifecycle activity was returned.</Unavailable>}<Unavailable>Comments require an append-only decision-event API. Local-only comments are not presented as persisted.</Unavailable></div>}
+      {tab === 'Owner & evidence' && <div className="space-y-3"><Grid rows={[["Governed owner", workItem?.owner || 'Workflow not started'], ['Workflow state', workItem ? human(workItem.state) : 'Not governed'], ['Due', workItem?.due_at ? date(workItem.due_at, true) : 'Unavailable'], ['Next escalation', workItem?.next_escalation_at ? date(workItem.next_escalation_at, true) : 'Not scheduled'], ["Discovered owner", costItem?.ownership?.owner?.value || 'Unassigned / unavailable'], ['Team', costItem?.ownership?.team?.value || 'Unassigned / unavailable'], ['Application', costItem?.ownership?.application?.value || 'Unavailable'], ['Evidence source', selected.source === 'cost' ? human(costItem?.source) : selected.source === 'security' ? human(finding?.finding_source) : 'Monitoring alert']]} />{!workItem ? <div className="space-y-2 rounded-lg border p-3"><p className="text-xs text-slate-500">Start a governed workflow to persist ownership, deadlines, escalation, comments, approvals, and exceptions.</p><input aria-label="Initial accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team (optional)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy} onClick={() => void startGovernance()} className="btn-primary text-xs">Start governed workflow</button></div> : <div className="space-y-2 rounded-lg border p-3"><strong className="text-xs">Assign accountable owner</strong><input aria-label="Accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Owner member ID" value={ownerUserId} onChange={e => setOwnerUserId(e.target.value)} placeholder="Organization member UUID (optional, validated)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !ownerDraft.trim()} onClick={() => void saveOwner()} className="btn-primary text-xs">Save owner</button></div>}<pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{JSON.stringify(selected.raw, null, 2)}</pre><Unavailable>Infrastructure code appears only when an exact linked repository file is known. Guessed Terraform is never generated.</Unavailable></div>}
+      {tab === 'Activities' && <div className="space-y-3">{workItem && <div className="space-y-2 rounded-lg border p-3"><strong className="text-xs">Add governed comment</strong><textarea aria-label="Governed comment" value={commentDraft} onChange={e => setCommentDraft(e.target.value)} maxLength={4000} rows={3} placeholder="Record context, evidence, or a decision…" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Mention organization members" value={mentionIds} onChange={e => setMentionIds(e.target.value)} placeholder="Member UUIDs, comma-separated (optional)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !commentDraft.trim()} onClick={() => void addComment()} className="btn-primary text-xs">Add comment</button><p className="text-[11px] text-slate-400">Mentions are accepted only for validated members of this organization.</p></div>}{workEvents.length ? workEvents.map(event => <div key={event.id} className="rounded-lg border border-brand-200 p-3"><div className="flex justify-between"><strong>{human(event.event_type)}</strong><time className="text-xs text-slate-400">{date(event.created_at, true)}</time></div><p className="mt-1 text-[11px] text-slate-400">Actor {event.actor_id}</p><pre className="mt-2 overflow-auto whitespace-pre-wrap text-[11px]">{JSON.stringify(event.details, null, 2)}</pre></div>) : <Unavailable>No governed activity has been recorded for this issue.</Unavailable>}<Select label="Resource activity type" value={activityType} set={setActivityType} options={[['all', 'All resource activity'], ...activityTypes.map(v => [v, human(v)] as [string, string])]} />{visibleActivity.length ? visibleActivity.map(a => <div key={a.id} className="rounded-lg border p-3"><div className="flex justify-between"><strong>{human(a.event_type)}</strong><time className="text-xs text-slate-400">{date(a.occurred_at, true)}</time></div><pre className="mt-2 overflow-auto text-[11px]">{JSON.stringify(a.detail, null, 2)}</pre></div>) : <Unavailable>No resource lifecycle activity was returned.</Unavailable>}</div>}
       {tab === 'Related issues' && (related.length ? related.map(i => <button key={i.id} onClick={() => open(i)} className="block w-full rounded-lg border p-3 text-left"><Badge tone="neutral">{labels[i.source]}</Badge><strong className="mt-2 block">{i.title}</strong>{i.annualSavings != null && <span className="text-xs text-emerald-600">${Math.round(i.annualSavings).toLocaleString()}/yr</span>}</button>) : <Unavailable>No related issue shares this resource or account in the loaded evidence.</Unavailable>)}
     </div>}</Drawer>{dialog}
   </div>;
