@@ -105,14 +105,9 @@ describe('MarketingHome', () => {
     expect(container.querySelector('#security')).toBeInTheDocument();
   });
 
-  it('links the documentation preview to the real docs route', () => {
+  it('does not expose authenticated documentation in public navigation', () => {
     renderHome();
-
-    const docsLink = screen.getByRole('link', {
-      name: /read the docs/i,
-    });
-
-    expect(docsLink).toHaveAttribute('href', '/docs');
+    expect(screen.queryByRole('link', { name: /docs|documentation/i })).not.toBeInTheDocument();
   });
 });
 /**
@@ -131,7 +126,7 @@ describe('MarketingHome coverage and roadmap honesty', () => {
     renderHome();
     expect(screen.getByRole('heading', { name: 'Full-stack Monitoring' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'AI SRE' })).toBeInTheDocument();
-    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
+    expect(screen.getAllByText('Coming soon')).toHaveLength(4);
   });
 
   it('states the human-control boundary', () => {

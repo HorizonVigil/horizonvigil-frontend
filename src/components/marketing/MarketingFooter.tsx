@@ -22,7 +22,6 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
       { label: 'Monitoring & SRE', href: '/#roadmap', section: true },
       { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
-      { label: 'Documentation', href: '/docs' },
       // "Status" removed 2026-09-08 (live audit): /status had no route at
       // all -- clicking it 404'd. No status-page service exists yet
       // (nothing in marketingContent.ts or the env-style API URL constants

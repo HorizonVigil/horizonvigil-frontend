@@ -12,7 +12,6 @@ const SECTION_LINKS = [
 ];
 const PAGE_LINKS = [
   { to: '/pricing', label: 'Pricing' },
-  { to: '/docs', label: 'Docs' },
 ];
 
 /**
