@@ -157,7 +157,7 @@ export function Overview() {
           <div>
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Horizon Intelligence
+              Sanvi AI
             </div>
             <h3 id="intelligence-heading" className="mt-2 text-xl font-semibold tracking-tight">
               Move from signals to decisions.
@@ -178,7 +178,7 @@ export function Overview() {
                 onClick={() => navigate('/ai-copilot?view=advisor')}
                 className="rounded-md border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500"
               >
-                Ask AI Advisor
+                Ask Sanvi AI
               </button>
             </div>
           </div>
