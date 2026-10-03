@@ -150,10 +150,10 @@ export function Overview() {
 
       <section
         aria-labelledby="intelligence-heading"
-        className="relative mb-5 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 px-5 py-5 text-white shadow-sm sm:px-6"
+        className="relative mb-5 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 px-5 py-4 text-white shadow-sm sm:px-6"
       >
         <div className="absolute -right-20 -top-24 h-56 w-56 rounded-full bg-brand-500/20 blur-3xl" aria-hidden="true" />
-        <div className="relative grid gap-5 xl:grid-cols-[1.2fr_.8fr] xl:items-center">
+        <div className="relative grid gap-4 xl:grid-cols-[1.35fr_.65fr] xl:items-center">
           <div>
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -168,7 +168,7 @@ export function Overview() {
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => navigate('/ai-copilot')}
+                onClick={() => navigate('/issues')}
                 className="rounded-md bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-500"
               >
                 Review decision queue
@@ -182,16 +182,16 @@ export function Overview() {
               </button>
             </div>
           </div>
-          <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+          <ol className="flex flex-wrap items-center gap-x-4 gap-y-2 xl:justify-end">
             {[
               ['01', 'Explain'],
               ['02', 'Verify'],
               ['03', 'Advise'],
               ['04', 'Record'],
             ].map(([number, label]) => (
-              <li key={label} className="rounded-lg border border-slate-800 bg-slate-900/80 p-3">
-                <span className="text-[10px] font-semibold text-brand-400">{number}</span>
-                <p className="mt-1 text-xs font-medium text-slate-200">{label}</p>
+              <li key={label} className="flex items-center gap-2 whitespace-nowrap">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full border border-brand-500/40 bg-brand-500/10 text-[10px] font-semibold text-brand-300">{number}</span>
+                <p className="text-xs font-medium text-slate-300">{label}</p>
               </li>
             ))}
           </ol>
