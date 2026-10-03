@@ -1,6 +1,4 @@
 import { Link } from 'react-router-dom';
-import { MarketingNav } from '../../components/marketing/MarketingNav';
-import { MarketingFooter } from '../../components/marketing/MarketingFooter';
 import { CONTACT_SALES_HREF } from '../../lib/marketingContent';
 
 const STEPS = [
@@ -63,10 +61,8 @@ const MODULES = [
 
 export function Docs() {
   return (
-    <div className="bg-white dark:bg-slate-950 min-h-screen flex flex-col">
-      <MarketingNav />
-
-      <main className="flex-grow" id="main-content">
+    <div className="bg-white dark:bg-slate-950 min-h-full rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <main id="main-content">
         <header className="max-w-3xl mx-auto px-5 pt-16 pb-8 text-center">
           <h1 className="text-4xl font-bold text-slate-900 dark:text-white text-balance">
             Documentation
@@ -169,17 +165,16 @@ export function Docs() {
                 Contact us
               </a>
               <Link
-                to="/signup"
+                to="/overview"
                 className="text-sm font-semibold px-4 py-2 rounded-md bg-brand-600 hover:bg-brand-700 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
               >
-                Start free
+                Back to workspace
               </Link>
             </div>
           </div>
         </section>
       </main>
 
-      <MarketingFooter />
     </div>
   );
 }
