@@ -65,7 +65,7 @@ describe('MarketingHome', () => {
     expect(screen.getByText(/privacy/i)).toBeInTheDocument();
   });
 
-  it('positions Horizon Intelligence as a governed decision system', () => {
+  it('positions VigilNexa AI as a governed decision system', () => {
     renderHome();
 
     const pageText = document.body.textContent ?? '';
@@ -85,7 +85,7 @@ describe('MarketingHome', () => {
     renderHome();
     expect(screen.getByRole('heading', { name: 'Multicloud FinOps' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Cloud Security' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'AI Intelligence' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'VigilNexa AI' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Decision Governance' })).toBeInTheDocument();
   });
 
@@ -122,10 +122,10 @@ describe('MarketingHome coverage and roadmap honesty', () => {
     expect(document.body.textContent).toMatch(/AWS, Google Cloud and Azure/i);
   });
 
-  it('marks monitoring and AI SRE as coming soon', () => {
+  it('marks Vigil Observability and VigilNexa Reliability as coming soon', () => {
     renderHome();
-    expect(screen.getByRole('heading', { name: 'Full-stack Monitoring' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'AI SRE' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vigil Observability' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'VigilNexa Reliability' })).toBeInTheDocument();
     expect(screen.getAllByText('Coming soon')).toHaveLength(4);
   });
 

@@ -15,7 +15,7 @@ const DECISION_STAGES = [
 const PLATFORM_PILLARS = [
   { title: 'Multicloud FinOps', metric: 'Available now', description: 'Understand spend across AWS, Google Cloud, and Azure, find waste, and turn optimization opportunities into accountable work.', bullets: ['Cost allocation and trends', 'Anomaly and waste detection', 'Rightsizing and commitments'] },
   { title: 'Cloud Security', metric: 'Available now', description: 'Prioritize misconfiguration, exposure, identity, vulnerability, and compliance evidence with resource context and remediation guidance.', bullets: ['Posture and exposure', 'Identity and vulnerabilities', 'Compliance evidence'] },
-  { title: 'AI Intelligence', metric: 'Available now', description: 'Correlate cost, security, resource, and change evidence to explain what happened, who changed it, and what it affects.', bullets: ['Explain and verify', 'Impact analysis', 'Evidence-linked advice'] },
+  { title: 'VigilNexa AI', metric: 'Available now', description: 'Correlate cost, security, resource, and change evidence to explain what happened, who changed it, and what it affects.', bullets: ['Explain and verify', 'Impact analysis', 'Evidence-linked advice'] },
   { title: 'Decision Governance', metric: 'Available now', description: 'Route decisions through owners, approvals, exceptions, remediation evidence, and an auditable outcome history.', bullets: ['Owners and approvals', 'Governed remediation', 'Decision and outcome history'] },
 ];
 
@@ -26,17 +26,17 @@ const PROVIDERS = [
 ];
 
 const ROADMAP = [
-  { title: 'Full-stack Monitoring', label: 'Coming soon', description: 'Dynatrace-class infrastructure and application observability across metrics, logs, traces, service maps, synthetic checks, alerts, and SLOs.' },
-  { title: 'AI SRE', label: 'Coming soon', description: 'OpenSRE-inspired agents that correlate telemetry, deployments, configuration, and runbooks to investigate incidents and recommend governed recovery actions.' },
+  { title: 'Vigil Observability', label: 'Coming soon', description: 'Infrastructure and application observability across metrics, logs, traces, service maps, synthetic checks, alerts, and SLOs.' },
+  { title: 'VigilNexa Reliability', label: 'Coming soon', description: 'Intelligent reliability workflows that correlate telemetry, deployments, configuration, and runbooks to investigate incidents and recommend governed recovery actions.' },
   { title: 'Incident Intelligence', label: 'Coming soon', description: 'Alert correlation, probable root cause, blast-radius analysis, ownership, timelines, post-incident evidence, and reusable learning from every response.' },
   { title: 'Unified Operations', label: 'Coming soon', description: 'A shared operations workspace for service health, Kubernetes, cloud dependencies, on-call collaboration, automation, and reliability governance.' },
 ];
 
 const FAQS = [
-  { question: 'What is Horizon Intelligence?', answer: 'It is the decision layer inside HorizonVigil. It brings together cloud evidence, explains what changed, verifies the supporting data, advises the next step, and keeps the human decision attached to the outcome.' },
+  { question: 'What is VigilNexa AI?', answer: 'VigilNexa AI is the decision layer inside HorizonVigil. It brings together cloud evidence, explains what changed, verifies the supporting data, advises the next step, and keeps the human decision attached to the outcome.' },
   { question: 'Does HorizonVigil make changes in my cloud?', answer: 'No. V1 connects read-only and keeps a human in control. It can prepare guidance, commands, or a reviewable handoff, but it does not silently mutate cloud resources.' },
   { question: 'Which providers are available?', answer: 'AWS, Google Cloud, and Microsoft Azure are supported for multicloud cost visibility and optimization. Inventory, security, and provider-native evidence vary by service and remain explicit, so a connected account is never mistaken for collected evidence.' },
-  { question: 'Are Monitoring and AI SRE available today?', answer: 'They are planned product surfaces and are clearly marked coming soon. The current product focuses on multicloud FinOps, cloud security, AI Intelligence, and governed decision workflows.' },
+  { question: 'Are Vigil Observability and VigilNexa Reliability available today?', answer: 'They are planned product surfaces and are clearly marked coming soon. The current product focuses on multicloud FinOps, cloud security, VigilNexa AI, and governed decision workflows.' },
   { question: 'Can I start without a sales call?', answer: 'Yes. The Free plan connects one cloud account for two users. Paid plans add account scale, users, automation capacity, retention, and support.' },
 ];
 
@@ -117,7 +117,7 @@ function Hero() {
           </div>
           <p className="mt-5 text-xs text-slate-500">AWS · Google Cloud · Microsoft Azure · Read-only onboarding · Human-governed action</p>
         </div>
-        <div className="relative" aria-label="Illustrative Horizon Intelligence decision queue">
+        <div className="relative" aria-label="Illustrative VigilNexa AI decision queue">
           <div className="absolute -inset-5 rounded-[2rem] bg-brand-500/10 blur-2xl" aria-hidden="true" />
           <div className="relative overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl shadow-black/40">
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
@@ -151,7 +151,7 @@ function TrustBar() {
 }
 
 function DecisionIntelligence() {
-  return <Section id="intelligence"><div className="mx-auto max-w-3xl text-center"><Eyebrow>Horizon Intelligence</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A decision system, not another stream of findings.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Every recommendation follows the same reviewable path. Teams get the context to act with confidence while people retain control of the decision.</p></div>
+  return <Section id="intelligence"><div className="mx-auto max-w-3xl text-center"><Eyebrow>VigilNexa AI</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A decision system, not another stream of findings.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Every recommendation follows the same reviewable path. Teams get the context to act with confidence while people retain control of the decision.</p></div>
     <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">{DECISION_STAGES.map(stage => <article key={stage.title} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-brand-600 dark:text-brand-400">{stage.number}</span><span className="h-px w-10 bg-slate-200 transition-all group-hover:w-16 group-hover:bg-brand-400 dark:bg-slate-700" /></div><h3 className="mt-8 text-xl font-semibold">{stage.title}</h3><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{stage.description}</p></article>)}</div>
   </Section>;
 }
@@ -163,7 +163,7 @@ function Platform() {
 }
 
 function Roadmap() {
-  return <Section id="roadmap"><div className="grid gap-10 lg:grid-cols-[.7fr_1.3fr]"><div><Eyebrow>What comes next</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">From cloud decisions to autonomous operations.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Monitoring and SRE are being developed as first-class HorizonVigil capabilities. They are presented separately so current product coverage stays clear.</p></div><div className="grid gap-4">{ROADMAP.map(item => <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-xl font-semibold">{item.title}</h3><span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">{item.label}</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{item.description}</p></article>)}</div></div></Section>;
+  return <Section id="roadmap"><div className="grid gap-10 lg:grid-cols-[.7fr_1.3fr]"><div><Eyebrow>What comes next</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">From cloud decisions to autonomous operations.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Vigil Observability and VigilNexa Reliability are being developed as first-class HorizonVigil capabilities. They are presented separately so current product coverage stays clear.</p></div><div className="grid gap-4">{ROADMAP.map(item => <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-xl font-semibold">{item.title}</h3><span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">{item.label}</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{item.description}</p></article>)}</div></div></Section>;
 }
 
 function DecisionWorkspace() {
@@ -174,7 +174,7 @@ function DecisionWorkspace() {
 }
 
 function Coverage() {
-  return <div className="border-y border-slate-200 bg-slate-950 text-white dark:border-slate-800"><Section><div className="grid gap-10 lg:grid-cols-[.8fr_1.2fr]"><div><Eyebrow>Cloud coverage</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A separate provider path. A shared decision layer.</h2><p className="mt-4 text-sm leading-6 text-slate-400">Each cloud keeps its native account, resource, cost, and security model. Horizon Intelligence normalizes the evidence needed to explain and govern a decision.</p></div><div className="grid gap-3">{PROVIDERS.map((provider, index) => <div key={provider.name} className="flex gap-4 rounded-xl border border-slate-800 bg-slate-900/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-xs font-bold text-brand-300">0{index + 1}</span><div><h3 className="font-semibold">{provider.name}</h3><p className="mt-1 text-sm leading-6 text-slate-400">{provider.detail}</p></div></div>)}</div></div></Section></div>;
+  return <div className="border-y border-slate-200 bg-slate-950 text-white dark:border-slate-800"><Section><div className="grid gap-10 lg:grid-cols-[.8fr_1.2fr]"><div><Eyebrow>Cloud coverage</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">A separate provider path. A shared decision layer.</h2><p className="mt-4 text-sm leading-6 text-slate-400">Each cloud keeps its native account, resource, cost, and security model. VigilNexa AI normalizes the evidence needed to explain and govern a decision.</p></div><div className="grid gap-3">{PROVIDERS.map((provider, index) => <div key={provider.name} className="flex gap-4 rounded-xl border border-slate-800 bg-slate-900/70 p-5"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-xs font-bold text-brand-300">0{index + 1}</span><div><h3 className="font-semibold">{provider.name}</h3><p className="mt-1 text-sm leading-6 text-slate-400">{provider.detail}</p></div></div>)}</div></div></Section></div>;
 }
 
 function Security() {

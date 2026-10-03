@@ -17,9 +17,9 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
   {
     title: 'Product',
     links: [
-      { label: 'Horizon Intelligence', href: '/#intelligence', section: true },
+      { label: 'VigilNexa AI', href: '/#intelligence', section: true },
       { label: 'Platform', href: '/#platform', section: true },
-      { label: 'Monitoring & SRE', href: '/#roadmap', section: true },
+      { label: 'Vigil Observability & VigilNexa Reliability', href: '/#roadmap', section: true },
       { label: 'Security', href: '/#security', section: true },
       { label: 'Pricing', href: '/pricing' },
       // "Status" removed 2026-09-08 (live audit): /status had no route at
