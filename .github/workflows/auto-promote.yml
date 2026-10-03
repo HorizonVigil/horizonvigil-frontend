@@ -39,7 +39,7 @@ jobs:
           # GitHub performs the merge only after every required branch check
           # succeeds. A failed, cancelled, skipped, stale, or missing check
           # leaves the pull request open and unmerged.
-          gh pr merge --auto --squash "$PR_URL"
+          gh pr merge --auto --merge "$PR_URL"
 
   promote:
     if: github.event_name == 'push'
@@ -61,4 +61,4 @@ jobs:
           if [ -z "$pr_url" ]; then
             pr_url="$(gh pr create --repo "$REPOSITORY" --head "$SOURCE" --base "$TARGET" --title "Promote $SOURCE to $TARGET" --body "Automated promotion. Merge remains blocked until every required build, browser, security, and promotion check succeeds.")"
           fi
-          gh pr merge --repo "$REPOSITORY" --auto --squash "$pr_url"
+          gh pr merge --repo "$REPOSITORY" --auto --merge "$pr_url"
