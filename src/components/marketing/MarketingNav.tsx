@@ -7,11 +7,11 @@ import { scrollToSection } from '../../lib/scrollToSection';
 const SECTION_LINKS = [
   { id: 'intelligence', label: 'Intelligence' },
   { id: 'platform', label: 'Platform' },
+  { id: 'roadmap', label: 'Roadmap' },
   { id: 'security', label: 'Security' },
 ];
 const PAGE_LINKS = [
   { to: '/pricing', label: 'Pricing' },
-  { to: '/docs', label: 'Docs' },
 ];
 
 /**

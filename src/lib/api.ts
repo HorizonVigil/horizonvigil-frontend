@@ -1515,6 +1515,11 @@ class ApiClient {
   getAdvisorWorkItems() { return this.get<{ items: AdvisorWorkItem[]; count: number }>('aiCopilot', '/api/ai-copilot/advisor/work-items'); }
   createAdvisorWorkItem(data: { signalId: string; owner?: string }) { return this.post<AdvisorWorkItem>('aiCopilot', '/api/ai-copilot/advisor/work-items', data); }
   assignAdvisorWorkItem(id: string, data: { owner: string; ownerUserId?: string | null }) { return this.patch<AdvisorWorkItem>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/owner`, data); }
+  transitionAdvisorWorkItem(id: string, data: { state: AdvisorWorkItemState; note?: string }) { return this.post<AdvisorWorkItem>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/transition`, data); }
+  getAdvisorApprovalRequests(id: string) { return this.get<{ requests: AdvisorApprovalRequest[]; count: number }>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/approval-requests`); }
+  requestAdvisorApproval(id: string, data: { requiredRole: 'owner' | 'admin' | 'editor'; sequence: number; expiresAt?: string | null }) { return this.post<{ id: string }>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/approval-requests`, data); }
+  decideAdvisorApproval(id: string, data: { decision: 'approved' | 'rejected'; note?: string }) { return this.post<{ id: string; status: string }>('aiCopilot', `/api/ai-copilot/advisor/approval-requests/${pathSegment(id)}/decision`, data); }
+  grantAdvisorException(id: string, data: { requestedBy: string; justification: string; expiresAt: string }) { return this.post<AdvisorWorkItem>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/exceptions`, data); }
   getAdvisorWorkItemEvents(id: string) { return this.get<{ events: AdvisorWorkItemEvent[] }>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/events`); }
   addAdvisorWorkItemComment(id: string, data: { comment: string; mentionUserIds?: string[] }) { return this.post<{ id: string; created_at: string }>('aiCopilot', `/api/ai-copilot/advisor/work-items/${pathSegment(id)}/comments`, data); }
   explainAdvisorSignal(data: { signalId: string; mode: AdvisorMode }) {
@@ -2263,5 +2268,7 @@ export interface ChatSource { type: string; summary: string }
 export interface ChatReply { conversationId: string; message: string; sources: ChatSource[] }
 export interface ConversationSummary { id: string; title: string; pinned: boolean; created_at: string; updated_at: string }
 export interface ChatMessage { id: string; role: 'user' | 'assistant' | 'system'; content: string; sources: ChatSource[]; created_at: string }
-export interface AdvisorWorkItem { id: string; signal_id: string; signal_type: string; signal_title: string; severity: string; state: string; owner: string; owner_source: string; owner_confidence: number; escalation_policy_id: string | null; escalation_step: number; due_at: string | null; next_escalation_at: string | null; exception_id: string | null; created_at: string; updated_at: string }
+export type AdvisorWorkItemState = 'open' | 'acknowledged' | 'in_review' | 'approved' | 'dismissed' | 'resolved' | 'exception';
+export interface AdvisorWorkItem { id: string; signal_id: string; signal_type: string; signal_title: string; severity: string; state: AdvisorWorkItemState; owner: string; owner_source: string; owner_confidence: number; escalation_policy_id: string | null; escalation_step: number; due_at: string | null; next_escalation_at: string | null; exception_id: string | null; created_at: string; updated_at: string }
+export interface AdvisorApprovalRequest { id: string; work_item_id: string; requested_by: string; required_role: 'owner' | 'admin' | 'editor'; sequence: number; status: 'pending' | 'approved' | 'rejected' | 'expired'; expires_at: string | null; decided_by: string | null; decision_note: string | null; decided_at: string | null; created_at: string }
 export interface AdvisorWorkItemEvent { id: string; work_item_id: string; actor_id: string; event_type: string; from_state: string | null; to_state: string | null; details: Record<string, unknown>; evidence_ids: string[]; created_at: string }

@@ -192,7 +192,7 @@ export const REGISTRY_META: readonly WidgetMeta[] = [
   {
     id: 'quick-actions', title: 'Quick Actions', description: 'Shortcuts to the tasks you run most.',
     category: 'operations', kind: 'panel', module: null, requires: [],
-    defaultSize: { w: 3, h: 3 }, basePriority: 80, integrated: true,
+    defaultSize: { w: 3, h: 3 }, basePriority: 80, integrated: true, defaultEnabled: false,
   },
   {
     id: 'active-incidents', title: 'Active Incidents', description: 'Open incidents in your scope.',
@@ -237,7 +237,7 @@ export const REGISTRY_META: readonly WidgetMeta[] = [
   {
     id: 'favorites', title: 'Favorites', description: 'Accounts, resources and reports you pinned.',
     category: 'operations', kind: 'panel', module: null, requires: [],
-    defaultSize: { w: 1, h: 6 }, basePriority: 258, integrated: true,
+    defaultSize: { w: 1, h: 6 }, basePriority: 258, integrated: true, defaultEnabled: false,
   },
 
   // ══ Security panels ════════════════════════════════════════════════════
@@ -310,7 +310,7 @@ export const REGISTRY_META: readonly WidgetMeta[] = [
   {
     id: 'cost-by-service', title: 'Cost by Service', description: 'Top spending services this month.',
     category: 'finops', kind: 'panel', module: 'cost', requires: ['cost.read'],
-    defaultSize: { w: 1, h: 6 }, basePriority: 154, integrated: true,
+    defaultSize: { w: 1, h: 6 }, basePriority: 154, integrated: true, defaultEnabled: false,
   },
   {
     id: 'cost-by-provider', title: 'Cost by Provider', description: 'Spend split across AWS, Azure and GCP.',
@@ -331,7 +331,7 @@ export const REGISTRY_META: readonly WidgetMeta[] = [
   {
     id: 'optimization-opportunities', title: 'Optimization Opportunities', description: 'Open cost recommendations by impact.',
     category: 'finops', kind: 'panel', module: 'cost', requires: ['cost.read'],
-    defaultSize: { w: 1, h: 6 }, basePriority: 162, integrated: true,
+    defaultSize: { w: 1, h: 6 }, basePriority: 162, integrated: true, defaultEnabled: false,
   },
   {
     id: 'potential-savings', title: 'Potential Savings', description: 'Realisable monthly savings and idle resources.',

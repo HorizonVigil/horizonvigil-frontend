@@ -8,7 +8,7 @@ import { Badge } from '../components/Badge';
 import { Drawer } from '../components/Drawer';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useFilters } from '../lib/filterContext';
-import { api, type AdvisorWorkItem, type AdvisorWorkItemEvent, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type RemediationRequest, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
+import { api, type AdvisorApprovalRequest, type AdvisorWorkItem, type AdvisorWorkItemEvent, type AdvisorWorkItemState, type AlertRow, type CloudConnection, type CloudResource, type CostRecommendation, type RemediationRequest, type ResourceLifecycleEvent, type ResourceMetric, type VulnerabilityFinding } from '../lib/api';
 import { isVulnerabilityDataEnabled } from '../lib/featureFlags';
 import { remediationActionLabel, remediationEligibility, remediationForIssue } from '../lib/issuesRemediation';
 import { safeExternalUrl } from '../lib/safeUrl';
@@ -61,7 +61,10 @@ export function Issues() {
   const [resource, setResource] = useState<CloudResource | null>(null), [metrics, setMetrics] = useState<ResourceMetric[]>([]), [activity, setActivity] = useState<ResourceLifecycleEvent[]>([]), [detailLoading, setDetailLoading] = useState(false), [activityType, setActivityType] = useState('all');
   const [remediation, setRemediation] = useState<RemediationRequest[]>([]);
   const [workItem, setWorkItem] = useState<AdvisorWorkItem | null>(null), [workEvents, setWorkEvents] = useState<AdvisorWorkItemEvent[]>([]);
+  const [approvalRequests, setApprovalRequests] = useState<AdvisorApprovalRequest[]>([]);
   const [ownerDraft, setOwnerDraft] = useState(''), [ownerUserId, setOwnerUserId] = useState(''), [commentDraft, setCommentDraft] = useState(''), [mentionIds, setMentionIds] = useState('');
+  const [transitionNote, setTransitionNote] = useState(''), [approvalRole, setApprovalRole] = useState<'owner' | 'admin' | 'editor'>('admin'), [approvalNote, setApprovalNote] = useState('');
+  const [exceptionRequester, setExceptionRequester] = useState(''), [exceptionJustification, setExceptionJustification] = useState(''), [exceptionExpiry, setExceptionExpiry] = useState('');
   const request = useRef(0), loaded = useRef(false);
   const get = (key: string, fallback = 'all') => url.get(key) ?? fallback;
   const set = useCallback((key: string, value: string, fallback = 'all') => setUrl(previous => { const next = new URLSearchParams(previous); if (!value || value === fallback) next.delete(key); else next.set(key, value); return next; }, { replace: true }), [setUrl]);
@@ -92,7 +95,7 @@ export function Issues() {
   const environments = [...new Set(all.map(i => i.environment))].sort(), types = [...new Set(all.map(i => i.resourceType))].sort();
 
   const loadDetail = useCallback(async (issue: Issue) => {
-    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); setOwnerDraft(''); setOwnerUserId(''); setCommentDraft(''); setMentionIds('');
+    setDetailLoading(true); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); setApprovalRequests([]); setOwnerDraft(''); setOwnerUserId(''); setCommentDraft(''); setMentionIds(''); setTransitionNote(''); setApprovalNote(''); setExceptionRequester(''); setExceptionJustification(''); setExceptionExpiry('');
     await Promise.all([
       issue.resourceId ? api.getResource(issue.resourceId).then(setResource).catch(() => undefined) : Promise.resolve(),
       issue.resourceId ? api.getMetrics({ resourceId: issue.resourceId, limit: 200 }).then(r => setMetrics(r.items)).catch(() => undefined) : Promise.resolve(),
@@ -101,12 +104,15 @@ export function Issues() {
       api.getAdvisorWorkItems().then(async result => {
         const item = result.items.find(candidate => candidate.signal_id === governedSignalId(issue)) ?? null;
         setWorkItem(item); setOwnerDraft(item?.owner === 'unassigned' ? '' : item?.owner ?? '');
-        if (item) setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events);
+        if (item) {
+          const [events, approvals] = await Promise.all([api.getAdvisorWorkItemEvents(item.id), api.getAdvisorApprovalRequests(item.id)]);
+          setWorkEvents(events.events); setApprovalRequests(approvals.requests);
+        }
       }).catch(() => undefined),
     ]); setDetailLoading(false);
   }, []);
   const open = useCallback((issue: Issue) => { setSelected(issue); setTab('Overview'); setActivityType('all'); set('id', issue.id, ''); void loadDetail(issue); }, [loadDetail, set]);
-  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); set('id', '', ''); };
+  const close = () => { setSelected(null); setResource(null); setMetrics([]); setActivity([]); setRemediation([]); setWorkItem(null); setWorkEvents([]); setApprovalRequests([]); set('id', '', ''); };
   useEffect(() => { const id = url.get('id'); const issue = id ? all.find(i => i.id === id) : null; if (issue && selected?.id !== issue.id) open(issue); }, [all, open, selected?.id, url]);
 
   async function mutate(issue: Issue, action: 'resolve' | 'progress' | 'suppress' | 'apply' | 'dismiss' | 'exclude') {
@@ -160,9 +166,56 @@ export function Issues() {
     setBusy(true);
     try {
       const item = await api.createAdvisorWorkItem({ signalId: governedSignalId(selected), owner: ownerDraft || undefined });
-      setWorkItem(item); setOwnerDraft(item.owner === 'unassigned' ? '' : item.owner); setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events);
+      setOwnerDraft(item.owner === 'unassigned' ? '' : item.owner); await refreshGovernance(item);
       toast('Governed workflow started with an accountable deadline and append-only history.', 'success');
     } catch (e) { toast(e instanceof Error ? e.message : 'Could not start governance.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function refreshGovernance(item: AdvisorWorkItem) {
+    const [events, approvals] = await Promise.all([api.getAdvisorWorkItemEvents(item.id), api.getAdvisorApprovalRequests(item.id)]);
+    setWorkItem(item); setWorkEvents(events.events); setApprovalRequests(approvals.requests);
+  }
+
+  async function transitionGovernance(state: AdvisorWorkItemState) {
+    if (!workItem) return;
+    setBusy(true);
+    try {
+      const item = await api.transitionAdvisorWorkItem(workItem.id, { state, note: transitionNote.trim() || undefined });
+      setTransitionNote(''); await refreshGovernance(item); toast(`Workflow moved to ${human(state)}.`, 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not update workflow state.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function requestApproval() {
+    if (!workItem) return;
+    setBusy(true);
+    try {
+      const sequence = approvalRequests.reduce((max, request) => Math.max(max, request.sequence), 0) + 1;
+      await api.requestAdvisorApproval(workItem.id, { requiredRole: approvalRole, sequence });
+      const items = await api.getAdvisorWorkItems();
+      const item = items.items.find(candidate => candidate.id === workItem.id);
+      if (item) await refreshGovernance(item);
+      toast('Approval requested with separation of duties.', 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not request approval.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function decideApproval(request: AdvisorApprovalRequest, decision: 'approved' | 'rejected') {
+    setBusy(true);
+    try {
+      await api.decideAdvisorApproval(request.id, { decision, note: approvalNote.trim() || undefined });
+      setApprovalNote('');
+      if (workItem) await refreshGovernance(workItem);
+      toast(`Approval ${decision}.`, 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not record approval decision.', 'error'); } finally { setBusy(false); }
+  }
+
+  async function grantException() {
+    if (!workItem || !exceptionRequester.trim() || !exceptionJustification.trim() || !exceptionExpiry) return;
+    setBusy(true);
+    try {
+      const item = await api.grantAdvisorException(workItem.id, { requestedBy: exceptionRequester.trim(), justification: exceptionJustification.trim(), expiresAt: new Date(exceptionExpiry).toISOString() });
+      setExceptionRequester(''); setExceptionJustification(''); setExceptionExpiry(''); await refreshGovernance(item);
+      toast('Time-bound exception granted and audited.', 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not grant exception.', 'error'); } finally { setBusy(false); }
   }
 
   async function saveOwner() {
@@ -170,7 +223,7 @@ export function Issues() {
     setBusy(true);
     try {
       const item = await api.assignAdvisorWorkItem(workItem.id, { owner: ownerDraft.trim(), ownerUserId: ownerUserId.trim() || null });
-      setWorkItem(item); setWorkEvents((await api.getAdvisorWorkItemEvents(item.id)).events); toast('Accountable owner updated and audited.', 'success');
+      await refreshGovernance(item); toast('Accountable owner updated and audited.', 'success');
     } catch (e) { toast(e instanceof Error ? e.message : 'Could not assign owner.', 'error'); } finally { setBusy(false); }
   }
 
@@ -180,7 +233,7 @@ export function Issues() {
     try {
       const ids = mentionIds.split(',').map(value => value.trim()).filter(Boolean);
       await api.addAdvisorWorkItemComment(workItem.id, { comment: commentDraft.trim(), mentionUserIds: ids });
-      setCommentDraft(''); setMentionIds(''); setWorkEvents((await api.getAdvisorWorkItemEvents(workItem.id)).events); toast('Comment added to append-only history.', 'success');
+      setCommentDraft(''); setMentionIds(''); await refreshGovernance(workItem); toast('Comment added to append-only history.', 'success');
     } catch (e) { toast(e instanceof Error ? e.message : 'Could not add comment.', 'error'); } finally { setBusy(false); }
   }
 
@@ -223,7 +276,7 @@ export function Issues() {
       {tab === 'Overview' && <><p className="whitespace-pre-wrap">{selected.detail || 'No description supplied by the source.'}</p><Grid rows={[["Account", selected.account], ['Environment', selected.environment], ['Resource type', resource?.resource_type_key || selected.resourceType], ['Resource', resource?.resource_id || selected.resourceId || 'Unavailable'], ['Region', resource?.region || finding?.region || text(alert?.metadata.region) || 'Unavailable'], ['Detected', date(selected.occurredAt, true)], ['Last observed', resource?.last_seen_at ? date(resource.last_seen_at, true) : finding?.last_seen_at ? date(finding.last_seen_at, true) : 'Unavailable'], ['Evidence', detailLoading ? 'Loading' : resource || metrics.length || activity.length ? 'Available' : 'No additional evidence returned']]} /></>}
       {tab === 'Remediation' && <div className="space-y-3">{costItem && <><Callout title="Recommended action">{costItem.recommended_action}</Callout><Grid rows={[["Validity", human(costItem.validity)], ['Reason', costItem.validity_reason || 'Unavailable'], ['Confidence', costItem.confidence == null ? 'Unavailable' : `${Math.round(costItem.confidence * 100)}%`], ['Evidence window', costItem.evidence_window_days == null ? 'Unavailable' : `${costItem.evidence_window_days} days`]]} /><Callout title="Governed AWS action">{eligibility.reason}</Callout>{canRequestRemediation && eligibility.action && <button disabled={busy || detailLoading} onClick={() => void remediationAction('request')} className="btn-primary text-xs">Request {remediationActionLabel[eligibility.action]}</button>}{remediationRequest && <RemediationLifecycle row={remediationRequest} busy={busy} act={remediationAction} />}{issueRemediation.length > 1 && <p className="text-xs text-slate-500">{issueRemediation.length - 1} earlier remediation request(s) remain in the immutable history.</p>}<div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'apply')} className="btn-secondary text-xs">Mark applied</button><button disabled={busy} onClick={() => void mutate(selected, 'dismiss')} className="btn-secondary text-xs">Dismiss</button><button disabled={busy} onClick={() => void mutate(selected, 'exclude')} className="btn-secondary text-xs">Exclude 30 days</button></div></>}{finding && <><Callout title="Security solution">{finding.remediation_link ? 'Follow the source guidance, re-scan, and resolve only after fresh evidence confirms the finding is absent.' : 'No remediation link was supplied. Review source evidence before changing the resource.'}</Callout>{safeExternalUrl(finding.remediation_link) && <a href={safeExternalUrl(finding.remediation_link)!} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Open remediation guidance ↗</a>}<div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button><button disabled={busy} onClick={() => void mutate(selected, 'suppress')} className="btn-secondary text-xs">Suppress</button></div></>}{alert && <><Callout title="Operational response">Investigate the alarm and affected resource, mark work in progress, and resolve after recovery.</Callout><div className="flex gap-2"><button disabled={busy} onClick={() => void mutate(selected, 'progress')} className="btn-secondary text-xs">Mark in progress</button><button disabled={busy} onClick={() => void mutate(selected, 'resolve')} className="btn-primary text-xs">Resolve</button></div></>}</div>}
       {tab === 'Costs & metrics' && <div className="space-y-3"><Grid rows={[["Monthly resource cost", resource?.cost_monthly == null ? 'Unavailable' : `$${resource.cost_monthly.toLocaleString()}`], ['Potential monthly savings', costItem ? `$${costItem.potential_monthly_savings.toLocaleString()}` : 'Unavailable'], ['Potential annual savings', selected.annualSavings == null ? 'Unavailable' : `$${Math.round(selected.annualSavings).toLocaleString()}`], ['Savings verification', costItem ? human(costItem.savings_state) : 'Unavailable']]} /><h3 className="font-medium">Live metric evidence</h3>{metricSummary.length ? <div className="grid gap-2 sm:grid-cols-2">{metricSummary.map(m => <div key={m.name} className="rounded-lg border p-3"><span className="text-xs text-slate-500">{m.name}</span><div>Avg {m.avg.toFixed(2)} · Peak {m.max.toFixed(2)}</div><small>{m.count} samples</small></div>)}</div> : <Unavailable>Metrics are unavailable or have not been collected.</Unavailable>}</div>}
-      {tab === 'Owner & evidence' && <div className="space-y-3"><Grid rows={[["Governed owner", workItem?.owner || 'Workflow not started'], ['Workflow state', workItem ? human(workItem.state) : 'Not governed'], ['Due', workItem?.due_at ? date(workItem.due_at, true) : 'Unavailable'], ['Next escalation', workItem?.next_escalation_at ? date(workItem.next_escalation_at, true) : 'Not scheduled'], ["Discovered owner", costItem?.ownership?.owner?.value || 'Unassigned / unavailable'], ['Team', costItem?.ownership?.team?.value || 'Unassigned / unavailable'], ['Application', costItem?.ownership?.application?.value || 'Unavailable'], ['Evidence source', selected.source === 'cost' ? human(costItem?.source) : selected.source === 'security' ? human(finding?.finding_source) : 'Monitoring alert']]} />{!workItem ? <div className="space-y-2 rounded-lg border p-3"><p className="text-xs text-slate-500">Start a governed workflow to persist ownership, deadlines, escalation, comments, approvals, and exceptions.</p><input aria-label="Initial accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team (optional)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy} onClick={() => void startGovernance()} className="btn-primary text-xs">Start governed workflow</button></div> : <div className="space-y-2 rounded-lg border p-3"><strong className="text-xs">Assign accountable owner</strong><input aria-label="Accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Owner member ID" value={ownerUserId} onChange={e => setOwnerUserId(e.target.value)} placeholder="Organization member UUID (optional, validated)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !ownerDraft.trim()} onClick={() => void saveOwner()} className="btn-primary text-xs">Save owner</button></div>}<pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{JSON.stringify(selected.raw, null, 2)}</pre><Unavailable>Infrastructure code appears only when an exact linked repository file is known. Guessed Terraform is never generated.</Unavailable></div>}
+      {tab === 'Owner & evidence' && <div className="space-y-3"><Grid rows={[["Governed owner", workItem?.owner || 'Workflow not started'], ['Workflow state', workItem ? human(workItem.state) : 'Not governed'], ['Due', workItem?.due_at ? date(workItem.due_at, true) : 'Unavailable'], ['Next escalation', workItem?.next_escalation_at ? date(workItem.next_escalation_at, true) : 'Not scheduled'], ["Discovered owner", costItem?.ownership?.owner?.value || 'Unassigned / unavailable'], ['Team', costItem?.ownership?.team?.value || 'Unassigned / unavailable'], ['Application', costItem?.ownership?.application?.value || 'Unavailable'], ['Evidence source', selected.source === 'cost' ? human(costItem?.source) : selected.source === 'security' ? human(finding?.finding_source) : 'Monitoring alert']]} />{!workItem ? <div className="space-y-2 rounded-lg border p-3"><p className="text-xs text-slate-500">Start a governed workflow to persist ownership, deadlines, escalation, comments, approvals, and exceptions.</p><input aria-label="Initial accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team (optional)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy} onClick={() => void startGovernance()} className="btn-primary text-xs">Start governed workflow</button></div> : <><div className="space-y-2 rounded-lg border p-3"><strong className="text-xs">Assign accountable owner</strong><input aria-label="Accountable owner" value={ownerDraft} onChange={e => setOwnerDraft(e.target.value)} placeholder="Owner name or team" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Owner member ID" value={ownerUserId} onChange={e => setOwnerUserId(e.target.value)} placeholder="Organization member UUID (optional, validated)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !ownerDraft.trim()} onClick={() => void saveOwner()} className="btn-primary text-xs">Save owner</button></div><GovernanceControls item={workItem} requests={approvalRequests} busy={busy} transitionNote={transitionNote} setTransitionNote={setTransitionNote} transition={transitionGovernance} approvalRole={approvalRole} setApprovalRole={setApprovalRole} requestApproval={requestApproval} approvalNote={approvalNote} setApprovalNote={setApprovalNote} decideApproval={decideApproval} exceptionRequester={exceptionRequester} setExceptionRequester={setExceptionRequester} exceptionJustification={exceptionJustification} setExceptionJustification={setExceptionJustification} exceptionExpiry={exceptionExpiry} setExceptionExpiry={setExceptionExpiry} grantException={grantException} /></>}<pre className="max-h-80 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] text-slate-200">{JSON.stringify(selected.raw, null, 2)}</pre><Unavailable>Infrastructure code appears only when an exact linked repository file is known. Guessed Terraform is never generated.</Unavailable></div>}
       {tab === 'Activities' && <div className="space-y-3">{workItem && <div className="space-y-2 rounded-lg border p-3"><strong className="text-xs">Add governed comment</strong><textarea aria-label="Governed comment" value={commentDraft} onChange={e => setCommentDraft(e.target.value)} maxLength={4000} rows={3} placeholder="Record context, evidence, or a decision…" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Mention organization members" value={mentionIds} onChange={e => setMentionIds(e.target.value)} placeholder="Member UUIDs, comma-separated (optional)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !commentDraft.trim()} onClick={() => void addComment()} className="btn-primary text-xs">Add comment</button><p className="text-[11px] text-slate-400">Mentions are accepted only for validated members of this organization.</p></div>}{workEvents.length ? workEvents.map(event => <div key={event.id} className="rounded-lg border border-brand-200 p-3"><div className="flex justify-between"><strong>{human(event.event_type)}</strong><time className="text-xs text-slate-400">{date(event.created_at, true)}</time></div><p className="mt-1 text-[11px] text-slate-400">Actor {event.actor_id}</p><pre className="mt-2 overflow-auto whitespace-pre-wrap text-[11px]">{JSON.stringify(event.details, null, 2)}</pre></div>) : <Unavailable>No governed activity has been recorded for this issue.</Unavailable>}<Select label="Resource activity type" value={activityType} set={setActivityType} options={[['all', 'All resource activity'], ...activityTypes.map(v => [v, human(v)] as [string, string])]} />{visibleActivity.length ? visibleActivity.map(a => <div key={a.id} className="rounded-lg border p-3"><div className="flex justify-between"><strong>{human(a.event_type)}</strong><time className="text-xs text-slate-400">{date(a.occurred_at, true)}</time></div><pre className="mt-2 overflow-auto text-[11px]">{JSON.stringify(a.detail, null, 2)}</pre></div>) : <Unavailable>No resource lifecycle activity was returned.</Unavailable>}</div>}
       {tab === 'Related issues' && (related.length ? related.map(i => <button key={i.id} onClick={() => open(i)} className="block w-full rounded-lg border p-3 text-left"><Badge tone="neutral">{labels[i.source]}</Badge><strong className="mt-2 block">{i.title}</strong>{i.annualSavings != null && <span className="text-xs text-emerald-600">${Math.round(i.annualSavings).toLocaleString()}/yr</span>}</button>) : <Unavailable>No related issue shares this resource or account in the loaded evidence.</Unavailable>)}
     </div>}</Drawer>{dialog}
@@ -235,6 +288,25 @@ function Card({ issue, selected, select, open }: { issue: Issue; selected: boole
 function Grid({ rows }: { rows: [string, string][] }) { return <dl className="grid gap-3 sm:grid-cols-2">{rows.map(([k, v]) => <div key={k} className="rounded-lg border p-3"><dt className="text-xs text-slate-400">{k}</dt><dd className="mt-1 break-words">{v}</dd></div>)}</dl>; }
 function Callout({ title, children }: { title: string; children: ReactNode }) { return <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-900 dark:bg-brand-950/20"><strong className="text-xs text-brand-700">{title}</strong><div className="mt-1">{children}</div></div>; }
 function Unavailable({ children }: { children: ReactNode }) { return <div className="rounded-lg border border-dashed p-3 text-xs text-slate-500">{children}</div>; }
+function GovernanceControls({ item, requests, busy, transitionNote, setTransitionNote, transition, approvalRole, setApprovalRole, requestApproval, approvalNote, setApprovalNote, decideApproval, exceptionRequester, setExceptionRequester, exceptionJustification, setExceptionJustification, exceptionExpiry, setExceptionExpiry, grantException }: {
+  item: AdvisorWorkItem; requests: AdvisorApprovalRequest[]; busy: boolean; transitionNote: string; setTransitionNote: (value: string) => void;
+  transition: (state: AdvisorWorkItemState) => Promise<void>; approvalRole: 'owner' | 'admin' | 'editor'; setApprovalRole: (value: 'owner' | 'admin' | 'editor') => void;
+  requestApproval: () => Promise<void>; approvalNote: string; setApprovalNote: (value: string) => void; decideApproval: (request: AdvisorApprovalRequest, decision: 'approved' | 'rejected') => Promise<void>;
+  exceptionRequester: string; setExceptionRequester: (value: string) => void; exceptionJustification: string; setExceptionJustification: (value: string) => void;
+  exceptionExpiry: string; setExceptionExpiry: (value: string) => void; grantException: () => Promise<void>;
+}) {
+  const allowed: Record<AdvisorWorkItemState, AdvisorWorkItemState[]> = { open: ['acknowledged', 'dismissed'], acknowledged: ['dismissed'], in_review: ['approved', 'dismissed'], approved: ['resolved'], dismissed: [], resolved: [], exception: [] };
+  const pending = requests.filter(request => request.status === 'pending');
+  const canRequest = ['open', 'acknowledged', 'dismissed', 'exception'].includes(item.state);
+  return <div className="space-y-3 rounded-lg border p-3"><strong className="text-xs">Governed decision controls</strong><p className="text-[11px] text-slate-500">State changes, approval decisions, and exceptions are tenant-scoped and recorded in append-only history.</p>
+    <textarea aria-label="Workflow decision note" value={transitionNote} onChange={event => setTransitionNote(event.target.value)} maxLength={2000} rows={2} placeholder="Decision rationale (recommended)" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" />
+    <div className="flex flex-wrap gap-2">{allowed[item.state].map(state => <button key={state} disabled={busy || (state === 'approved' && !requests.some(request => request.status === 'approved'))} onClick={() => void transition(state)} className={state === 'approved' || state === 'resolved' ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>{state === 'acknowledged' ? 'Acknowledge' : state === 'dismissed' ? 'Dismiss workflow' : state === 'approved' ? 'Approve workflow' : 'Resolve workflow'}</button>)}</div>
+    {canRequest && <div className="flex flex-wrap items-center gap-2 border-t pt-3"><select aria-label="Required approver role" value={approvalRole} onChange={event => setApprovalRole(event.target.value as 'owner' | 'admin' | 'editor')} className="rounded-md border px-2 py-1.5 text-xs dark:bg-slate-950"><option value="owner">Owner approval</option><option value="admin">Admin approval</option><option value="editor">Editor approval</option></select><button disabled={busy} onClick={() => void requestApproval()} className="btn-primary text-xs">Request approval</button></div>}
+    {requests.length > 0 && <div className="space-y-2 border-t pt-3"><strong className="text-xs">Approval chain</strong><textarea aria-label="Approval decision note" value={approvalNote} onChange={event => setApprovalNote(event.target.value)} maxLength={2000} rows={2} placeholder="Approval or rejection note" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" />{requests.map(request => <div key={request.id} className="rounded-md border p-2 text-xs"><div className="flex flex-wrap items-center gap-2"><Badge tone={request.status === 'approved' ? 'good' : request.status === 'rejected' ? 'serious' : 'warning'}>{human(request.status)}</Badge><span>Step {request.sequence} · {human(request.required_role)}</span>{request.expires_at && <span>Expires {date(request.expires_at, true)}</span>}</div>{request.decision_note && <p className="mt-1 text-slate-500">{request.decision_note}</p>}{request.status === 'pending' && <div className="mt-2 flex gap-2"><button disabled={busy} onClick={() => void decideApproval(request, 'approved')} className="btn-primary text-xs">Approve request</button><button disabled={busy} onClick={() => void decideApproval(request, 'rejected')} className="btn-secondary text-xs">Reject request</button></div>}</div>)}</div>}
+    <details className="border-t pt-3"><summary className="cursor-pointer text-xs font-semibold">Grant time-bound exception</summary><div className="mt-2 space-y-2"><p className="text-[11px] text-slate-500">Owner/admin only. The requester must be a different organization member.</p><input aria-label="Exception requester member ID" value={exceptionRequester} onChange={event => setExceptionRequester(event.target.value)} placeholder="Requester member UUID" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><textarea aria-label="Exception justification" value={exceptionJustification} onChange={event => setExceptionJustification(event.target.value)} maxLength={2000} rows={2} placeholder="Accepted risk and compensating controls" className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><input aria-label="Exception expiry" type="datetime-local" value={exceptionExpiry} onChange={event => setExceptionExpiry(event.target.value)} className="w-full rounded-md border px-3 py-2 text-xs dark:bg-slate-950" /><button disabled={busy || !exceptionRequester.trim() || !exceptionJustification.trim() || !exceptionExpiry} onClick={() => void grantException()} className="btn-secondary text-xs">Grant exception</button></div></details>
+    {pending.length > 0 && <p className="text-[11px] text-amber-600">Separation of duties applies: a requester cannot approve their own request.</p>}
+  </div>;
+}
 function RemediationLifecycle({ row, busy, act }: { row: RemediationRequest; busy: boolean; act: (action: 'request' | 'approve' | 'reject' | 'dry-run' | 'execute' | 'rollback', row?: RemediationRequest) => Promise<void> }) {
   return <div className="space-y-3 rounded-lg border p-3"><Grid rows={[["Action", remediationActionLabel[row.action_type]], ['Status', human(row.status)], ['Requested', date(row.created_at, true)], ['Approved', row.approved_at ? date(row.approved_at, true) : 'Pending'], ['Executed', row.executed_at ? date(row.executed_at, true) : 'Not executed']]} />
     {row.dry_run_result && <Evidence title="Dry-run evidence" value={row.dry_run_result} />}{row.execution_result && <Evidence title="Execution evidence" value={row.execution_result} />}
