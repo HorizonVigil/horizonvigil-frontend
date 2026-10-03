@@ -908,6 +908,9 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   const [autoPrReposLoading, setAutoPrReposLoading] = useState(false);
   const [autoPrRepoFullName, setAutoPrRepoFullName] = useState('');
   const [autoPrFilePath, setAutoPrFilePath] = useState('');
+  const [autoPrProvider, setAutoPrProvider] = useState<'terraform' | 'pulumi'>('terraform');
+  const [autoPrResourceAddress, setAutoPrResourceAddress] = useState('');
+  const [verifiedLinkId, setVerifiedLinkId] = useState('');
   const [autoPrSubmitting, setAutoPrSubmitting] = useState(false);
   const [autoPrResult, setAutoPrResult] = useState<{ prUrl: string } | { error: string } | null>(null);
 
@@ -916,12 +919,13 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   // recommendations (same JSX position in the Drawer), so without this the
   // last recommendation's repo/path selection would leak into the next one.
   useEffect(() => {
-    setAutoPrInstallationRowId(''); setAutoPrRepos([]); setAutoPrRepoFullName(''); setAutoPrFilePath(''); setAutoPrResult(null);
+    setAutoPrInstallationRowId(''); setAutoPrRepos([]); setAutoPrRepoFullName(''); setAutoPrFilePath(''); setAutoPrProvider('terraform'); setAutoPrResourceAddress(''); setVerifiedLinkId(''); setAutoPrResult(null);
   }, [recommendation.id]);
 
   async function loadAutoPrRepos(installationRowId: string) {
     setAutoPrInstallationRowId(installationRowId);
     setAutoPrRepoFullName('');
+    setVerifiedLinkId('');
     setAutoPrRepos([]);
     if (!installationRowId) return;
     setAutoPrReposLoading(true);
@@ -937,11 +941,17 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
   }
 
   async function submitAutoPr() {
-    if (!autoPrInstallationRowId || !autoPrRepoFullName || !autoPrFilePath) return;
+    if (!autoPrInstallationRowId || !autoPrRepoFullName || !autoPrFilePath || !autoPrResourceAddress) return;
     setAutoPrSubmitting(true);
     setAutoPrResult(null);
     try {
-      const res = await api.openAutoPr(recommendation.id, { installationRowId: autoPrInstallationRowId, repoFullName: autoPrRepoFullName, filePath: autoPrFilePath });
+      let linkId = verifiedLinkId;
+      if (!linkId) {
+        const verified = await api.verifyIaCLink(recommendation.id, { installationRowId: autoPrInstallationRowId, repoFullName: autoPrRepoFullName, filePath: autoPrFilePath, provider: autoPrProvider, resourceAddress: autoPrResourceAddress });
+        linkId = verified.link.id;
+        setVerifiedLinkId(linkId);
+      }
+      const res = await api.openAutoPr(recommendation.id, { linkId });
       try {
         const parsed = new URL(res.prUrl);
         if (parsed.protocol !== 'https:') {
@@ -1067,22 +1077,28 @@ function RightsizingDetail({ recommendation, resource, cpuHistory, loading, copi
           <p className="text-xs text-slate-400">No GitHub repository connected yet — connect one in Settings → Git Integration to open a pull request that updates your Terraform/Pulumi instance_type directly.</p>
         ) : recommendedType && currentType ? (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-slate-400">Finds <span className="font-mono">instance_type = "{currentType}"</span> (Terraform) or <span className="font-mono">instanceType: "{currentType}"</span> (Pulumi) in the file below and opens a real PR changing it to <span className="font-mono text-emerald-600 dark:text-emerald-400">{recommendedType}</span> — only if it appears exactly once.</p>
+            <p className="text-xs text-slate-400">Verifies the exact IaC resource declaration and source revision, then opens a PR changing only that resource from <span className="font-mono">{currentType}</span> to <span className="font-mono text-emerald-600 dark:text-emerald-400">{recommendedType}</span>. A changed, missing, or ambiguous declaration is blocked.</p>
             <select value={autoPrInstallationRowId} onChange={e => void loadAutoPrRepos(e.target.value)} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
               <option value="">Select a GitHub installation…</option>
               {gitInstallations.map(inst => <option key={inst.id} value={inst.id}>{inst.account_login}</option>)}
             </select>
             {autoPrInstallationRowId && (
-              <select value={autoPrRepoFullName} onChange={e => setAutoPrRepoFullName(e.target.value)} disabled={autoPrReposLoading} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 disabled:opacity-50">
+              <select value={autoPrRepoFullName} onChange={e => { setAutoPrRepoFullName(e.target.value); setVerifiedLinkId(''); }} disabled={autoPrReposLoading} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 disabled:opacity-50">
                 <option value="">{autoPrReposLoading ? 'Loading repos…' : 'Select a repository…'}</option>
                 {autoPrRepos.map(r => <option key={r.fullName} value={r.fullName}>{r.fullName}</option>)}
               </select>
             )}
             {autoPrRepoFullName && (
-              <input value={autoPrFilePath} onChange={e => setAutoPrFilePath(e.target.value)} placeholder="path/to/instance.tf" className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+              <>
+                <select value={autoPrProvider} onChange={e => { setAutoPrProvider(e.target.value as 'terraform' | 'pulumi'); setVerifiedLinkId(''); }} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                  <option value="terraform">Terraform</option><option value="pulumi">Pulumi</option>
+                </select>
+                <input value={autoPrFilePath} onChange={e => { setAutoPrFilePath(e.target.value); setVerifiedLinkId(''); }} placeholder={autoPrProvider === 'terraform' ? 'path/to/instance.tf' : 'path/to/instance.ts'} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+                <input value={autoPrResourceAddress} onChange={e => { setAutoPrResourceAddress(e.target.value); setVerifiedLinkId(''); }} placeholder={autoPrProvider === 'terraform' ? 'module.web.aws_instance.api' : 'Pulumi logical resource name'} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5" />
+              </>
             )}
-            {autoPrRepoFullName && autoPrFilePath && (
-              <button type="button" onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Opening PR…' : 'Open Pull Request'}</button>
+            {autoPrRepoFullName && autoPrFilePath && autoPrResourceAddress && (
+              <button type="button" onClick={() => void submitAutoPr()} disabled={autoPrSubmitting} className="self-start text-xs px-3 py-1.5 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 disabled:opacity-50">{autoPrSubmitting ? 'Verifying and opening PR…' : 'Verify Link & Open Pull Request'}</button>
             )}
             {autoPrResult && 'prUrl' in autoPrResult && (
               <p className="text-xs text-emerald-600 dark:text-emerald-400">Pull request opened: {safeExternalUrl(autoPrResult.prUrl)
