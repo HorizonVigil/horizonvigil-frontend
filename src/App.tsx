@@ -164,7 +164,6 @@ export default function App() {
                         {/* Public routes */}
                         <Route path="/" element={<RootRoute />} />
                         <Route path="/pricing" element={<Pricing />} />
-                        <Route path="/docs" element={<Docs />} />
                         <Route path="/privacy" element={<PrivacyPolicy />} />
                         <Route path="/terms" element={<TermsOfService />} />
 
@@ -219,6 +218,14 @@ export default function App() {
                         <Route element={<RequireAuth />}>
                           <Route element={<RequireOrg />}>
                             <Route element={<Layout />}>
+                              <Route
+                                path="/docs"
+                                element={
+                                  <ProtectedRoute>
+                                    <Docs />
+                                  </ProtectedRoute>
+                                }
+                              />
                               <Route
                                 path="/overview"
                                 element={

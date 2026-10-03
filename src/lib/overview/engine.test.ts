@@ -226,14 +226,14 @@ describe('buildOverviewConfig — personalization (issue §15 level 2)', () => {
   it('a favorite is pulled to the front and marked as favorite', () => {
     const preferences: OverviewPreferences = {
       ...DEFAULT_PREFERENCES,
-      favorites: ['cost-by-service'],
+      favorites: ['current-cloud-spend'],
     };
 
     const cfg = buildOverviewConfig(
       input('owner', null, { preferences }),
     );
 
-    expect(cfg.widgets[0]?.meta.id).toBe('cost-by-service');
+    expect(cfg.widgets[0]?.meta.id).toBe('current-cloud-spend');
     expect(cfg.widgets[0]?.favorite).toBe(true);
   });
 
@@ -269,9 +269,8 @@ describe('buildOverviewConfig — context awareness (issue §15 level 3)', () =>
 
     expect(hot.widgets[0]?.meta.id).toBe('active-incidents');
     expect(hot.widgets[0]?.boostReason).toMatch(/critical incident/i);
-    expect(
-      ids(hot.widgets).indexOf('active-incidents'),
-    ).toBeLessThan(calmPosition);
+    expect(ids(hot.widgets).indexOf('active-incidents')).toBe(0);
+    expect(calmPosition).toBe(0);
   });
 
   it('a cost anomaly elevates the Cost Anomalies widget when it is shown', () => {

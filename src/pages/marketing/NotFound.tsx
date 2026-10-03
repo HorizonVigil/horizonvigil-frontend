@@ -63,19 +63,6 @@ export function NotFound() {
               Back to homepage
             </Link>
 
-            <Link
-              to="/docs"
-              className={[
-                'rounded-md border border-slate-200 px-6 py-3 text-sm font-semibold',
-                'text-slate-700 transition-colors hover:bg-slate-50',
-                'dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900',
-                'focus-visible:outline-none focus-visible:ring-2',
-                'focus-visible:ring-brand-600 focus-visible:ring-offset-2',
-                'dark:focus-visible:ring-offset-slate-950',
-              ].join(' ')}
-            >
-              Browse docs
-            </Link>
           </nav>
         </section>
       </main>
