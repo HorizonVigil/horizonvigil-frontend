@@ -13,22 +13,28 @@ const DECISION_STAGES = [
 ];
 
 const PLATFORM_PILLARS = [
-  { title: 'FinOps', metric: 'Spend → decision', description: 'Explain anomalies, identify the resources behind them, and turn savings opportunities into owned decisions.', bullets: ['Cost allocation and trends', 'Anomaly investigation', 'Evidence-backed optimization'] },
-  { title: 'Security', metric: 'Finding → priority', description: 'Connect posture, exposure, identity, and provider-native evidence so teams can prioritize what is actually risky.', bullets: ['Cloud posture and exposure', 'Resource-level evidence', 'Provider-native signals'] },
-  { title: 'Operations', metric: 'Signal → owner', description: 'See resources, clusters, monitoring, alerts, and change context in the same operating picture.', bullets: ['Multi-account inventory', 'Cluster and workload health', 'Monitoring and alert context'] },
-  { title: 'Governance', metric: 'Decision → record', description: 'Keep access scoped, changes deliberate, and every product write attributable to a person and time.', bullets: ['Organization-scoped RBAC', 'Human approval by design', 'Auditable decision history'] },
+  { title: 'Multicloud FinOps', metric: 'Available now', description: 'Understand spend across AWS, Google Cloud, and Azure, find waste, and turn optimization opportunities into accountable work.', bullets: ['Cost allocation and trends', 'Anomaly and waste detection', 'Rightsizing and commitments'] },
+  { title: 'Cloud Security', metric: 'Available now', description: 'Prioritize misconfiguration, exposure, identity, vulnerability, and compliance evidence with resource context and remediation guidance.', bullets: ['Posture and exposure', 'Identity and vulnerabilities', 'Compliance evidence'] },
+  { title: 'AI Intelligence', metric: 'Available now', description: 'Correlate cost, security, resource, and change evidence to explain what happened, who changed it, and what it affects.', bullets: ['Explain and verify', 'Impact analysis', 'Evidence-linked advice'] },
+  { title: 'Decision Governance', metric: 'Available now', description: 'Route decisions through owners, approvals, exceptions, remediation evidence, and an auditable outcome history.', bullets: ['Owners and approvals', 'Governed remediation', 'Decision and outcome history'] },
 ];
 
 const PROVIDERS = [
-  { name: 'AWS', detail: 'Inventory, cost, security, clusters, monitoring, and provider-native evidence.' },
-  { name: 'Google Cloud', detail: 'Projects, resources, cost, GKE, Cloud Run, Artifact Registry, and operational context.' },
-  { name: 'Azure', detail: 'A dedicated connector and workspace are rolling out through the V1 delivery plan.' },
+  { name: 'AWS', detail: 'Accounts, inventory, CUR and Cost Explorer, optimization, Security Hub, Config, CloudTrail, clusters, and governed remediation.' },
+  { name: 'Google Cloud', detail: 'Projects, billing exports, resources, optimization, security evidence, GKE, Cloud Run, and Artifact Registry.' },
+  { name: 'Microsoft Azure', detail: 'Subscriptions, cost visibility and optimization, resource inventory, security posture, and a dedicated operating workspace.' },
+];
+
+const ROADMAP = [
+  { title: 'Full-stack Monitoring', label: 'Coming soon', description: 'Dynatrace-class infrastructure, application, metrics, logs, traces, service maps, alerts, SLOs, and incident context in the same evidence model.' },
+  { title: 'AI SRE', label: 'Coming soon', description: 'OpenSRE-inspired investigation workflows that correlate telemetry, deployments, configuration, and runbooks to diagnose incidents and recommend governed recovery actions.' },
 ];
 
 const FAQS = [
   { question: 'What is Horizon Intelligence?', answer: 'It is the decision layer inside HorizonVigil. It brings together cloud evidence, explains what changed, verifies the supporting data, advises the next step, and keeps the human decision attached to the outcome.' },
   { question: 'Does HorizonVigil make changes in my cloud?', answer: 'No. V1 connects read-only and keeps a human in control. It can prepare guidance, commands, or a reviewable handoff, but it does not silently mutate cloud resources.' },
-  { question: 'Which providers are available?', answer: 'AWS and Google Cloud are the established production paths. Azure has its own connector and workspace and is being rolled out through the V1 plan. Provider coverage remains explicit so a configured integration is never mistaken for collected evidence.' },
+  { question: 'Which providers are available?', answer: 'AWS, Google Cloud, and Microsoft Azure are supported for multicloud cost visibility and optimization. Inventory, security, and provider-native evidence vary by service and remain explicit, so a connected account is never mistaken for collected evidence.' },
+  { question: 'Are Monitoring and AI SRE available today?', answer: 'They are planned product surfaces and are clearly marked coming soon. The current product focuses on multicloud FinOps, cloud security, AI Intelligence, and governed decision workflows.' },
   { question: 'Can I start without a sales call?', answer: 'Yes. The Free plan connects one cloud account for two users. Paid plans add account scale, users, automation capacity, retention, and support.' },
 ];
 
@@ -44,8 +50,8 @@ export function MarketingHome() {
   const { hash } = useLocation();
 
   useEffect(() => {
-    document.title = 'HorizonVigil — AI Cloud Decision Intelligence';
-    const description = 'HorizonVigil turns cloud cost, security, and operational signals into explained, verified, human-governed decisions across AWS, Google Cloud, and Azure.';
+    document.title = 'HorizonVigil — Multicloud FinOps, Security and AI Governance';
+    const description = 'HorizonVigil unifies multicloud FinOps, cloud security, AI intelligence, and governed remediation across AWS, Google Cloud, and Microsoft Azure.';
     let meta = document.querySelector<HTMLMetaElement>('meta[name=description]');
     if (!meta) {
       meta = document.createElement('meta');
@@ -69,6 +75,7 @@ export function MarketingHome() {
         <TrustBar />
         <DecisionIntelligence />
         <Platform />
+        <Roadmap />
         <DecisionWorkspace />
         <Coverage />
         <Security />
@@ -97,16 +104,16 @@ function Hero() {
       <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-20 sm:px-6 lg:grid-cols-[1.05fr_.95fr] lg:px-8 lg:py-28">
         <div>
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-400/30 bg-brand-500/10 px-3 py-1.5 text-xs font-medium text-brand-100">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />AI cloud decision intelligence
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Multicloud FinOps, security and governance
           </div>
-          <h1 className="max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">Turn cloud signals into governed decisions.</h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">HorizonVigil unifies cost, security, operations, and change evidence. Horizon Intelligence explains what changed, verifies the evidence, and advises the next step. Your team decides.</p>
+          <h1 className="max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">See cloud waste and risk. Decide what to fix.</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">One operating platform for AWS, Google Cloud, and Azure. Optimize cost, prioritize security risk, understand who changed what, and move every recommendation through an evidence-backed governance workflow.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link to="/signup" className="rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-900/30 transition hover:bg-brand-500">Start free</Link>
             <a href="/#intelligence" className="rounded-lg border border-slate-600 bg-slate-900/60 px-5 py-3 text-sm font-semibold text-white transition hover:border-slate-400 hover:bg-slate-800">See how Intelligence works</a>
             <a href={BOOK_DEMO_HREF} className="px-3 py-3 text-sm font-semibold text-slate-300 transition hover:text-white">Book a demo →</a>
           </div>
-          <p className="mt-5 text-xs text-slate-500">Read-only by default · Human approval · Decision history</p>
+          <p className="mt-5 text-xs text-slate-500">AWS · Google Cloud · Microsoft Azure · Read-only onboarding · Human-governed action</p>
         </div>
         <div className="relative" aria-label="Illustrative Horizon Intelligence decision queue">
           <div className="absolute -inset-5 rounded-[2rem] bg-brand-500/10 blur-2xl" aria-hidden="true" />
@@ -136,7 +143,7 @@ function Hero() {
 function TrustBar() {
   return <div id="coverage" className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/50"><div className="mx-auto grid max-w-6xl grid-cols-2 divide-x divide-y divide-slate-200 px-5 sm:px-6 md:grid-cols-4 md:divide-y-0 lg:px-8 dark:divide-slate-800">
     {[
-      ['AWS + GCP', 'Production cloud paths'], ['Azure', 'Dedicated V1 connector'], ['101', 'Registered AWS service scanners'], ['Read-only', 'Default connection model'],
+      ['3 clouds', 'AWS, Google Cloud and Azure'], ['FinOps + Security', 'One resource context'], ['AI governed', 'Evidence before action'], ['Read-only', 'Default connection model'],
     ].map(([value, label]) => <div key={value} className="px-5 py-6 text-center"><p className="text-lg font-semibold text-slate-900 dark:text-white">{value}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{label}</p></div>)}
   </div></div>;
 }
@@ -148,9 +155,13 @@ function DecisionIntelligence() {
 }
 
 function Platform() {
-  return <div className="border-y border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40"><Section id="platform"><div className="grid gap-8 lg:grid-cols-[.75fr_1.25fr] lg:items-end"><div><Eyebrow>One operating picture</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Four disciplines. One evidence model.</h2></div><p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 lg:justify-self-end">HorizonVigil connects the cost, risk, operational health, and ownership of the same resource. The advisor can reason across that context instead of treating every signal as an isolated alert.</p></div>
+  return <div className="border-y border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40"><Section id="platform"><div className="grid gap-8 lg:grid-cols-[.75fr_1.25fr] lg:items-end"><div><Eyebrow>Available today</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Cost, risk, change and ownership in one place.</h2></div><p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 lg:justify-self-end">HorizonVigil connects the cost, security posture, configuration changes, and accountable owner of the same resource. The advisor reasons across that evidence instead of producing another isolated alert.</p></div>
     <div className="mt-12 grid gap-4 md:grid-cols-2">{PLATFORM_PILLARS.map(pillar => <article key={pillar.title} className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-950"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-semibold">{pillar.title}</h3><span className="rounded-full bg-brand-50 px-3 py-1 text-[11px] font-semibold text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">{pillar.metric}</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{pillar.description}</p><ul className="mt-5 grid gap-2 sm:grid-cols-3">{pillar.bullets.map(bullet => <li key={bullet} className="flex items-start gap-2 text-xs leading-5 text-slate-500 dark:text-slate-400"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-brand-500" />{bullet}</li>)}</ul></article>)}</div>
   </Section></div>;
+}
+
+function Roadmap() {
+  return <Section id="roadmap"><div className="grid gap-10 lg:grid-cols-[.7fr_1.3fr]"><div><Eyebrow>What comes next</Eyebrow><h2 className="text-3xl font-bold tracking-tight sm:text-4xl">From cloud decisions to autonomous operations.</h2><p className="mt-4 text-base leading-7 text-slate-600 dark:text-slate-300">Monitoring and SRE are being developed as first-class HorizonVigil capabilities. They are presented separately so current product coverage stays clear.</p></div><div className="grid gap-4">{ROADMAP.map(item => <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-xl font-semibold">{item.title}</h3><span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">{item.label}</span></div><p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-400">{item.description}</p></article>)}</div></div></Section>;
 }
 
 function DecisionWorkspace() {

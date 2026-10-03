@@ -39,7 +39,7 @@ describe('MarketingHome', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: /turn cloud signals into governed decisions/i,
+        name: /see cloud waste and risk. decide what to fix/i,
       }),
     ).toBeInTheDocument();
 
@@ -83,17 +83,17 @@ describe('MarketingHome', () => {
 
   it('shows the four operating pillars', () => {
     renderHome();
-    expect(screen.getByRole('heading', { name: 'FinOps' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Security' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Operations' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Governance' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Multicloud FinOps' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Cloud Security' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI Intelligence' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Decision Governance' })).toBeInTheDocument();
   });
 
   it('shows the provider-specific coverage boundary', () => {
     renderHome();
     expect(screen.getByRole('heading', { name: 'AWS' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Google Cloud' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Azure' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Microsoft Azure' })).toBeInTheDocument();
   });
 
   it('preserves the public navigation anchor targets', () => {
@@ -101,6 +101,7 @@ describe('MarketingHome', () => {
 
     expect(container.querySelector('#intelligence')).toBeInTheDocument();
     expect(container.querySelector('#platform')).toBeInTheDocument();
+    expect(container.querySelector('#roadmap')).toBeInTheDocument();
     expect(container.querySelector('#security')).toBeInTheDocument();
   });
 
@@ -121,25 +122,22 @@ describe('MarketingHome', () => {
  * available.
  */
 describe('MarketingHome coverage and roadmap honesty', () => {
-  it('states the real registered AWS scanner count', () => {
+  it('shows all three cloud providers in the availability summary', () => {
     renderHome();
-
-    // 88 regional + 13 global scanners, counted from the connector's own
-    // REGIONAL_SCANNERS/GLOBAL_SCANNERS registry. If that registry changes,
-    // this copy has to change with it.
-    expect(screen.getAllByText('101').length).toBeGreaterThan(0);
-    expect(document.body.textContent).toMatch(/101/);
+    expect(document.body.textContent).toMatch(/AWS, Google Cloud and Azure/i);
   });
 
-  it('describes Azure as a V1 rollout rather than established production coverage', () => {
+  it('marks monitoring and AI SRE as coming soon', () => {
     renderHome();
-    expect(document.body.textContent).toMatch(/Azure has its own connector and workspace and is being rolled out through the V1 plan/i);
+    expect(screen.getByRole('heading', { name: 'Full-stack Monitoring' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI SRE' })).toBeInTheDocument();
+    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
   });
 
   it('states the human-control boundary', () => {
     renderHome();
     const pageText = document.body.textContent ?? '';
     expect(pageText).toMatch(/read-only by default/i);
-    expect(pageText).toMatch(/your team decides/i);
+    expect(pageText).toMatch(/human-governed action/i);
   });
 });
